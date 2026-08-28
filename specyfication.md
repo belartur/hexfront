@@ -9,7 +9,7 @@ Reguły gry znajdują się w pliku [rules.md](rules.md).
 Kod jest przejrzysty i dobrze udokumentowany, w języku angielskim.
 Wszelkie funkcje, metody, klasy, pola, itp. mają dokumentację.
 Logika gry jest sensownie oddzielona i niezależna od interfejsu użytkownika (tą regułe może być nagięta w uzasadnionych przypadkach).
-Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokumentowane, także można je łatwo zmienić i eksperymentować z innymi wartościami.
+Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokumentowane, także można je łatwo zmienić i eksperymentować z innymi wartościami. Stałe dotyczące odległości, zasięgów i prędkości wyrażone są w jednostkach odległości (j) z rules.md; przelicznik j → piksele zdefiniowany jest w jednym miejscu.
 
 ## Grafika i interfejs użytkownika
 Grafika jest izometryczna. Plansza rysuje się z kodu. Okno gry można skalować.
@@ -31,24 +31,29 @@ Po wybraniu poziomu on się ładuje pokazując mapę.
 Brak dźwięku (w przyszłości to się może zmienić).
 
 ## Parametry liczbowe
-Wartości w pikselach odnoszą się do widoku w skali 1:1 (przy zoomie wszystkie odległości logiczne — promienie wykrywania i zasięgi — pozostają niezmienione, skaluje się tylko rendering).
+Wszystkie odległości, promienie i zasięgi w grze wyrażone są w jednostkach odległości (j) zdefiniowanych w rules.md. Przyjmuje się przelicznik **1 j = 1 px** przy skali widoku 1:1; zoom i skalowanie okna dotyczą wyłącznie renderingu. Przelicznik jest jedną stałą w kodzie — jego zmiana (np. na 1 j = 2 px dla wyświetlaczy o dużej gęstości) nie wpływa na logikę gry.
 
 ### Geometria planszy
 
-* bok sześciokąta: **36 px** (układ flat-top),
-* szerokość pola: **72 px**, wysokość pola: **≈62,4 px** (√3 × 36),
-* odległość między środkami sąsiednich pól: **≈62,4 px** — umowna jednostka „1 heksa odległości", wygodna do wyrażania zasięgów.
+* bok sześciokąta: **36 j** (= 36 px przy skali 1:1; układ flat-top),
+* szerokość pola: **72 j** (= 72 px), wysokość pola: **≈62,4 j** (≈62,4 px; √3 × 36),
+* odległość między środkami sąsiednich pól: **≈62,4 j** — umowna jednostka „1 heksa odległości", wygodna do wyrażania zasięgów.
 
 ### Wykrywanie
 
-* promień wykrywania pojazdów: **80 px** (koło; obejmuje 6 sąsiednich pól, bez drugiego pierścienia).
+* promień wykrywania pojazdów: **80 j** (= 80 px; koło; obejmuje 6 sąsiednich pól, bez drugiego pierścienia).
+
+### Zasięgi i prędkości (wartości domyślne)
+
+* promień leczenia bufora: **160 j** (§5.4),
+* zasięg zwykłego działka: **250 j**, szybkostrzelnego: **190 j**, rakietowego: **375 j**; promień splashu rakietówki: **160 j** (§10),
+* zasięg wieży leczniczej: **80 j + x j**, gdzie x — ilość jednostek w wieży (§11),
+* prędkości pojazdów: czołg **60 j/s**, bufor **60 j/s**, poduszkowiec **48 j/s**, helikopter **90 j/s** (§5); pułapka lodowa — połowa prędkości,
+* częstotliwość decyzji AI: **co 5 s**.
 
 ### Do ustalenia
 
-Poniższe wartości nie są jeszcze ustalone (reguły odwołują się do nich bez liczb):
+Poniższe elementy nie są jeszcze zaprojektowane:
 
-* promień leczenia bufora (§5.4),
-* zasięg zwykłego działka, działka szybkostrzelnego i działka rakietowego oraz promień splashu rakietówki (§10),
-* wzór zasięgu wieży leczniczej („zależny od ilości jednostek", §11),
-* prędkości pojazdów (§4; znane modyfikatory: poduszkowiec 20% wolniej, pułapka lodowa — połowa prędkości),
-* częstotliwość decyzji AI (§2).
+* szczegółowa strategia AI (poza częstotliwością decyzji),
+* konstrukcja map/poziomów (format, niezmienniki mapy).

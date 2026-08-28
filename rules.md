@@ -96,19 +96,19 @@ Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość
 
 ### 5.1. Czołg
 
-Czołg jest pojazdem lądowym. To oznacza, że może poruszać się tylko po lądzie. Oddziałują na niego wszelkie przeszkody umieszczone na lądzie.
+Czołg jest pojazdem lądowym. To oznacza, że może poruszać się tylko po lądzie. Oddziałują na niego wszelkie przeszkody umieszczone na lądzie. Porusza się z prędkością 60 j/s.
 
 ### 5.2. Helikopter
 
-Helikopter jest pojazdem latającym. Może poruszać się wszędzie: nad wodą i nad lądem. Jest jedynym pojazdem, którego nie dotyczą różnice wysokości pól. Ponadto nie oddziałują na niego żadne utrudnienia.
+Helikopter jest pojazdem latającym. Może poruszać się wszędzie: nad wodą i nad lądem. Jest jedynym pojazdem, którego nie dotyczą różnice wysokości pól. Ponadto nie oddziałują na niego żadne utrudnienia. Porusza się z prędkością 90 j/s.
 
 ### 5.3. Poduszkowiec
 
-Poduszkowiec to pojazd lądowo-wodny. Może się poruszać na lądzie i w wodzie. Lecz przejazd pomiędzy wodą i lądem jest możliwy tylko gdy ląd jest na wysokości 1. Oddziałują na niego wszelkie przeszkody umieszczone na lądzie i w wodzie. Porusza on się 20% wolniej niż inne pojazdy.
+Poduszkowiec to pojazd lądowo-wodny. Może się poruszać na lądzie i w wodzie. Lecz przejazd pomiędzy wodą i lądem jest możliwy tylko gdy ląd jest na wysokości 1. Oddziałują na niego wszelkie przeszkody umieszczone na lądzie i w wodzie. Porusza on się 20% wolniej niż inne pojazdy, czyli z prędkością 48 j/s.
 
 ### 5.4. Bufor
 
-Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem jest to, że bufor leczy wszystkie przyjazne (tj. mające tego samego właściciela) dla niego pojazdy w pobliżu: leczenie dotyczy pojazdów, których aktualna pozycja leży w okręgu o promieniu równym zasięgowi bufora, wyznaczonym wokół aktualnej pozycji bufora (odległości mierzymy jak w sekcji 9). Może on leczyć inne bufory, ale nie leczy samego siebie.
+Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem jest to, że bufor leczy wszystkie przyjazne (tj. mające tego samego właściciela) dla niego pojazdy w pobliżu: leczenie dotyczy pojazdów, których aktualna pozycja leży w okręgu o promieniu równym zasięgowi bufora, wyznaczonym wokół aktualnej pozycji bufora (odległości mierzymy jak w sekcji 9). Może on leczyć inne bufory, ale nie leczy samego siebie. Promień leczenia bufora wynosi 160 j.
 
 
 ## 6. Sterowanie
@@ -135,7 +135,9 @@ Helikopter lata dowolnie, nad mostem.
 ## 9. Walka pojazdów
 Odległość między dwoma pojazdami to odległość euklidesowa między ich aktualnymi pozycjami. Odległość pojazdu od nieruchomego obiektu (budynku, działka, wieży leczniczej) to odległość euklidesowa między aktualną pozycją pojazdu a środkiem pola, na którym ten obiekt stoi.
 
-Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż promień wykrywania — obszar wykrywania ma kształt koła o promieniu równym promieniowi wykrywania, wyznaczonego wokół pozycji pojazdu (konkretne wartości liczbowe, w tym promień wykrywania, określa plik specyfication.md). Gdy dwa wrogie pojazdy spotkają się na trasie, rozpoczyna się walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
+Odległości, promienie i zasięgi wyrażamy w jednostkach odległości (j). Jednostka j jest umowna — jej przeliczenie na piksele określa specyfikacja implementacji.
+
+Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż 80 j — obszar wykrywania ma kształt koła o promieniu 80 j (promień wykrywania) wokół pozycji pojazdu. Gdy dwa wrogie pojazdy spotkają się na trasie, rozpoczyna się walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
 
 Jeśli odległości kilku wykrytych pojazdów są identyczne, celem jest ten, który wcześniej wszedł w obszar wykrywania; przy pełnym remisie wybór jest deterministyczny (pojazd znajdujący się na polu o mniejszej współrzędnej q, a przy równości — r, w układzie współrzędnych axialnych).
 
@@ -167,22 +169,22 @@ przez $x$ oznaczmy ilość jednostek w działku:
 
 ### 10.1. Zwykłe działko
 
-strzela z prędkością 1 pocisk na 5s, a każdy pocisk zadaje $x$ obrażeń.
+strzela z prędkością 1 pocisk na 5s, a każdy pocisk zadaje $x$ obrażeń. Zasięg działania: 250 j.
 
 ### 10.2. Działko rakietowe
 
-Jego działanie różni się od zwykłego działka tylko tym, że jego pocisk oprócz trafionego pojazdu zmniejsza liczbę jednostek także wszystkim wrogim pojazdom w pobliżu. Ponadto ma większy zasięg niż działka pozostałych typów.
+Jego działanie różni się od zwykłego działka tylko tym, że jego pocisk oprócz trafionego pojazdu zmniejsza liczbę jednostek także wszystkim wrogim pojazdom w pobliżu. Ponadto ma większy zasięg niż działka pozostałych typów. Zasięg działania: 375 j, promień obszaru rażenia wokół trafionego pojazdu: 160 j.
 
 ### 10.3. Działko szybkostrzelne
 
-strzela z prędkością 1 pocisk na 1s, a każdy pocisk zadaje $\lceil x \div 4 \rceil$ obrażeń.
+strzela z prędkością 1 pocisk na 1s, a każdy pocisk zadaje $\lceil x \div 4 \rceil$ obrażeń. Zasięg działania: 190 j.
 
 ## 11. Wieża lecznicza
 
 Wieże lecznicze są nieruchomymi strukturami bojowymi.
 
 Każda wieża lecznicza:
-* posiada swój określony zasięg, zależny od ilości jednostek
+* posiada zasięg równy 80 j + x, gdzie x oznacza ilość jednostek w wieży
 * automatycznie zwiększa ilość jednostek o 2 każdemu przyjaznemu pojazdowi znajdującemu się w jej zasięgu co 3 s,
 * nie produkuje nowych jednostek.
 
