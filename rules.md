@@ -62,7 +62,8 @@ Budynek, nawet jeśli nie jest neutralny, może być pusty (zawierać zero jedno
 
 ## 4. Pojazdy
 
-Po mapie poruszają się pojazdy. Każdy pojazd przynależy do któregoś z graczy i jest jednego z następujących rodzajów:
+Po mapie poruszają się pojazdy. Pojazd porusza się w sposób ciągły i w każdej chwili ma określoną pozycję — środek swojej grafiki.
+Każdy pojazd przynależy do któregoś z graczy i jest jednego z następujących rodzajów:
 * czołg,
 * helikopter,
 * poduszkowiec,
@@ -123,7 +124,6 @@ Podjazd zajmuje całe pole (nazwijmy je p) i łączy ze sobą dwa przeciwległe 
 Na pole p można wjechać tylko z pól a oraz b, a także z p można zjechać tylko na pole a lub b, i przejazdy w obie strony są możliwe bez względu na wysokość pól a oraz b.
 Pole p znajduje się na wysokości równej minimum z wysokości pól a oraz b.
 
-
 ## 8. Mosty
 
 Most łączy ze sobą dwa niesąsiadujące ze sobą pola (nazwijmy je a i b) będące na tej samej wysokości (oznaczmy ją literą w).
@@ -133,9 +133,6 @@ Przejazd jest możliwy albo po moście (wzdłuż mostu), albo pod mostem (zgodni
 Helikopter lata dowolnie, nad mostem.
 
 ## 9. Walka pojazdów
-
-Pojazd porusza się w sposób ciągły i w każdej chwili ma określoną pozycję — środek swojej grafiki.
-
 Odległość między dwoma pojazdami to odległość euklidesowa między ich aktualnymi pozycjami. Odległość pojazdu od nieruchomego obiektu (budynku, działka, wieży leczniczej) to odległość euklidesowa między aktualną pozycją pojazdu a środkiem pola, na którym ten obiekt stoi.
 
 Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż 80 px — obszar wykrywania ma kształt koła o promieniu 80 px wokół pozycji pojazdu. Gdy dwa wrogie pojazdy spotkają się na trasie, rozpoczyna się walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
