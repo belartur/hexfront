@@ -107,12 +107,12 @@ Poduszkowiec to pojazd lądowo-wodny. Może się poruszać na lądzie i w wodzie
 
 ### 5.4. Bufor
 
-Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem jest to, że bufor leczy wszystkie przyjazne (tj. mające tego samego właściciela) dla niego pojazdy w pobliżu. Może on leczyć inne bufory, ale nie leczy samego siebie.
+Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem jest to, że bufor leczy wszystkie przyjazne (tj. mające tego samego właściciela) dla niego pojazdy w pobliżu: leczenie dotyczy pojazdów, których aktualna pozycja leży w okręgu o promieniu równym zasięgowi bufora, wyznaczonym wokół aktualnej pozycji bufora (odległości mierzymy jak w sekcji 9). Może on leczyć inne bufory, ale nie leczy samego siebie.
 
 
 ## 6. Sterowanie
 
-Każdy gracz może wysłać pojazd z jednostkami. W tym celu, gracz najpierw wskazuje swój budynek (z dodatnią liczbą jednostek w środku), z którego chce wysyłać jednostki (ten budynek zostaje zaznaczony w UI). Następnie wskazuje dowolny (inny) budynek docelowy. Wtedy wyznaczana jest najkrótsza możliwa droga między wskazanymi budynkami, która zależy od typu pojazdu i nie uwzględnia utrudnień (min, pułapek i ścian) (i budynek źródłowy jest odznaczany w UI). Jeśli nie istnieje żadna droga, pojazd nie jest wysyłany. Pojazd zabiera wszystkie jednostki z budynku źródłowego.
+Każdy gracz może wysłać pojazd z jednostkami. W tym celu, gracz najpierw wskazuje swój budynek (z dodatnią liczbą jednostek w środku), z którego chce wysyłać jednostki. Następnie wskazuje dowolny (inny) budynek docelowy. Wtedy wyznaczana jest najkrótsza możliwa droga między wskazanymi budynkami, która zależy od typu pojazdu i nie uwzględnia utrudnień (min, pułapek i ścian). Jeśli nie istnieje żadna droga, pojazd nie jest wysyłany. Pojazd zabiera wszystkie jednostki z budynku źródłowego.
 
 
 
@@ -134,11 +134,17 @@ Helikopter lata dowolnie, nad mostem.
 
 ## 9. Walka pojazdów
 
-Gdy dwa wrogie (należące do innych graczy) pojazdy spotkają się na trasie, rozpoczyna się walka.
+Pojazd porusza się w sposób ciągły i w każdej chwili ma określoną pozycję — środek swojej grafiki.
+
+Odległość między dwoma pojazdami to odległość euklidesowa między ich aktualnymi pozycjami. Odległość pojazdu od nieruchomego obiektu (budynku, działka, wieży leczniczej) to odległość euklidesowa między aktualną pozycją pojazdu a środkiem pola, na którym ten obiekt stoi.
+
+Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż 80 px — obszar wykrywania ma kształt koła o promieniu 80 px wokół pozycji pojazdu. Gdy dwa wrogie pojazdy spotkają się na trasie, rozpoczyna się walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
+
+Jeśli odległości kilku wykrytych pojazdów są identyczne, celem jest ten, który wcześniej wszedł w obszar wykrywania; przy pełnym remisie wybór jest deterministyczny (pojazd znajdujący się na polu o mniejszej współrzędnej q, a przy równości — r, w układzie współrzędnych axialnych).
 
 Walka polega na tym, że każdy pojazd co sekundę wysyła pocisk do wrogiego pojazdu, zmniejszając ilość jego jednostek o dokładnie $\lceil x \div 5 \rceil$, gdzie $x$ oznacza ilość jednostek w pojeździe, który wysłał pocisk.
 
-Gdy do walczących pojazdów dołącza jeszcze jeden, to zaczyna on atakować pojazd, który wykrył, chyba że jest on przyjazny — wtedy go ignoruje.  
+Gdy do walczących pojazdów dołącza jeszcze jeden, to zaczyna on atakować pojazd wykryty jako pierwszy (najbliższy), chyba że jest on przyjazny — wtedy go ignoruje.  
 
 Walka trwa, dopóki jedna ze stron nie zostanie pokonana (ilość jednostek w pojeździe jednej ze stron nie spadnie do zera).
 Po wygraniu walki zwycięski pojazd kontynuuje swoją wcześniej wyznaczoną trasę.
@@ -155,6 +161,8 @@ Każde działko:
 * automatycznie strzela pociski do wrogich pojazdów znajdujących się w jego zasięgu,
 * jego pocisk zmniejsza liczbę jednostek w pojeździe, który nim został trafiony
 * nie produkuje nowych jednostek.
+
+Pojazd znajduje się w zasięgu działka, jeśli jego aktualna pozycja leży w okręgu o promieniu równym zasięgowi działka, wyznaczonym wokół środka pola działka (odległości mierzymy jak w sekcji 9).
 
 W przypadku wielu wrogów działko strzela do najbliższego. Trafienie pociskiem jest rozliczane w momencie wystrzelenia pocisku, który ma charakter czysto wizualny. 
 
@@ -180,6 +188,8 @@ Każda wieża lecznicza:
 * posiada swój określony zasięg, zależny od ilości jednostek
 * automatycznie zwiększa ilość jednostek o 2 każdemu przyjaznemu pojazdowi znajdującemu się w jej zasięgu co 3 s,
 * nie produkuje nowych jednostek.
+
+Pojazd znajduje się w zasięgu wieży leczniczej, jeśli jego aktualna pozycja leży w okręgu o promieniu równym zasięgowi wieży, wyznaczonym wokół środka pola wieży (odległości mierzymy jak w sekcji 9).
 
 ## 12. Budynki neutralne
 
