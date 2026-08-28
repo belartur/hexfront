@@ -30,26 +30,12 @@ Po wybraniu poziomu on się ładuje pokazując mapę.
 ## Dźwięk
 Brak dźwięku (w przyszłości to się może zmienić).
 
-## Parametry liczbowe
-Wszystkie odległości, promienie i zasięgi w grze wyrażone są w jednostkach odległości (j) zdefiniowanych w rules.md. Przyjmuje się przelicznik **1 j = 1 px** przy skali widoku 1:1; zoom i skalowanie okna dotyczą wyłącznie renderingu. Przelicznik jest jedną stałą w kodzie — jego zmiana (np. na 1 j = 2 px dla wyświetlaczy o dużej gęstości) nie wpływa na logikę gry.
+## Parametry
 
-### Geometria planszy
+Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, prędkości, obrażenia itd.) są zdefiniowane w [rules.md](rules.md) w jednostkach odległości (j). Ta sekcja określa wyłącznie odwzorowanie jednostek na ekran:
 
-* bok sześciokąta: **36 j** (= 36 px przy skali 1:1; układ flat-top),
-* szerokość pola: **72 j** (= 72 px), wysokość pola: **≈62,4 j** (≈62,4 px; √3 × 36),
-* odległość między środkami sąsiednich pól: **≈62,4 j** — umowna jednostka „1 heksa odległości", wygodna do wyrażania zasięgów.
-
-### Wykrywanie
-
-* promień wykrywania pojazdów: **80 j** (= 80 px; koło; obejmuje 6 sąsiednich pól, bez drugiego pierścienia).
-
-### Zasięgi i prędkości (wartości domyślne)
-
-* promień leczenia bufora: **160 j** (§5.4),
-* zasięg zwykłego działka: **250 j**, szybkostrzelnego: **190 j**, rakietowego: **375 j**; promień splashu rakietówki: **160 j** (§10),
-* zasięg wieży leczniczej: **80 j + x j**, gdzie x — ilość jednostek w wieży (§11),
-* prędkości pojazdów: czołg **60 j/s**, bufor **60 j/s**, poduszkowiec **48 j/s**, helikopter **90 j/s** (§5); pułapka lodowa — połowa prędkości,
-* częstotliwość decyzji AI: **co 5 s**.
+* przelicznik: **1 j = 1 px** przy skali widoku 1:1 — jedna stała w kodzie; zoom i skalowanie okna dotyczą tylko renderingu,
+* bok sześciokąta: **36 j** (układ flat-top) — jedyna wartość geometryczna spoza zasad, potrzebna do przeliczenia współrzędnych heksów na pozycje w świecie gry; pozostałe wymiary pola wynikają z niej (√3).
 
 ### Do ustalenia
 
