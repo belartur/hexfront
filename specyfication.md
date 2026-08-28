@@ -29,3 +29,27 @@ Po wybraniu poziomu on się ładuje pokazując mapę.
 
 ## Dźwięk
 Brak dźwięku (w przyszłości to się może zmienić).
+
+## Parametry liczbowe
+
+Wszystkie konkretne wymiary w pikselach przeniesiono tu z zasad, aby reguły pozostawały niezależne od skalowania widoku. Wartości w pikselach odnoszą się do widoku w skali 1:1 (przy zoomie wszystkie odległości logiczne — promienie wykrywania i zasięgi — pozostają niezmienione, skaluje się tylko rendering).
+
+### Geometria planszy
+
+* bok sześciokąta: **36 px** (układ flat-top),
+* szerokość pola: **72 px**, wysokość pola: **≈62,4 px** (√3 × 36),
+* odległość między środkami sąsiednich pól: **≈62,4 px** — umowna jednostka „1 heksa odległości", wygodna do wyrażania zasięgów.
+
+### Wykrywanie
+
+* promień wykrywania pojazdów: **80 px** (koło; obejmuje 6 sąsiednich pól, bez drugiego pierścienia).
+
+### Do ustalenia
+
+Poniższe wartości nie są jeszcze ustalone (reguły odwołują się do nich bez liczb):
+
+* promień leczenia bufora (§5.4),
+* zasięg zwykłego działka, działka szybkostrzelnego i działka rakietowego oraz promień splashu rakietówki (§10),
+* wzór zasięgu wieży leczniczej („zależny od ilości jednostek", §11),
+* prędkości pojazdów (§4; znane modyfikatory: poduszkowiec 20% wolniej, pułapka lodowa — połowa prędkości),
+* częstotliwość decyzji AI (§2).
