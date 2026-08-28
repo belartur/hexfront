@@ -15,6 +15,7 @@ Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokument
 ## Grafika
 Grafika izometryczna. Plansza rysowana z kodu.
 Obiekty także rysowane z kodu (w przyszłości możliwe podmienienie na grafikę rastrową).
+Obiekty poszczególnych graczy różnią się kolorem (kod rysujący parametryzowany kolorem).
 
 ## Interfejs użytkownika
 
