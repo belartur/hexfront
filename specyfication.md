@@ -31,8 +31,7 @@ Po wybraniu poziomu on się ładuje pokazując mapę.
 Brak dźwięku (w przyszłości to się może zmienić).
 
 ## Parametry liczbowe
-
-Wszystkie konkretne wymiary w pikselach przeniesiono tu z zasad, aby reguły pozostawały niezależne od skalowania widoku. Wartości w pikselach odnoszą się do widoku w skali 1:1 (przy zoomie wszystkie odległości logiczne — promienie wykrywania i zasięgi — pozostają niezmienione, skaluje się tylko rendering).
+Wartości w pikselach odnoszą się do widoku w skali 1:1 (przy zoomie wszystkie odległości logiczne — promienie wykrywania i zasięgi — pozostają niezmienione, skaluje się tylko rendering).
 
 ### Geometria planszy
 
