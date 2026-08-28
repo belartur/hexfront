@@ -18,7 +18,7 @@ Na każdym polu z lądem może się znajdować jedno z:
 * fragment mostu,
 * ściana,
 * mina lądowa,
-* pułapka.
+* pułapka (ogniowa lub lodowa).
 
 Na polu z wodą (o wysokości 0) może się znajdować jedno z:
 
@@ -93,15 +93,15 @@ Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość
 
 ### 5.1. Czołg
 
-Czołg jest pojazdem lądowym. To oznacza, że może poruszać się tylko po lądzie. Oddziałują na niego wszelkie przeszkody umieszczone na ziemi.
+Czołg jest pojazdem lądowym. To oznacza, że może poruszać się tylko po lądzie. Oddziałują na niego wszelkie przeszkody umieszczone na lądzie.
 
 ### 5.2. Helikopter
 
-Helikopter jest pojazdem latającym. Może poruszać się wszędzie: nad wodą i nad lądem. Jest jedynym pojazdem, które nie dotyczą różnice wysokości pól.
+Helikopter jest pojazdem latającym. Może poruszać się wszędzie: nad wodą i nad lądem. Jest jedynym pojazdem, które nie dotyczą różnice wysokości pól. Ponadto nie oddziałują na niego żadne utrudnienia.
 
 ### 5.3. Poduszkowiec
 
-Poduszkowiec to pojazd lądowo-wodny. Może się poruszać na lądzie i w wodzie. Lecz przejazd pomiędzy wodą i lądem jest możliwy tylko gdy ląd jest na wysokości 1. Oddziałują na niego Wszelkie pułapki umieszczone na lądzie i w wodzie. Porusza on się wolniej niż inne pojazdy.
+Poduszkowiec to pojazd lądowo-wodny. Może się poruszać na lądzie i w wodzie. Lecz przejazd pomiędzy wodą i lądem jest możliwy tylko gdy ląd jest na wysokości 1. Oddziałują na niego Wszelkie przeszkody umieszczone na lądzie i w wodzie. Porusza on się wolniej niż inne pojazdy.
 
 ### 5.4. Bufor
 
@@ -110,7 +110,7 @@ Bufor ma taki ruch, jak czołg. To, co jedyną różnicą między buforem i czo�
 
 ## 6. Sterowanie
 
-Każdy gracz może wysłać pojazd z jednostkami. W tym celu, gracz najpierw wskazuje swój budynek (z dodatnią liczbą jednostek w środku), z którego chce wysyłać jednostki (ten budynek zostaje zaznaczony w UI). Następnie wskazuje dowolny (inny) budynek docelowy. Wtedy wyznaczana jest najkrótsza możliwa droga między wskazanymi budynkami (i budynek źródłowy jest odznaczany w UI). Jeśli nie istnieje żadna droga, pojazd nie jest wysyłany. Pojazd zabiera wszystkie jednostki z budynku źródłowego.
+Każdy gracz może wysłać pojazd z jednostkami. W tym celu, gracz najpierw wskazuje swój budynek (z dodatnią liczbą jednostek w środku), z którego chce wysyłać jednostki (ten budynek zostaje zaznaczony w UI). Następnie wskazuje dowolny (inny) budynek docelowy. Wtedy wyznaczana jest najkrótsza możliwa droga między wskazanymi budynkami, która jednak nie uwzględnia utrudnień(min, pułapek i ścian) (i budynek źródłowy jest odznaczany w UI). Jeśli nie istnieje żadna droga, pojazd nie jest wysyłany. Pojazd zabiera wszystkie jednostki z budynku źródłowego.
 
 
 
