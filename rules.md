@@ -39,7 +39,7 @@ Plansza gry może być dość duża i nie mieścić się na ekranie. Wtedy gracz
 Celem gry jest przejęcie kontroli nad wszystkimi budynkami i zniszczenie wszystkich pojazdów na mapie.
 Gracz kontrolowany przez człowieka zwycięża po przejęciu wszystkich budynków i zniszczeniu wszystkich wrogich pojazdów.
 Jeśli zaś straci on wszystkie budynki, to gra się kończy przegraną.
-Gdy AI straci wszystkie jednostki(w budynkach i na pojazdach), to jest ono eliminowane.
+Gdy AI straci wszystkie jednostki (w budynkach i na pojazdach), to jest ono eliminowane.
 
 Po przejęciu budynku, zaczyna on działać na rzecz nowego właściciela.
 
@@ -183,5 +183,5 @@ Każda wieża lecznicza:
 
 ## 12. Budynki neutralne
 
-Budynki neutralne nie mogą wysyłać pojazdów, bazy neutralne nie produkują jednostek, neutralne wieże lecznicze nie dodają nikomu jednostek, lecz neutralne działka strzelają do wszystkich pojazdów ,wg. zasad z sekcji 10, pociskami zadającymi normalną ilość obrażeń.
+Budynki neutralne nie mogą wysyłać pojazdów, bazy neutralne nie produkują jednostek, neutralne wieże lecznicze nie dodają nikomu jednostek, lecz neutralne działka strzelają do wszystkich pojazdów, wg zasad z sekcji 10, pociskami zadającymi normalną ilość obrażeń.
 
