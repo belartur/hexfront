@@ -91,7 +91,7 @@ Gdy pojazd z p jednostkami dociera do budynku docelowego, w którym znajduje si�
   * jeśli p > b, to budynek staje się własnością właściciela pojazdu i liczba jednostek w budynku jest ustawiana na p-b.
   * w przeciwnym razie, budynek nie zmienia właściciela i liczba jednostek w budynku jest ustawiana na b-p.
 
-Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość pojazdu (innego niż helikopter) jest redukowana o połowę, gdy przejeżdża on przez pułapkę lodową. Gdy na drodze pojazdu (innego niż helikopter) pojawi się ściana, to zatrzymuje się on i zaczyna ją atakować z częstotliwością 1 atak na sekundę. Po zniszczeniu ściany, czyli po strzeleniu jej 20 razy, pojazd kontynuuje swoją podróż. Pojazd zatrzymuje się też w przypadku wykrycia wrogiego (czyli należącego do innego gracza) pojazdu w pobliżu. Wtedy te dwa pojazdy zaczynają walkę.
+Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość pojazdu (innego niż helikopter) jest redukowana o połowę, gdy przejeżdża on przez pułapkę lodową. Gdy na drodze pojazdu (innego niż helikopter) pojawi się ściana, to zatrzymuje się on i zaczyna ją atakować z częstotliwością 1 atak na sekundę. Po zniszczeniu ściany, czyli po strzeleniu jej 20 razy, pojazd kontynuuje swoją podróż. Pojazd zatrzymuje się też w przypadku wykrycia wrogiego (czyli należącego do innego gracza) pojazdu w pobliżu. Wtedy zatrzymują się oba pojazdy i rozpoczyna się między nimi walka (wg zasad z sekcji 9).
 
 ## 5. Typy pojazdów
 
@@ -136,15 +136,16 @@ Helikopter lata dowolnie, nad mostem.
 ## 9. Walka pojazdów
 Odległość między dwoma pojazdami to odległość euklidesowa między ich aktualnymi pozycjami. Odległość pojazdu od nieruchomego obiektu (budynku, działka, wieży leczniczej) to odległość euklidesowa między aktualną pozycją pojazdu a środkiem pola, na którym ten obiekt stoi.
 
-Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż 80 j — obszar wykrywania ma kształt koła o promieniu 80 j (promień wykrywania) wokół pozycji pojazdu. Gdy dwa wrogie pojazdy spotkają się na trasie, rozpoczyna się walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
+Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż 80 j — obszar wykrywania ma kształt koła o promieniu 80 j (promień wykrywania) wokół pozycji pojazdu. Gdy pojazd wykryje wrogi pojazd (znajdujący się w odległości nie większej niż promień wykrywania), to zatrzymują się oba pojazdy i rozpoczyna się między nimi walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
 
 Jeśli odległości kilku wykrytych pojazdów są identyczne, celem jest ten, który wcześniej wszedł w obszar wykrywania; przy pełnym remisie wybór jest deterministyczny (pojazd znajdujący się na polu o mniejszej współrzędnej q, a przy równości — r, w układzie współrzędnych axialnych).
 
 Walka polega na tym, że każdy pojazd co sekundę wysyła pocisk do wrogiego pojazdu, zmniejszając ilość jego jednostek o dokładnie $\lceil x \div 5 \rceil$, gdzie $x$ oznacza ilość jednostek w pojeździe, który wysłał pocisk.
 
-Gdy do walczących pojazdów dołącza jeszcze jeden, to zaczyna on atakować pojazd wykryty jako pierwszy (najbliższy), chyba że jest on przyjazny — wtedy go ignoruje.  
+Gdy do trwającej walki dołącza kolejny pojazd, to atakuje on najbliższego wrogiego pojazdu w swoim obszarze wykrywania — zaatakowany w ten sposób pojazd nie odpowiada ogniem na dołączającego, lecz dalej walczy ze swoim oryginalnym przeciwnikiem (oryginalna para walczy ze sobą). Jeśli w obszarze wykrywania dołączającego pojazdu nie ma wrogich pojazdów, to nie atakuje on nikogo.  
 
 Walka trwa, dopóki jedna ze stron nie zostanie pokonana (ilość jednostek w pojeździe jednej ze stron nie spadnie do zera).
+Gdy dołączający pojazd zniszczy swój cel, to atakuje dalej pozostałego członka oryginalnej pary, jeśli ten nadal walczy.
 Po wygraniu walki zwycięski pojazd kontynuuje swoją wcześniej wyznaczoną trasę.
 
 
