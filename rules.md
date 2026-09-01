@@ -56,9 +56,9 @@ Każdy budynek jest jednego z następujących rodzajów:
 * działko, jednego z 3 rodzajów: zwykłe, szybkostrzelne, rakietowe
 * wieża lecznicza.
 
-Każdy gracz ma pewną, zmienną w trakcie rozgrywki liczbę jednostek. Jednostki gracza rodzą się w kontrolowanych przez niego bazach ze stałą prędkością (5 jednostek co 10 sekund) aż do wyczerpania pojemności bazy. Wszystkie budynki mają określoną pojemność, równą 50, z wyjątkiem baz, których pojemność wynosi 100.
+Każdy gracz ma pewną, zmienną w trakcie rozgrywki liczbę jednostek. Jednostki gracza rodzą się w kontrolowanych przez niego bazach skokowo: co 10 sekund przybywa 5 jednostek aż do wyczerpania pojemności bazy. Wszystkie budynki mają określoną pojemność, równą 50, z wyjątkiem baz, których pojemność wynosi 100.
 
-W przeludnionym budynku jednostki giną ze stałą prędkością 1 jednostki na sekundę.
+W przeludnionym budynku jednostki giną ze stałą prędkością 1 jednostki na sekundę. Przyjazny pojazd może dostarczyć jednostki ponad pojemność budynku, tworząc przeludnienie; przeludnienie kończy się, gdy liczba jednostek spadnie do pojemności budynku.
 
 Budynek, nawet jeśli nie jest neutralny, może być pusty (zawierać zero jednostek).
 
