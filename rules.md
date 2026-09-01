@@ -139,7 +139,7 @@ Odległość między dwoma pojazdami to odległość euklidesowa między ich akt
 
 Pojazd cyklicznie (co tick symulacji) wykrywa wrogie (należące do innych graczy) pojazdy znajdujące się w odległości nie większej niż 80 j — obszar wykrywania ma kształt koła o promieniu 80 j (promień wykrywania) wokół pozycji pojazdu. Gdy pojazd wykryje wrogi pojazd (znajdujący się w odległości nie większej niż promień wykrywania), to zatrzymują się oba pojazdy i rozpoczyna się między nimi walka. Pojazd rozpoczyna walkę z najbliższym z wykrytych, czyli o najmniejszej odległości — jest on „wykrytym jako pierwszy”. W trakcie trwającej walki pojazd nie zmienia celu: walczy z danym przeciwnikiem, dopóki któryś z nich nie zostanie pokonany, nawet jeśli inny wróg zbliży się na mniejszą odległość.
 
-Jeśli odległości kilku wykrytych pojazdów są identyczne, celem jest ten, który wcześniej wszedł w obszar wykrywania; przy pełnym remisie wybór jest deterministyczny (pojazd znajdujący się na polu o mniejszej współrzędnej q, a przy równości — r, w układzie współrzędnych axialnych).
+Jeśli odległości kilku wykrytych pojazdów są identyczne, celem jest ten, który wcześniej wszedł w obszar wykrywania.
 
 Walka polega na tym, że każdy pojazd co sekundę wysyła pocisk do wrogiego pojazdu, zmniejszając ilość jego jednostek o dokładnie $\lceil x \div 5 \rceil$, gdzie $x$ oznacza ilość jednostek w pojeździe, który wysłał pocisk.
 
