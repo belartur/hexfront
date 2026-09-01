@@ -71,7 +71,7 @@ Każdy pojazd przynależy do któregoś z graczy i jest jednego z następującyc
 * poduszkowiec,
 * bufor.
 
-Pojazdy powstają, gdy jakiś gracz postanowi przesłać jednostki z jednego budynku do drugiego i ich typ zależy od budynku, z którego wyjeżdżają. Jeśli wyjeżdżają z bazy, ich rodzaj zależy od rodzaju tej bazy. Z innych budynków źródłowych zawsze wyjeżdża czołg. Na jednym polu może znajdować się dowolna liczba pojazdów.
+Pojazdy powstają, gdy jakiś gracz postanowi przesłać jednostki z jednego budynku do drugiego i ich typ zależy od budynku, z którego wyjeżdżają. Jeśli wyjeżdżają z bazy, ich rodzaj zależy od rodzaju tej bazy. Z innych budynków źródłowych zawsze wyjeżdża czołg. Wysyłać pojazdy mogą więc wszystkie budynki — także działka i wieża lecznicza. Na jednym polu może znajdować się dowolna liczba pojazdów.
 
 Każdym pojazdem przemieszcza się pewna, niezerowa liczba jednostek. Na początku liczba ta jest równa liczbie jednostek w budynku, z którego dany pojazd wyjechał. Pojazd zabiera wszystkie jednostki z budynku (w budynku pozostaje zero jednostek). Liczba jednostek w pojeździe może ulec zmianie: zwiększa się w przypadku leczenia (od bufora lub wieży leczniczej), a zmniejsza w przypadku:
 
