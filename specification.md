@@ -27,6 +27,16 @@ Po uruchomieniu gry wyświetla się menu, z poziomami: każdy poziom ma swoją w
 Po wybraniu poziomu ładuje się on, pokazując mapę.
 
 
+## Sterowanie
+
+**Widok:** planszę można przesuwać, przeciągając ją myszą z wciśniętym LMB, klawiszami strzałek, klawiszami WASD oraz przez przytrzymanie kursora na krawędzi ekranu. Zoom wykonuje się kółkiem myszy albo klawiszami + i −, w zakresie od 0,5× do 2×.
+
+**Wysyłanie pojazdu:** gracz klika LMB na swój budynek (z dodatnią liczbą jednostek w środku), a następnie na budynek docelowy. Po wskazaniu celu rysowany jest podgląd trasy; wysyłkę zatwierdza się klawiszem Enter albo trzecim kliknięciem LMB. Wskazanie można anulować klawiszem Esc lub kliknięciem RMB.
+
+**Menu poziomów:** poziom wybiera się kliknięciem na jego wyświetlaną nazwę. Podczas gry klawisz Esc powraca do menu, chyba że aktualnie jest wybrana trasa(patrz wysyłanie pojazdu w tej sekcji).
+
+**Pauza:** klawisz P wstrzymuje i wznawia grę.
+
 ## Dźwięk
 Brak dźwięku (w przyszłości to się może zmienić).
 
