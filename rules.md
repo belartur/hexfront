@@ -83,7 +83,7 @@ Każdym pojazdem przemieszcza się pewna, niezerowa liczba jednostek. Na począt
 Gdy liczba jednostek w pojeździe przestanie być dodatnia, pojazd znika.
 
 Każdy pojazd ma określony cel podróży (wskazany budynek, dowolny do którego istnieje droga i jest różny od źródłowego), do którego podąża po automatycznie wyznaczonej ścieżce (ścieżka jest wyznaczana w momencie rozpoczęcia podróży i nie może się później zmienić).
-Większość pojazdów (wszystkich poza helikopterem) porusza się jedynie po polach leżących na tej samej wysokości. Zmiana wysokości jest możliwa tylko za pomocą podjazdów oraz przejechania pomiędzy lądem o wysokości 1 i wodą przez poduszkowiec.
+Większość pojazdów (wszystkich poza helikopterem) porusza się jedynie po polach leżących na tej samej wysokości: dwa sąsiednie pola o różnych wysokościach nie są dla nich połączone bezpośrednim przejazdem. Zmiana wysokości jest możliwa tylko za pomocą podjazdów oraz przejechania pomiędzy lądem o wysokości 1 i wodą przez poduszkowiec.
 
 Gdy pojazd z p jednostkami dociera do budynku docelowego, w którym znajduje się b jednostek, to wykonywana jest jedna z poniższych akcji i pojazd znika:
 
@@ -110,7 +110,7 @@ Poduszkowiec to pojazd lądowo-wodny. Może się poruszać na lądzie i w wodzie
 
 ### 5.4. Bufor
 
-Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem jest to, że bufor leczy wszystkie przyjazne (tj. mające tego samego właściciela) dla niego pojazdy w pobliżu: leczenie dotyczy pojazdów, których aktualna pozycja leży w okręgu o promieniu równym zasięgowi bufora, wyznaczonym wokół aktualnej pozycji bufora (odległości mierzymy jak w sekcji 9). Może on leczyć inne bufory, ale nie leczy samego siebie. Promień leczenia bufora wynosi 160 j.
+Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem jest to, że bufor leczy wszystkie przyjazne (tj. mające tego samego właściciela) dla niego pojazdy w pobliżu: leczenie dotyczy pojazdów, których aktualna pozycja leży w okręgu o promieniu równym zasięgowi bufora, wyznaczonym wokół aktualnej pozycji bufora (odległości mierzymy jak w sekcji 9). Może on leczyć inne bufory, ale nie leczy samego siebie. Promień leczenia bufora wynosi 160 j. Bufor leczy z prędkością 1 jednostki na 2 sekundy.
 
 
 ## 6. Sterowanie
@@ -174,7 +174,7 @@ strzela z prędkością 1 pocisk na 5s, a każdy pocisk zadaje $x$ obrażeń. Za
 
 ### 10.2. Działko rakietowe
 
-Jego działanie różni się od zwykłego działka tylko tym, że jego pocisk oprócz trafionego pojazdu zmniejsza liczbę jednostek także wszystkim wrogim pojazdom w pobliżu. Ponadto ma większy zasięg niż działka pozostałych typów. Zasięg działania: 375 j, promień obszaru rażenia wokół trafionego pojazdu: 160 j.
+Jego działanie różni się od zwykłego działka tylko tym, że jego pocisk oprócz trafionego pojazdu zmniejsza liczbę jednostek także wszystkim wrogim pojazdom w pobliżu, zadając im te same obrażenia x, co trafionemu pojazdowi. Ponadto ma większy zasięg niż działka pozostałych typów. Zasięg działania: 375 j, promień obszaru rażenia wokół trafionego pojazdu: 160 j.
 
 ### 10.3. Działko szybkostrzelne
 
