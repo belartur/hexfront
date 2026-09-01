@@ -129,8 +129,8 @@ Pole p znajduje się na wysokości równej minimum z wysokości pól a oraz b.
 ## 8. Mosty
 
 Most łączy ze sobą dwa niesąsiadujące ze sobą pola (nazwijmy je a i b) będące na tej samej wysokości (oznaczmy ją literą w).
-Most leży na jednym albo więcej pól o wysokościach mniejszych od w-2 (w szczególności nie obejmuje samych pól a oraz b).
-Most zaczyna się na polu sąsiadującym z a, kończy na polu sąsiadującym z b i nigdy nie skręca (musi istnieć odcinek łączący a z b, prostopadły do ścianek pól).
+Most składa się z fragmentów mostu (obiektów z sekcji 1) położonych na kolejnych polach i leży na jednym albo więcej pól o wysokościach mniejszych od w-2 (w szczególności nie obejmuje samych pól a oraz b).
+Most zaczyna się na polu sąsiadującym z a, kończy na polu sąsiadującym z b i nigdy nie skręca (musi istnieć prosty korytarz heksów łączący a z b, biegnący w jednym z 6 kierunków siatki).
 Przejazd jest możliwy albo po moście (wzdłuż mostu), albo pod mostem (zgodnie z regułami opisanymi wcześniej).
 Helikopter lata dowolnie, nad mostem.
 
