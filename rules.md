@@ -39,8 +39,8 @@ Odległości, promienie i zasięgi wyrażamy w jednostkach odległości (j). Jed
 
 Celem gry jest przejęcie kontroli nad wszystkimi budynkami i zniszczenie wszystkich pojazdów na mapie.
 Gracz kontrolowany przez człowieka zwycięża po przejęciu wszystkich budynków i zniszczeniu wszystkich wrogich pojazdów.
-Jeśli zaś straci on wszystkie budynki, to gra się kończy przegraną.
-Gdy AI straci wszystkie jednostki (w budynkach i w pojazdach), to jest ono eliminowane.
+Gracz zostaje wyeliminowany, gdy nie kontroluje już żadnego budynku i nie posiada już żadnych pojazdów. Zasada ta obowiązuje symetrycznie wszystkich graczy: zarówno człowieka, jak i AI.
+
 
 Po przejęciu budynku, zaczyna on działać na rzecz nowego właściciela.
 
