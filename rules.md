@@ -40,7 +40,7 @@ Odległości, promienie i zasięgi wyrażamy w jednostkach odległości (j). Jed
 Celem gry jest przejęcie kontroli nad wszystkimi budynkami i zniszczenie wszystkich pojazdów na mapie.
 Gracz kontrolowany przez człowieka zwycięża po przejęciu wszystkich budynków i zniszczeniu wszystkich wrogich pojazdów.
 Jeśli zaś straci on wszystkie budynki, to gra się kończy przegraną.
-Gdy AI straci wszystkie jednostki (w budynkach i na pojazdach), to jest ono eliminowane.
+Gdy AI straci wszystkie jednostki (w budynkach i w pojazdach), to jest ono eliminowane.
 
 Po przejęciu budynku, zaczyna on działać na rzecz nowego właściciela.
 
@@ -51,8 +51,8 @@ Rozgrywka odbywa się w czasie rzeczywistym.
 
 Każdy budynek jest jednego z następujących rodzajów:
 
-* baza, jednego z 4 rodzai: czołgowa, helikopterowa, poduszkowcowa, buforowa
-* działko, jednego z 3 rodzai: zwykłe, szybkostrzelne, rakietowe
+* baza, jednego z 4 rodzajów: czołgowa, helikopterowa, poduszkowcowa, buforowa
+* działko, jednego z 3 rodzajów: zwykłe, szybkostrzelne, rakietowe
 * wieża lecznicza.
 
 Każdy gracz ma pewną, zmienną w trakcie rozgrywki liczbę jednostek. Jednostki gracza rodzą się w kontrolowanych przez niego bazach ze stałą prędkością (5 jednostek co 10 sekund) aż do wyczerpania pojemności bazy. Wszystkie budynki mają określoną pojemność, równą 50, z wyjątkiem baz, których pojemność wynosi 100.
@@ -70,7 +70,7 @@ Każdy pojazd przynależy do któregoś z graczy i jest jednego z następującyc
 * poduszkowiec,
 * bufor.
 
-Pojazdy powstają, gdy jakiś gracz postanowi przesłać jednostki z jednego budynku do drugiego i ich typ zależy od budynku, z którego wyjeżdżają. Jeśli wyjeżdżają z bazy, ich rodzaj zależy od rodzaju tej bazy. Z innych budynków źródłowych zawsze wyjeżdża czołg. Na jednym polu może znajdywać się dowolna ilość pojazdów.
+Pojazdy powstają, gdy jakiś gracz postanowi przesłać jednostki z jednego budynku do drugiego i ich typ zależy od budynku, z którego wyjeżdżają. Jeśli wyjeżdżają z bazy, ich rodzaj zależy od rodzaju tej bazy. Z innych budynków źródłowych zawsze wyjeżdża czołg. Na jednym polu może znajdować się dowolna liczba pojazdów.
 
 Każdym pojazdem przemieszcza się pewna, niezerowa liczba jednostek. Na początku liczba ta jest równa liczbie jednostek w budynku, z którego dany pojazd wyjechał. Pojazd zabiera wszystkie jednostki z budynku (w budynku pozostaje zero jednostek). Liczba jednostek w pojeździe może ulec zmianie: zwiększa się w przypadku leczenia (od bufora lub wieży leczniczej), a zmniejsza w przypadku:
 

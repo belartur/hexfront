@@ -8,7 +8,7 @@ Reguły gry znajdują się w pliku [rules.md](rules.md).
 ## Kod
 Kod jest przejrzysty i dobrze udokumentowany, w języku angielskim.
 Wszelkie funkcje, metody, klasy, pola, itp. mają dokumentację.
-Logika gry jest sensownie oddzielona i niezależna od interfejsu użytkownika (tą regułe może być nagięta w uzasadnionych przypadkach).
+Logika gry jest sensownie oddzielona i niezależna od interfejsu użytkownika (tę regułę można nagiąć w uzasadnionych przypadkach).
 Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokumentowane, także można je łatwo zmienić i eksperymentować z innymi wartościami. Stałe dotyczące odległości, zasięgów i prędkości wyrażone są w jednostkach odległości (j) z rules.md; przelicznik j → piksele zdefiniowany jest w jednym miejscu.
 
 ## Grafika i interfejs użytkownika
@@ -24,7 +24,7 @@ Gdy pojazd lub budynek traci x jednostek, to wyświetla się biała liczba -x le
 Zasięgi działek są renderowane jako białe, a wież leczących jako jasnozielone. Zasięgi mają spory procent przezroczystości.
 
 Po uruchomieniu gry wyświetla się menu, z poziomami: każdy poziom ma swoją wyświetlaną nazwę.
-Po wybraniu poziomu on się ładuje pokazując mapę.
+Po wybraniu poziomu ładuje się on, pokazując mapę.
 
 
 ## Dźwięk
