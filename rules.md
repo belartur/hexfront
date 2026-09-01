@@ -195,3 +195,69 @@ Pojazd znajduje się w zasięgu wieży leczniczej, jeśli jego aktualna pozycja 
 
 Budynki neutralne nie mogą wysyłać pojazdów, bazy neutralne nie produkują jednostek, neutralne wieże lecznicze nie dodają nikomu jednostek, lecz neutralne działka strzelają do wszystkich pojazdów, wg zasad z sekcji 10, pociskami zadającymi normalną ilość obrażeń.
 
+## 13. Sztuczna inteligencja
+
+Gracze sterowani przez AI podejmują decyzje według poniższych zasad.
+
+### 13.1. Akcje
+
+Jedyną akcją, jaką może wykonać AI, jest wysłanie pojazdu z jednego ze swoich budynków do innego budynku — na zasadach opisanych w sekcji 6. AI może także nie wykonać żadnej akcji. Pojazdy w trasie, walki pojazdów, leczenie i ostrzał działek zachodzą automatycznie, zgodnie z zasadami gry; AI nie steruje nimi bezpośrednio.
+
+### 13.2. Pętla decyzyjna
+
+AI podejmuje decyzje co stały interwał 2 sekund, przy czym decyzje poszczególnych graczy AI są przesunięte w czasie względem siebie. W ramach jednej decyzji AI wykonuje co najwyżej jedną akcję. Zachowanie AI jest deterministyczne przy ustalonym ziarnie losowości przypisanym do poziomu.
+
+### 13.3. Informacje
+
+Decydując, AI uwzględnia aktualny stan gry: położenie i liczbę jednostek we wszystkich budynkach, położenie, typ i liczebność wszystkich pojazdów wraz z ich trasami, a także położenie min, pułapek, ścian i zasięgów działek.
+
+### 13.4. Model zagrożeń
+
+Dla każdego swojego budynku AI wyznacza łączną liczbę jednostek w wrogich pojazdach jadących do tego budynku oraz szacowany czas ich dotarcia. AI śledzi również własne pojazdy w trasie, aby nie dublować rozkazów skierowanych do tego samego celu.
+
+### 13.5. Ocena akcji
+
+Dla każdej pary (budynek źródłowy z jednostkami, budynek docelowy), dla której istnieje droga, AI wyznacza punktację:
+
+score = W1·szansa_przejęcia + W2·wartość_budynku + W3·potrzeba_obrony − W4·czas_podróży − W5·niebezpieczeństwo_trasy − W6·ryzyko_utraty_źródła
+
+gdzie:
+
+* szansa_przejęcia zależy od porównania liczby jednostek w pojeździe (równej liczbie jednostek w budynku źródłowym) z liczbą jednostek w budynku docelowym (sekcja 4),
+* wartość_budynku jest wyższa dla baz niż dla działek i wież leczniczych, z uwzględnieniem położenia budynku na mapie,
+* potrzeba_obrony rośnie, gdy do własnego budynku jedzie wrogi pojazd; obejmuje zarówno wysyłkę posiłków, jak i ewakuację jednostek z budynku skazanego na utratę,
+* czas_podróży wynika z długości trasy i prędkości pojazdu danego typu (sekcja 5),
+* niebezpieczeństwo_trasy uwzględnia odcinki trasy w zasięgu wrogich i neutralnych działek (sekcja 10) oraz miny, pułapki i ściany leżące na trasie,
+* ryzyko_utraty_źródła wynika z tego, że pojazd zabiera wszystkie jednostki z budynku źródłowego i zostawia go pustym (sekcja 4).
+
+Przy ocenie wysyłki do budynku należącego do tego samego gracza AI uwzględnia ponadto:
+
+* **wzmocnienie obrony** — dostarczenie jednostek do budynku zagrożonego wrogimi pojazdami w trasie,
+* **ewakuację** — wycofanie jednostek z budynku, którego nie da się obronić,
+* **koncentrację sił** — gromadzenie jednostek w jednym budynku przed planowanym atakiem (pojazd zabiera wszystkie jednostki ze źródła, więc silniejsze uderzenie wymaga uprzedniego przerzutu jednostek),
+* **wzmocnienie parametrów budynku** — utrzymywanie zapasu jednostek w działku zwiększa jego obrażenia (sekcja 10), a w wieży leczniczej — jej zasięg (sekcja 11); AI nie opróżnia własnych działek i wież pełniących rolę obronną bez ważnego powodu i nie przepełnia ich ponad pojemność (jednostki ginąłyby w przeludnieniu — sekcja 3).
+
+AI wykonuje akcję o najwyższej punktacji, o ile przekracza ona ustalony próg; w przeciwnym razie nie wysyła żadnego pojazdu.
+
+### 13.6. Zasady bezpieczeństwa
+
+AI nie wykonuje wysyłki, gdy:
+
+* z budynku źródłowego nie istnieje droga do żadnego innego budynku (sekcja 6),
+* wysyłka do wrogo lub neutralnie posiadanego celu byłaby nieopłacalna, czyli gdy liczba jednostek w pojeździe nie przewyższa liczby jednostek w budynku docelowym (sekcja 4),
+* liczba dostarczanych jednostek znacząco przekroczyłaby pojemność budynku docelowego, tak że większość z nich zginęłaby w przeludnieniu (sekcja 3).
+
+### 13.7. Taktyki
+
+AI może stosować taktyki wynikające wprost z zasad gry, w szczególności:
+
+* wysyłanie dwóch pojazdów do tego samego celu w krótkim odstępie czasu — pojazd dołączający do trwającej walki atakuje najbliższego wroga, nie otrzymując od niego ostrzału zwrotnego (sekcja 9),
+* wspieranie ataków buforem, który leczy pojazdy w trasie (sekcja 5.4),
+* wykorzystywanie wież leczniczych jako punktów przyczółkowych — ich zasięg rośnie z liczbą jednostek (sekcja 11),
+* szybkie przejmowanie pustych budynków, np. po eliminacji innego gracza (sekcja 2).
+* koncentracja sił — przemieszczanie zapasów jednostek z tylnych baz do budynku przyczółkowego przed większym atakiem.
+
+### 13.8. Poziomy trudności
+
+Poziom trudności AI jest opisany zestawem parametrów: interwałem decyzji, szumem dodawanym do punktacji, opóźnieniem reakcji na zagrożenia, progiem wysyłki oraz wagami W1–W6 i progiem z sekcji 13.5. Wartości tych parametrów są zdefiniowane w pliku stałych (zgodnie z sekcją „Kod” specyfikacji implementacji).
+
