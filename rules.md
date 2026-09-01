@@ -76,7 +76,7 @@ Pojazdy powstają, gdy jakiś gracz postanowi przesłać jednostki z jednego bud
 Każdym pojazdem przemieszcza się pewna, niezerowa liczba jednostek. Na początku liczba ta jest równa liczbie jednostek w budynku, z którego dany pojazd wyjechał. Pojazd zabiera wszystkie jednostki z budynku (w budynku pozostaje zero jednostek). Liczba jednostek w pojeździe może ulec zmianie: zwiększa się w przypadku leczenia (od bufora lub wieży leczniczej), a zmniejsza w przypadku:
 
 * walki z innym pojazdem,
-* natrafienia na pułapkę ogniową (wtedy obrażenia zadawane są ze stałą prędkością 1/sekundę dopóki na niej jest),
+* natrafienia na pułapkę ogniową (wtedy obrażenia zadawane są ze stałą prędkością 1/sekundę dopóki na niej jest; pułapka ogniowa nie zostaje usunięta),
 * natrafienia na minę (wtedy zadawana jest stała liczba 25 obrażeń, a następnie ta mina jest usuwana),
 * lub dostania pociskiem od działka.
 
@@ -92,7 +92,7 @@ Gdy pojazd z p jednostkami dociera do budynku docelowego, w którym znajduje si�
   * jeśli p > b, to budynek staje się własnością właściciela pojazdu i liczba jednostek w budynku jest ustawiana na p-b.
   * w przeciwnym razie, budynek nie zmienia właściciela i liczba jednostek w budynku jest ustawiana na b-p.
 
-Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość pojazdu (innego niż helikopter) jest redukowana o połowę, gdy przejeżdża on przez pułapkę lodową. Gdy pojazd (inny niż helikopter) znajdzie się na polu ze ścianą, to zatrzymuje się on i zaczyna ją atakować z częstotliwością 1 atak na sekundę. Każdy strzał zadaje ścianie dokładnie 1 punkt obrażeń, niezależnie od liczby jednostek w pojeździe. Po zniszczeniu ściany, czyli po strzeleniu jej 20 razy, pojazd kontynuuje swoją podróż. Zniszczona ściana znika na stałe; ścianę niszczą tylko i wyłącznie pojazdy. Pojazd zatrzymuje się też w przypadku wykrycia wrogiego (czyli należącego do innego gracza) pojazdu w pobliżu. Wtedy zatrzymują się oba pojazdy i rozpoczyna się między nimi walka (wg zasad z sekcji 9).
+Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość pojazdu (innego niż helikopter) jest redukowana o połowę, gdy przejeżdża on przez pułapkę lodową; po opuszczeniu pułapki lodowej pojazd wraca do oryginalnej prędkości, a pułapka lodowa nie zostaje usunięta. Gdy pojazd (inny niż helikopter) znajdzie się na polu ze ścianą, to zatrzymuje się on i zaczyna ją atakować z częstotliwością 1 atak na sekundę. Każdy strzał zadaje ścianie dokładnie 1 punkt obrażeń, niezależnie od liczby jednostek w pojeździe. Po zniszczeniu ściany, czyli po strzeleniu jej 20 razy, pojazd kontynuuje swoją podróż. Zniszczona ściana znika na stałe; ścianę niszczą tylko i wyłącznie pojazdy. Pojazd zatrzymuje się też w przypadku wykrycia wrogiego (czyli należącego do innego gracza) pojazdu w pobliżu. Wtedy zatrzymują się oba pojazdy i rozpoczyna się między nimi walka (wg zasad z sekcji 9).
 
 ## 5. Typy pojazdów
 
