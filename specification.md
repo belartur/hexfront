@@ -50,6 +50,5 @@ Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są z
 FPS = 1/60
 
 ### Generowanie planszy
-
 Jest jedna przykładowa plansza generowana z kodu.
 W przyszłości plansze będą projektowane w PyTMX (na razie jednak nie jest to obsługiwane i PyTMX nie jest wymagany).
