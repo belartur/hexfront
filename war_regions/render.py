@@ -47,6 +47,10 @@ class Renderer:
     def draw_world(self, game, camera: Camera, selection=None,
                    hover_tile=None) -> None:
         """Render one frame of the running game."""
+        # Clear the view with open water: the board is surrounded by
+        # water on all sides (rules.md sec. 1), so anything outside the
+        # generated tiles renders as the sea.
+        self.screen.fill(C.WATER_COLOR)
         self._rotor_phase += 0.2
         overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
         self._draw_terrain(game, camera)

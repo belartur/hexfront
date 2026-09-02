@@ -46,7 +46,8 @@ war_regions/
   render.py      code-drawn isometric renderer (no raster assets)
   app.py         menu, loading screen, input handling, HUD
 main.py          entry point
-tests/test_logic.py   headless rule tests:  python3 -m tests.test_logic
+tests/test_logic.py   headless rule tests:      python3 -m tests.test_logic
+tests/test_render.py  rendering regression test: python3 -m tests.test_render
 ```
 
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in

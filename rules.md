@@ -8,6 +8,7 @@ W rozgrywce bierze udział od 2 do 4 graczy, w tym 1 sterowany przez człowieka
 
 Do każdego pola na mapie przypisana jest niezmienna w trakcie gry wysokość (nieujemna liczba całkowita do 15).
 Wysokość 0 to woda, a większa to ląd.
+Plansza z każdej strony otoczona jest wodą — poza jej granicami rozciąga się nieograniczona woda.
 
 Każde pole może być puste, albo może się na nim znajdować jeden z niżej wymienionych obiektów.
 
