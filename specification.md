@@ -1,7 +1,7 @@
 # War Regions — specyfikacja implementacji gry
 
 ## Wstęp
-War Regions to gra komputerowa napisana w Pythonie, przy użyciu bibliotek PyGame i PyTMX.
+War Regions to gra komputerowa napisana w Pythonie, przy użyciu bibliotek PyGame.
 
 Reguły gry znajdują się w pliku [rules.md](rules.md).
 
@@ -49,9 +49,7 @@ Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są z
 
 FPS = 1/60
 
-### Do ustalenia
+### Generowanie planszy
 
-Poniższe elementy nie są jeszcze zaprojektowane:
-
-* szczegółowa strategia AI (poza częstotliwością decyzji),
-* konstrukcja map/poziomów (format, niezmienniki mapy).
+Jest jedna przykładowa plansza generowana z kodu.
+W przyszłości plansze będą projektowane w PyTMX (na razie jednak nie jest to obsługiwane i PyTMX nie jest wymagany).
