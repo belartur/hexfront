@@ -174,7 +174,7 @@ strzela z prędkością 1 pocisk na 5s, a każdy pocisk zadaje $x$ obrażeń. Za
 
 ### 10.2. Działko rakietowe
 
-Jego działanie różni się od zwykłego działka tylko tym, że jego pocisk oprócz trafionego pojazdu zmniejsza liczbę jednostek także wszystkim wrogim pojazdom w pobliżu, zadając im te same obrażenia x, co trafionemu pojazdowi. Ponadto ma większy zasięg niż działka pozostałych typów. Zasięg działania: 375 j, promień obszaru rażenia wokół trafionego pojazdu: 160 j.
+Jego działanie różni się od zwykłego działka tylko tym, że jego pocisk oprócz trafionego pojazdu zmniejsza liczbę jednostek także wszystkim wrogim pojazdom w pobliżu, zadając im te same obrażenia x, co trafionemu pojazdowi. Ponadto ma większy zasięg niż działka pozostałych typów. Zasięg działania: 320 j, promień obszaru rażenia wokół trafionego pojazdu: 80 j.
 
 ### 10.3. Działko szybkostrzelne
 
@@ -185,7 +185,7 @@ strzela z prędkością 1 pocisk na 1s, a każdy pocisk zadaje $\lceil x \div 4 
 Wieże lecznicze są nieruchomymi strukturami bojowymi.
 
 Każda wieża lecznicza:
-* posiada zasięg równy 80 j + x, gdzie x oznacza liczbę jednostek w wieży
+* posiada zasięg równy 15x, gdzie x oznacza liczbę jednostek w wieży
 * automatycznie zwiększa liczbę jednostek o 2 każdemu przyjaznemu pojazdowi znajdującemu się w jej zasięgu co 3 s,
 * nie produkuje nowych jednostek.
 
