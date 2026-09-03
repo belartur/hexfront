@@ -163,28 +163,55 @@ class Renderer:
     # ------------------------------------------------------------------
 
     def _draw_ramp(self, game, camera: Camera, tile: tuple, t) -> None:
-        """A ramp tile: dirt-coloured hex with chevrons along its axis."""
-        q, r = tile
-        corners = hexgrid.hex_corners(q, r, game.board.side)
-        z = t.height * C.ELEVATION_PX
-        pts = [camera.world_to_screen(x, y, z) for x, y in corners]
+        """A ramp tile: a solid inclined *strip* along the ramp axis.
+
+        The strip's top face is a true on-screen rectangle anchored at
+        the midpoints of the hex edges facing neighbours a and b, drawn
+        at their respective heights, so the tilt is exactly the joined
+        fields' height difference.  The body below the top face is
+        filled with darker dirt down to the base elevation -- no empty
+        space is visible under the ramp.  The strip is narrower than the
+        hex; normal ground of tile ``p`` stays visible at both sides.
+        """
+        board = game.board
+        cx, cy = board.center_world(tile)
+        a, b = t.ramp
+        za = board.height(a) * C.ELEVATION_PX
+        zb = board.height(b) * C.ELEVATION_PX
+        z_lo = min(za, zb)
+        ax, ay = board.center_world(a)
+        bx, by = board.center_world(b)
+        length = math.hypot(bx - ax, by - ay) or 1.0
+        ux, uy = (bx - ax) / length, (by - ay) / length  # points a -> b
+        apo = board.side * math.sqrt(3.0) / 2.0   # centre -> edge midpoint
+        hw = board.side * 0.45                    # strip half-width (<= s/2)
+        # Screen anchors: edge midpoints at the neighbours' heights.
+        m1 = camera.world_to_screen(cx - ux * apo, cy - uy * apo, za)
+        m2 = camera.world_to_screen(cx + ux * apo, cy + uy * apo, zb)
+        dx, dy = m2[0] - m1[0], m2[1] - m1[1]
+        seg = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / seg, dx / seg              # lateral unit (screen)
+        o0 = camera.world_to_screen(cx, cy, 0.0)
+        o1 = camera.world_to_screen(cx - uy * hw, cy + ux * hw, 0.0)
+        w = math.hypot(o1[0] - o0[0], o1[1] - o0[1])  # half-width (screen)
+        a1 = (m1[0] + nx * w, m1[1] + ny * w)
+        a2 = (m1[0] - nx * w, m1[1] - ny * w)
+        b1 = (m2[0] + nx * w, m2[1] + ny * w)
+        b2 = (m2[0] - nx * w, m2[1] - ny * w)
+        # Solid body: both sides filled from the tilted top edges down to
+        # the base elevation -- the union covers everything under the ramp.
+        da, db = int(za - z_lo), int(zb - z_lo)
+        skirt = _shade((172, 158, 120), 0.62)
+        pygame.draw.polygon(self.screen, skirt,
+                            [a1, b1, (b1[0], b1[1] + db),
+                             (a1[0], a1[1] + da)])
+        pygame.draw.polygon(self.screen, skirt,
+                            [a2, b2, (b2[0], b2[1] + db),
+                             (a2[0], a2[1] + da)])
+        # Rectangular top face, tilted by the height difference.
+        pts = [a1, b1, b2, a2]
         pygame.draw.polygon(self.screen, (172, 158, 120), pts)
         pygame.draw.polygon(self.screen, C.LAND_EDGE, pts, 1)
-        a, b = t.ramp
-        ax, ay = game.board.center_world(a)
-        bx, by = game.board.center_world(b)
-        cx, cy = game.board.center_world(tile)
-        length = math.hypot(bx - ax, by - ay) or 1.0
-        ux, uy = (bx - ax) / length, (by - ay) / length
-        for off in (-10.0, 10.0):
-            tipx, tipy = cx + ux * off, cy + uy * off
-            left = camera.world_to_screen(tipx - uy * 7 - ux * 6,
-                                          tipy + ux * 7 - uy * 6, z)
-            right = camera.world_to_screen(tipx + uy * 7 - ux * 6,
-                                           tipy - ux * 7 - uy * 6, z)
-            tip = camera.world_to_screen(tipx + ux * 8, tipy + uy * 8, z)
-            pygame.draw.polygon(self.screen, (240, 235, 220),
-                                [left, tip, right])
 
     def _draw_bridge_fragment(self, game, camera: Camera, bridge,
                               frag: tuple) -> None:
