@@ -347,9 +347,11 @@ class Game:
     def _flush_texts(self, ent, dt: float) -> None:
         """Aggregate continuous losses/gains into floating numbers.
 
-        Every full second the accumulated amounts are rounded and pushed
-        into ``ent.texts`` as ``[amount, age]`` pairs; entries older than
-        FLOAT_TEXT_LIFETIME are dropped.
+        A number is pushed as soon as at least one full unit has been
+        accumulated, so damage shows on the very frame it happens; the
+        periodic 1 s timer remains only as a fallback that flushes the
+        leftover fraction of slow gains (e.g. healing).  Entries older
+        than FLOAT_TEXT_LIFETIME are dropped.
         """
         ent.text_timer += dt
         for t in ent.texts:
@@ -357,8 +359,11 @@ class Game:
         if ent.texts:
             ent.texts = [t for t in ent.texts
                          if t[1] < C.FLOAT_TEXT_LIFETIME]
+        flush = ent.loss_acc >= 1.0 or ent.gain_acc >= 1.0
         if ent.text_timer >= 1.0:
             ent.text_timer -= 1.0
+            flush = True
+        if flush:
             loss = round(ent.loss_acc)
             gain = round(ent.gain_acc)
             ent.loss_acc -= loss
