@@ -14,9 +14,10 @@ python3 main.py          # requires pygame (pip install pygame)
 
 * 2-4 players per level: you (blue) plus AI opponents.
 * Real-time combat.  Units spawn in your bases (5 per 10 s, up to capacity).
-* Click **LMB** on your building to select it, **LMB** on a target building to
-  preview the route, then press **Enter** (or click **LMB** a third time) to
-  send *all* units as a vehicle.  **RMB**/**Esc** cancels.
+* Click **RMB** on your building (or **LMB** when nothing is selected yet)
+  to select it; then **LMB** on any other building sends *all* its units
+  there as a vehicle — your own buildings included, so you can transfer
+  units between them.  **Esc** (or **RMB** off-building) cancels.
 * Capture every building and destroy every enemy vehicle to win.
 * Ground vehicles move only between tiles of equal height; ramps join
   different heights and bridges cross water.  Helicopters fly anywhere.
@@ -27,7 +28,7 @@ python3 main.py          # requires pygame (pip install pygame)
 |--------------------------------|---------------------------------|
 | LMB drag / arrows / WASD / edge| pan the view                    |
 | mouse wheel / `+` / `-`        | zoom (0.5x - 2x)                |
-| LMB, Enter, RMB, Esc           | sending vehicles (see above)    |
+| LMB, RMB, Esc                 | selecting & sending vehicles    |
 | `P`                            | pause                           |
 | `Esc`                          | back to menu (unless selecting) |
 

@@ -31,9 +31,11 @@ Po wybraniu poziomu ładuje się on, pokazując mapę.
 
 **Widok:** planszę można przesuwać, przeciągając ją myszą z wciśniętym LMB, klawiszami strzałek, klawiszami WASD oraz przez przytrzymanie kursora na krawędzi ekranu. Zoom wykonuje się kółkiem myszy albo klawiszami + i −, w zakresie od 0,5× do 2×.
 
-**Wysyłanie pojazdu:** gracz klika LMB na swój budynek (z dodatnią liczbą jednostek w środku), a następnie na budynek docelowy. Po wskazaniu celu rysowany jest podgląd trasy; wysyłkę zatwierdza się klawiszem Enter albo trzecim kliknięciem LMB. Wskazanie można anulować klawiszem Esc lub kliknięciem RMB.
+**Zaznaczanie budynku:** kliknięcie PPM zawsze zaznacza wskazany własny budynek (z dodatnią liczbą jednostek w środku) jako budynek źródłowy; kolejne kliknięcia PPM zmieniają zaznaczenie na inny budynek. Kliknięcie PPM poza własnym budynkiem z jednostkami anuluje zaznaczenie.
 
-**Menu poziomów:** poziom wybiera się kliknięciem na jego wyświetlaną nazwę. Podczas gry klawisz Esc powraca do menu, chyba że aktualnie jest wybrana trasa(patrz wysyłanie pojazdu w tej sekcji).
+**Wysyłanie pojazdu:** kliknięcie LPM zaznacza wskazany własny budynek (z dodatnią liczbą jednostek w środku), o ile żaden inny budynek nie jest zaznaczony. Gdy jakiś budynek jest zaznaczony, kliknięcie LPM na dowolny inny budynek wysyła pojazd z jednostkami z budynku zaznaczonego do wskazanego — pozwala to również na przesyłanie jednostek między własnymi budynkami. Jeśli nie istnieje droga, pojazd nie jest wysyłany, a zaznaczenie zostaje. Podgląd trasy do budynku wskazanego kursorem rysowany jest na bieżąco. Zaznaczenie można anulować klawiszem Esc albo kliknięciem PPM poza własnym budynkiem z jednostkami.
+
+**Menu poziomów:** poziom wybiera się kliknięciem na jego wyświetlaną nazwę. Podczas gry klawisz Esc powraca do menu, chyba że aktualnie jest zaznaczony budynek (wtedy Esc anuluje zaznaczenie; patrz wysyłanie pojazdu w tej sekcji).
 
 **Pauza:** klawisz P wstrzymuje i wznawia grę.
 

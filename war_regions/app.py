@@ -3,9 +3,13 @@
 Implements the controls from the specification:
   * view: LMB drag, arrow keys, WASD, screen-edge hover, wheel/+/- zoom
     (0.5x - 2x);
-  * sending a vehicle: LMB on own building, LMB on target, preview path,
-    confirm with Enter or a third LMB click, cancel with Esc or RMB;
-  * Esc returns to the menu unless a route is being selected;
+  * selecting a source building: RMB always (re)selects the clicked own
+    building with units inside; RMB anywhere else cancels;
+  * sending a vehicle: LMB on own building selects it when nothing is
+    selected; with an active selection LMB on any other building sends
+    a vehicle there (own buildings included, i.e. unit transfers).
+    The route preview follows the cursor; Esc cancels the selection;
+  * Esc returns to the menu unless a building is selected;
   * P pauses the game.
 """
 
@@ -40,7 +44,8 @@ class Application:
         self.camera = None
         self.ai = []
         self.paused = False
-        self.selection = None         # {"src", "dst", "path"}
+        self.selection = None         # {"src": tile, "path": preview}
+        self._preview_tile = None     # hover tile the preview was built for
         self.load_timer = 0.0
         self._sim_acc = 0.0
         self._down_pos = None
@@ -82,7 +87,7 @@ class Application:
                     self._down_pos = ev.pos
                     self._dragging = False
                 elif ev.button == 3 and self.state == STATE_PLAYING:
-                    self.selection = None          # RMB cancels selection
+                    self._select_rmb(ev.pos)       # RMB always selects
                 elif ev.button in (4, 5) and self.camera is not None:
                     self.camera.zoom_at(
                         C.ZOOM_STEP if ev.button == 4 else 1.0 / C.ZOOM_STEP,
@@ -109,16 +114,9 @@ class Application:
 
     def _key(self, ev: pygame.event.Event) -> None:
         if self.state == STATE_PLAYING:
-            if ev.key == pygame.K_RETURN and self.selection is not None \
-                    and self.selection.get("dst") is not None:
-                # Enter confirms the selected send (specification).
-                self.game.try_send(self.game.human_id,
-                                   self.selection["src"],
-                                   self.selection["dst"])
-                self.selection = None
-            elif ev.key == pygame.K_ESCAPE:
+            if ev.key == pygame.K_ESCAPE:
                 if self.selection is not None:
-                    self.selection = None      # first cancel the route
+                    self._set_selection(None)  # first cancel the selection
                 else:
                     self.state = STATE_MENU
             elif ev.key == pygame.K_p:
@@ -141,7 +139,14 @@ class Application:
             self._game_click(pos)
 
     def _game_click(self, pos) -> None:
-        """LMB click during play: source -> target -> confirm (spec)."""
+        """LMB click during play: select when idle, otherwise send (spec).
+
+        With no building selected, LMB selects an own building with units
+        inside.  With an active selection, LMB on any *other* building
+        sends a vehicle from the selected building to the clicked one --
+        own buildings included, which enables unit transfers.  A failed
+        send (no route) keeps the selection.
+        """
         tile = self._pick_tile(pos)
         building = (self.game.building_at_tile(tile)
                     if tile is not None else None)
@@ -150,25 +155,49 @@ class Application:
         if sel is None:
             if (building is not None and building.owner == human
                     and building.units > 0):
-                self.selection = {"src": building.tile, "dst": None,
-                                  "path": None}
-        elif sel["dst"] is None:
-            if building is None:
-                return
-            if (building.owner == human and building.units > 0
-                    and building.tile != sel["src"]):
-                sel["src"] = building.tile      # re-select the source
-                sel["path"] = None
-                return
-            if building.tile != sel["src"]:
-                path = self._route_preview(sel["src"], building.tile)
-                if path is not None:            # no road -> not accepted
-                    sel["dst"] = building.tile
-                    sel["path"] = path
+                self._set_selection(building.tile)
+        elif building is not None and building.tile != sel["src"]:
+            # LMB with an active selection always means "send there".
+            if self.game.try_send(human, sel["src"], building.tile):
+                self._set_selection(None)
+
+    def _select_rmb(self, pos) -> None:
+        """RMB click during play: always (re)selects the clicked own
+        building with units inside; anywhere else it cancels (spec)."""
+        tile = self._pick_tile(pos)
+        building = (self.game.building_at_tile(tile)
+                    if tile is not None else None)
+        human = self.game.human_id
+        if (building is not None and building.owner == human
+                and building.units > 0):
+            self._set_selection(building.tile)
         else:
-            # Third LMB click (or Enter) confirms the send.
-            self.game.try_send(human, sel["src"], sel["dst"])
-            self.selection = None
+            self._set_selection(None)
+
+    def _set_selection(self, src_tile) -> None:
+        """Select ``src_tile`` as the sending source; ``None`` cancels."""
+        self._preview_tile = None
+        self.selection = ({"src": src_tile, "path": None}
+                          if src_tile is not None else None)
+
+    def _update_preview(self, hover_tile) -> None:
+        """Refresh the dashed route preview for the selected source.
+
+        The preview targets the building under the cursor and is
+        recomputed only when the hovered tile changes (path-finding is
+        not free).
+        """
+        sel = self.selection
+        if sel is None or self.game is None:
+            self._preview_tile = None
+            return
+        if hover_tile == self._preview_tile:
+            return                          # preview still valid
+        self._preview_tile = hover_tile
+        sel["path"] = None
+        if hover_tile is not None and hover_tile != sel["src"]:
+            if self.game.building_at_tile(hover_tile) is not None:
+                sel["path"] = self._route_preview(sel["src"], hover_tile)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -209,7 +238,7 @@ class Application:
                                 level.seed * 31 + p.id)
                    for p in self.game.players if not p.is_human]
         self.paused = False
-        self.selection = None
+        self._set_selection(None)
         self._sim_acc = 0.0
         self.load_timer = C.LOADING_TIME
         self.state = STATE_LOADING
@@ -267,6 +296,7 @@ class Application:
             return
         hover = self._pick_tile(self.mouse_pos) \
             if self.state == STATE_PLAYING else None
+        self._update_preview(hover)
         self.renderer.draw_world(self.game, self.camera, self.selection,
                                  hover)
         if self.state == STATE_LOADING:
@@ -289,8 +319,10 @@ class Application:
 
     def _hud(self) -> None:
         """Small control hints in the top-left corner."""
-        lines = ["LMB: send units   Enter/3rd click: confirm   RMB/Esc: cancel",
-                 "Drag/WASD/arrows/edge: pan   wheel/+/-: zoom   P: pause   Esc: menu"]
+        lines = ["RMB: select building   LMB: select / send units   "
+                 "Esc: cancel",
+                 "Drag/WASD/arrows/edge: pan   wheel/+/-: zoom   P: pause   "
+                 "Esc: menu"]
         for i, line in enumerate(lines):
             surf = self.renderer.font(18).render(line, True,
                                                  C.UI_TEXT_COLOR)

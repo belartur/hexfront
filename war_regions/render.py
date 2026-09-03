@@ -323,8 +323,7 @@ class Renderer:
         for _, kind, obj in items:
             if kind == "b":
                 selected = selection is not None and (
-                    selection.get("src") == obj.tile or
-                    selection.get("dst") == obj.tile)
+                    selection.get("src") == obj.tile)
                 self._draw_building(game, camera, obj, selected)
                 self._draw_badge(game, camera, obj.pos,
                                  board.height(obj.tile) * C.ELEVATION_PX,
