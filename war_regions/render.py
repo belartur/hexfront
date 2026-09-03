@@ -66,10 +66,17 @@ class Renderer:
     # ------------------------------------------------------------------
     # Terrain (land grey, water light blue - specification)
     # ------------------------------------------------------------------
-    def _tile_depth(self, game, tile: tuple) -> float:
-        """Painter depth key of a tile: bigger = closer to the camera."""
+    def _tile_depth(self, game, tile: tuple) -> tuple:
+        """Painter depth key of a tile (lower = drawn earlier).
+
+        Primary key: the tile height, so the board is painted from the
+        lowest fields to the highest (specification: terrain never hides
+        taller ground behind it).  Secondary key: the world diagonal
+        ``x + y`` -- the classic back-to-front order within one height
+        level.
+        """
         x, y = game.board.center_world(tile)
-        return x + y
+        return (game.board.height(tile), x + y)
 
     def _draw_terrain(self, game, camera: Camera) -> None:
         board = game.board

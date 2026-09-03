@@ -23,6 +23,8 @@ Gdy pojazd lub budynek traci x jednostek, to wyświetla się biała liczba -x le
 
 Zasięgi działek są renderowane jako białe, a wież leczących jako jasnozielone. Zasięgi mają spory procent przezroczystości. Zasięgi leczenia przez bufory także renderują się jako jasnozielone i przesuwają się one wraz z ruchem tego pojazdu. Zasięgi wykrywania wrogich pojazdów nie są zaznaczane.
 
+Plansza rysowana jest algorytmem malarza od pól o najniższej wysokości do pól o najwyższej; przy równych wysokościach pola rysowane są od dalszej części planszy do bliższej (wg przekątnej świata). Dzięki temu wyższy teren (wraz ze ściankami skarp) zawsze przykrywa teren niższy, nigdy odwrotnie.
+
 Po uruchomieniu gry wyświetla się menu, z poziomami: każdy poziom ma swoją wyświetlaną nazwę.
 Po wybraniu poziomu ładuje się on, pokazując mapę.
 
