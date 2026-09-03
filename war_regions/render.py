@@ -542,13 +542,18 @@ class Renderer:
                 z = self._vehicle_z(game, ent)
             sx, sy = camera.world_to_screen(pos[0], pos[1], z)
             bx, by = sx + int(18 * camera.zoom), sy + int(13 * camera.zoom)
-            for amount, age in ent.texts:
+            for t in ent.texts:
+                amount, age = t[0], t[1]
+                count = len(t) > 2 and t[2]     # wall-shot ordinal flag
                 alpha = max(0, 255 - int(255 * age / C.FLOAT_TEXT_LIFETIME))
-                color = ((255, 255, 255) if amount < 0
+                color = ((255, 255, 255) if (amount < 0 or count)
                          else (170, 245, 170))
                 fsize = max(10, int(18 * camera.zoom))
-                label = f"{amount:+d}".replace("+0", "+") \
-                    if amount > 0 else str(amount)
+                if count:
+                    label = str(amount)
+                else:
+                    label = f"{amount:+d}".replace("+0", "+") \
+                        if amount > 0 else str(amount)
                 surf = self.font(fsize).render(label, True, color)
                 surf.set_alpha(alpha)
                 dy = int(age * C.FLOAT_TEXT_SPEED * camera.zoom)

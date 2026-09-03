@@ -128,6 +128,8 @@ class Vehicle:
         self.last_opponent = None         # last vehicle we shot at
         self.fire_timer = 0.0             # combat shot cooldown progress
         self.wall_timer = 0.0             # wall-attack shot cooldown progress
+        self.wall_target = None           # tile of the wall being shot
+        self.wall_shots = 0               # shots fired at that wall so far
         self.loss_acc = 0.0
         self.gain_acc = 0.0
         self.text_timer = 0.0

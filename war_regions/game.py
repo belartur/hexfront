@@ -244,6 +244,13 @@ class Game:
                     if v.wall_timer >= C.WALL_ATTACK_INTERVAL:
                         v.wall_timer -= C.WALL_ATTACK_INTERVAL
                         obstacle.hp -= C.WALL_ATTACK_DAMAGE
+                        # Shot ordinal shown as a white floating number;
+                        # numbering restarts when the target wall changes.
+                        if v.wall_target != tile:
+                            v.wall_target = tile
+                            v.wall_shots = 0
+                        v.wall_shots += 1
+                        v.texts.append([v.wall_shots, 0.0, True])
                         if obstacle.hp <= 0:
                             board.tiles[tile].obstacle = None
                     continue                    # stopped, shooting the wall
