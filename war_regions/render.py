@@ -53,59 +53,100 @@ class Renderer:
         self.screen.fill(C.WATER_COLOR)
         self._rotor_phase += 0.2
         overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-        self._draw_terrain(game, camera)
         self._draw_shadows(game, camera, overlay)
-        self._draw_decals(game, camera)
         self._draw_ranges(game, camera, overlay)
+        self._draw_tiles(game, camera)
         self.screen.blit(overlay, (0, 0))
         self._draw_paths(game, camera, selection)
         self._draw_objects(game, camera, selection, hover_tile)
         self._draw_projectiles(game, camera)
         self._draw_float_texts(game, camera)
+        self._draw_badges(game, camera)
 
     # ------------------------------------------------------------------
     # Terrain (land grey, water light blue - specification)
     # ------------------------------------------------------------------
-    def _tile_depth(self, game, tile: tuple) -> tuple:
-        """Painter depth key of a tile (lower = drawn earlier).
+    def _draw_skirts(self, game, camera: Camera, tile: tuple, t) -> None:
+        """Cliff skirts of one tile, wherever a neighbour (or void) is
+        lower.  Called for every tile before any hex top is drawn."""
+        board = game.board
+        q, r = tile
+        corners = hexgrid.hex_corners(q, r, board.side)
+        z = t.height * C.ELEVATION_PX
+        pts = [camera.world_to_screen(x, y, z) for x, y in corners]
+        for k in range(6):
+            d = hexgrid.edge_dir_index(q, k)
+            n = hexgrid.neighbor(q, r, d)
+            nh = board.height(n) if board.contains(n) else 0
+            if nh < t.height:
+                nz = nh * C.ELEVATION_PX
+                b1 = camera.world_to_screen(*corners[k], nz)
+                b2 = camera.world_to_screen(*corners[(k + 1) % 6], nz)
+                skirt = _shade(_shade(C.LAND_COLOR,
+                                      1.0 + 0.05 * t.height), 0.62)
+                pygame.draw.polygon(
+                    self.screen, skirt,
+                    [pts[k], pts[(k + 1) % 6], b2, b1])
 
-        Primary key: the tile height, so the board is painted from the
-        lowest fields to the highest (specification: terrain never hides
-        taller ground behind it).  Secondary key: the world diagonal
-        ``x + y`` -- the classic back-to-front order within one height
-        level.
+    def _draw_top(self, game, camera: Camera, tile: tuple, t) -> None:
+        """Hex top surface of one tile."""
+        board = game.board
+        q, r = tile
+        corners = hexgrid.hex_corners(q, r, board.side)
+        z = t.height * C.ELEVATION_PX
+        pts = [camera.world_to_screen(x, y, z) for x, y in corners]
+        if t.height == 0:
+            fill, edge = C.WATER_COLOR, C.WATER_EDGE
+        else:
+            fill = _shade(C.LAND_COLOR, 1.0 + 0.05 * t.height)
+            edge = C.LAND_EDGE
+        pygame.draw.polygon(self.screen, fill, pts)
+        pygame.draw.polygon(self.screen, edge, pts, 1)
+
+    # ------------------------------------------------------------------
+    # One painter pass: each tile is drawn together with everything that
+    # stands on it (ramp, bridge deck, obstacle, building), all sorted by
+    # the same depth key, so tall terrain properly occludes the contents
+    # of lower tiles behind it.
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Board painter: tiles back-to-front, each with its cliff skirts, top
+    # and contents drawn together, so walls stay attached to their tile.
+    # ------------------------------------------------------------------
+    def _tile_depth(self, game, tile: tuple) -> float:
+        """Painter depth key of a tile: bigger = closer to the camera.
+
+        From the projection (camera.py: ``py = (x + y) * ISO_SIN - z``)
+        two points land on one view ray when a step of one height unit
+        offsets ``1 / ISO_SIN`` steps of the world diagonal -- so the
+        elevation must enter the depth with weight ``ELEVATION_PX /
+        ISO_SIN`` relative to ``(x + y)``.  Higher ground is therefore
+        painted after lower ground in front of it and stays visible.
         """
         x, y = game.board.center_world(tile)
-        return (game.board.height(tile), x + y)
+        return ((x + y) * C.ISO_SIN
+                + game.board.height(tile) * C.ELEVATION_PX)
 
-    def _draw_terrain(self, game, camera: Camera) -> None:
+    def _draw_tiles(self, game, camera: Camera) -> None:
         board = game.board
-        for tile, t in sorted(board.tiles.items(),
-                              key=lambda kv: self._tile_depth(game, kv[0])):
-            q, r = tile
-            corners = hexgrid.hex_corners(q, r, board.side)
-            z = t.height * C.ELEVATION_PX
-            pts = [camera.world_to_screen(x, y, z) for x, y in corners]
-            if t.height == 0:
-                fill, edge = C.WATER_COLOR, C.WATER_EDGE
-            else:
-                fill = _shade(C.LAND_COLOR, 1.0 + 0.05 * t.height)
-                edge = C.LAND_EDGE
-            # Side skirts wherever a neighbour (or the void) is lower.
-            for k in range(6):
-                d = hexgrid.edge_dir_index(q, k)
-                n = hexgrid.neighbor(q, r, d)
-                nh = board.height(n) if board.contains(n) else 0
-                if nh < t.height:
-                    nz = nh * C.ELEVATION_PX
-                    b1 = camera.world_to_screen(*corners[k], nz)
-                    b2 = camera.world_to_screen(*corners[(k + 1) % 6], nz)
-                    skirt = _shade(fill, 0.62)
-                    pygame.draw.polygon(
-                        self.screen, skirt,
-                        [pts[k], pts[(k + 1) % 6], b2, b1])
-            pygame.draw.polygon(self.screen, fill, pts)
-            pygame.draw.polygon(self.screen, edge, pts, 1)
+        building_at = {b.tile: b for b in game.buildings}
+        for tile in sorted(board.tiles, key=lambda t: self._tile_depth(game, t)):
+            t = board.tiles[tile]
+            # Skirts first, then the top: the wall fills the gap below
+            # its own hex and covers the lower terrain behind it.
+            self._draw_skirts(game, camera, tile, t)
+            self._draw_top(game, camera, tile, t)
+            if t.ramp is not None:
+                self._draw_ramp(game, camera, tile, t)
+            if t.obstacle is not None:
+                self._draw_obstacle(game, camera, tile, t.obstacle)
+            b = building_at.get(tile)
+            if b is not None:
+                self._draw_building(game, camera, b, False)
+        # Bridge decks float above every terrain surface.
+        for bridge in board.bridges:
+            for frag in sorted(bridge.fragments):
+                self._draw_bridge_fragment(game, camera, bridge, frag)
 
     # ------------------------------------------------------------------
     # Shadows of flying and ground vehicles
@@ -118,21 +159,8 @@ class Renderer:
             pygame.draw.polygon(overlay, (0, 0, 0, 70), pts)
 
     # ------------------------------------------------------------------
-    # Ramps, bridges, walls, mines and traps
+    # Ramp, bridge, obstacle and building drawing primitives
     # ------------------------------------------------------------------
-    def _draw_decals(self, game, camera: Camera) -> None:
-        board = game.board
-        for tile, t in sorted(board.tiles.items(),
-                              key=lambda kv: self._tile_depth(game, kv[0])):
-            if t.ramp is not None:
-                self._draw_ramp(game, camera, tile, t)
-        for bridge in board.bridges:
-            for frag in bridge.fragments:
-                self._draw_bridge_fragment(game, camera, bridge, frag)
-        for tile, t in sorted(board.tiles.items(),
-                              key=lambda kv: self._tile_depth(game, kv[0])):
-            if t.obstacle is not None:
-                self._draw_obstacle(game, camera, tile, t.obstacle)
 
     def _draw_ramp(self, game, camera: Camera, tile: tuple, t) -> None:
         """A ramp tile: dirt-coloured hex with chevrons along its axis."""
@@ -310,7 +338,7 @@ class Renderer:
                     left = dash if drawing else gap
 
     # ------------------------------------------------------------------
-    # Buildings and vehicles, depth-sorted
+    # Vehicles, depth-sorted (buildings are drawn with their tiles)
     # ------------------------------------------------------------------
     def _draw_objects(self, game, camera: Camera, selection,
                       hover_tile) -> None:
@@ -322,30 +350,11 @@ class Renderer:
                                        board.side)]
             pygame.draw.polygon(self.screen, (255, 255, 255), pts, 1)
         items = []
-        for b in game.buildings:
-            items.append((b.pos[0] + b.pos[1], "b", b))
         for v in game.vehicles:
             items.append((v.x + v.y + 0.1, "v", v))
         items.sort(key=lambda it: it[0])
         for _, kind, obj in items:
-            if kind == "b":
-                selected = selection is not None and (
-                    selection.get("src") == obj.tile)
-                self._draw_building(game, camera, obj, selected)
-                self._draw_badge(game, camera, obj.pos,
-                                 board.height(obj.tile) * C.ELEVATION_PX,
-                                 obj.units,
-                                 maxed=obj.units >= obj.capacity,
-                                 production_frac=(obj.production_timer /
-                                                  C.BASE_SPAWN_INTERVAL
-                                                  if is_base(obj.kind) and
-                                                  obj.owner is not None
-                                                  else None))
-            else:
-                self._draw_vehicle(game, camera, obj)
-                self._draw_badge(game, camera, obj.pos,
-                                 self._vehicle_z(game, obj), obj.units,
-                                 maxed=False, production_frac=None)
+            self._draw_vehicle(game, camera, obj)
         if selection is not None and selection.get("src") is not None:
             src = game.building_at_tile(selection["src"])
             if src is not None:
@@ -353,6 +362,25 @@ class Renderer:
                 pts = camera.screen_circle_poly(src.pos[0], src.pos[1],
                                                 30.0, z, 24)
                 pygame.draw.polygon(self.screen, (255, 255, 255), pts, 2)
+
+    def _draw_badges(self, game, camera: Camera) -> None:
+        """Unit-count badges of every building and vehicle, drawn as the
+        very last pass so they are never hidden by terrain or objects."""
+        board = game.board
+        for b in game.buildings:
+            self._draw_badge(game, camera, b.pos,
+                             board.height(b.tile) * C.ELEVATION_PX,
+                             b.units,
+                             maxed=b.units >= b.capacity,
+                             production_frac=(b.production_timer
+                                              / C.BASE_SPAWN_INTERVAL
+                                              if is_base(b.kind)
+                                              and b.owner is not None
+                                              else None))
+        for v in game.vehicles:
+            self._draw_badge(game, camera, v.pos,
+                             self._vehicle_z(game, v), v.units,
+                             maxed=False, production_frac=None)
 
     def _vehicle_z(self, game, v) -> float:
         """Render elevation of a vehicle (helicopters hover higher)."""
