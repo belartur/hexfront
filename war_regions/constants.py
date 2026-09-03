@@ -193,6 +193,13 @@ NEUTRAL_COLOR = (165, 165, 165)
 RANGE_TURRET_COLOR = (255, 255, 255, 42)
 RANGE_HEAL_COLOR = (150, 245, 150, 46)
 
+#: Range outlines: same hue as the fill but clearly less transparent, so
+#: an outline stays visible where it crosses another range's fill and
+#: covers it (drawn in a second pass, after every fill).
+RANGE_TURRET_OUTLINE = (255, 255, 255, 130)
+RANGE_HEAL_OUTLINE = (150, 245, 150, 130)
+RANGE_OUTLINE_WIDTH = 3
+
 #: Preview path colours.
 PATH_COLOR = (255, 255, 255)
 PATH_PREVIEW_COLOR = (255, 240, 120)

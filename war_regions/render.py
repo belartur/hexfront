@@ -269,25 +269,36 @@ class Renderer:
     # Range overlays (white turrets, light-green healers - specification)
     # ------------------------------------------------------------------
     def _draw_ranges(self, game, camera: Camera, overlay) -> None:
+        """Range overlays: every translucent fill first, then every
+        outline (same hue, less transparent), so an outline covers the
+        fills of other ranges instead of blending into them."""
+        circles = []
         for b in game.buildings:
             z = game.board.height(b.tile) * C.ELEVATION_PX
             tk = turret_kind_of(b.kind)
             if tk is not None:
-                pts = camera.screen_circle_poly(
-                    b.pos[0], b.pos[1], C.TURRET_STATS[tk]["range"], z)
-                pygame.draw.polygon(overlay, C.RANGE_TURRET_COLOR, pts)
+                circles.append((camera.screen_circle_poly(
+                    b.pos[0], b.pos[1],
+                    C.TURRET_STATS[tk]["range"], z),
+                    C.RANGE_TURRET_COLOR, C.RANGE_TURRET_OUTLINE))
             elif b.kind == BuildingKind.HEAL_TOWER and b.owner is not None:
                 rng = C.HEAL_TOWER_RANGE_PER_UNIT * b.units
-                pts = camera.screen_circle_poly(b.pos[0], b.pos[1], rng, z)
-                pygame.draw.polygon(overlay, C.RANGE_HEAL_COLOR, pts)
+                circles.append((camera.screen_circle_poly(
+                    b.pos[0], b.pos[1], rng, z),
+                    C.RANGE_HEAL_COLOR, C.RANGE_HEAL_OUTLINE))
         for v in game.vehicles:
             if v.kind != VehicleKind.BUFFER:
                 continue
             tile = game.board.world_to_tile(v.x, v.y)
             z = (game.board.height(tile) * C.ELEVATION_PX) if tile else 0
-            pts = camera.screen_circle_poly(
-                v.x, v.y, C.BUFFER_HEAL_RADIUS, z)
-            pygame.draw.polygon(overlay, C.RANGE_HEAL_COLOR, pts)
+            circles.append((camera.screen_circle_poly(
+                v.x, v.y, C.BUFFER_HEAL_RADIUS, z),
+                C.RANGE_HEAL_COLOR, C.RANGE_HEAL_OUTLINE))
+        for pts, fill, _outline in circles:
+            pygame.draw.polygon(overlay, fill, pts)
+        for pts, _fill, outline in circles:
+            pygame.draw.polygon(overlay, outline, pts,
+                                C.RANGE_OUTLINE_WIDTH)
 
     # ------------------------------------------------------------------
     # Dashed travel paths (vanish behind the vehicle - specification)
