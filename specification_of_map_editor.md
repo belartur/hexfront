@@ -9,8 +9,7 @@ Edytor dzieli kod rysujący planszę z grą. Plansze zapisywane są w katalogu m
 Edycja polega na wskazaniu pola za pomocą myszy (jest ono wskazywane dokładnie tak jak w samej grze) i następnie wciśnięciu jednego z klawiszy, który zmienia właściwości pola albo obiektu na nim stojącego.
 
 Działanie poszczególnych klawiszy:
-* `b` stawia budynek albo, jeśli na polu już znajduje się budynek, cyklicznie zmienia jego rodzaj (domyślne właściwości nowego budynku:
-neutralna baza czołgowa z zerem jednostek);
+* `b` stawia budynek albo, jeśli na polu już znajduje się budynek, cyklicznie zmienia jego rodzaj;
 * cyfry - zmieniają liczbę jednostek (w zakresie 0-255) w budynku (wpisywanie jest zatwierdzanie natychmiast po wpisaniu trzeciej cyfry albo sekundę po wpisaniu pierwszej lub drugiej cyfry; wpisywane cyfry wyświetlane są od razu w polu wyświetlającym liczbę jednostek w budynku; wartość większa od 255 jest ograniczana do 255 w momencie zatwierdzenia; jeśli na polu nie ma budynku, wpisywanie cyfr niczego nie zmienia; wpisywany ciąg cyfr jest związany z polem, na którym rozpoczęto wpisywanie - samo wskazanie innego pola go nie przerywa (po sekundzie zatwierdzi się na starym polu), a wpisanie cyfry na innym polu porzuca stary ciąg i zaczyna nowy dla tego pola);
 * `o` cyklicznie zmienia własciciela budynku (brak działania jeśli na polu nie ma budynku);
 * `t` wstawia utrudnienie lub cyklicznie zmienia jego rodzaj;
@@ -28,6 +27,8 @@ Wstawienie obiektu nadpisuje obiekt który znajdował się na polu wcześniej.
 Edytor wyświetla legendę z opisem działania klawiszy.
 
 Działka i wieże lecznicze są wyświetlane wraz z zasięgiem (w przypadku wież leczniczych zgodnie z regułami gry, czyli zależnie od liczby jednostek; neutralne wieże lecznicze nie mają wyświetlanego zasięgu).
+
+Pierwszy wstawiony budynek jest początkowo neutralną bazą czołgową z zerem jednostek. Jednakże gdy użytkownik zmienia własności budynków (typy, kolory i liczby jednostek) to są one przez edytor zapamiętywane i nadawane nowo wstawianym budynkom. Analogicznie zapamiętywany jest rodzaj ostatnio wybranego utrudnienia i jest on nadawany nowo wstawianym utrudnieniom.
 
 Przy wychodzeniu edytor pyta czy zapisać zmiany (jeśli nie są już zapisane).
 
