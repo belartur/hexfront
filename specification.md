@@ -53,11 +53,11 @@ Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są z
 
 FPS = 1/60
 
-### Plansze i edytor plansz
-Edytor plansz jest osobną aplikacją. W miarę możliwości powinien dzielić kod rysujący plansze z grą.
-Plansze zapisywane są w katalogu maps, każda w osobnym pliku.
+## Plansze i edytor plansz
+Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_of_map_editor.md](specification_of_map_editor.md).
+Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku.
 
-### Format pliku planszy
+## Format pliku planszy
 Plik planszy jest binarny. Znajdują się w nim, kolejno, następujące informacje:
 * Wymiary planszy (4 bajty): liczba kolumn k (2 bajty) i wierszy w (2 bajty).
 * k·w liczb 4 bitowych kodujących wysokości kolejnych pól planszy, zapisane na k·w/2 bajtach gdy k·w jest parzyste, w przeciwnym razie na (k·w+1)/2 bajtach (wtedy ostatnie 4 bity przechowują zero).
