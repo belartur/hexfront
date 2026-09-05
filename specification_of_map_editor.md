@@ -13,14 +13,17 @@ Działanie poszczególnych klawiszy:
 * cyfry - zmieniają liczbę jednostek (w zakresie 0-255) w budynku (wpisywanie jest zatwierdzanie natychmiast po wpisaniu trzeciej cyfry albo chwilę po wpisaniu pierwszej lub drugiej cyfry);
 * `o` cyklicznie zmienia własciciela budynku (brak działania jeśli na polu nie ma budynku);
 * `t` wstawia utrudnienie lub cyklicznie zmienia jego rodzaj;
-* `m` wstawia most lub cyklicznie go obraca;
-* `r` wstawia podjazd lub cyklicznie go obraca;
+* `m` wstawia most lub cyklicznie go obraca (jeśli na polu sąsiadującym jest most skierowany w stronę bieżącego pola, to wstawianemu mostowi jest nadawany ten sam kierunek);
+* `r` wstawia podjazd (o kierunku między dwoma przeciwległymi sąsiadami o różnych wysokościach, jeśli istnieją) lub cyklicznie go obraca;
 * `[` zmniejsza wysokość terenu o 1 (modulo 16);
 * `]` zwiększa wysokość terenu o 1 (modulo 16);
 * `Del` lub prawy przycisk myszy - kasuje obiekt.
 * `l` ładuje mapę z pliku (wyświetla nazwy z katalogu maps do wskazania);
-* `s` zapisuje mapę do pliku (można podać nazwę albo wybrać jedną z istniejących; nazwa wybrana dla tej mapy wyświetla się jako pierwsza i jest wyróżniona).
+* `s` zapisuje mapę do pliku (można podać nazwę albo wybrać jedną z istniejących; jeśli mapie nadano już nazwę wcześniej, to wyświetla się ona jako pierwsza i jest wyróżniona);
+* `ctrl`+`n` czyszczenie / tworzenie nowej mapy (bez żądania potwierdzenia).
 
 Wstawienie obiektu nadpisuje obiekt który znajdował się na polu wcześniej.
 
 Edytor wyświetla legendę z opisem działania klawiszy.
+
+Przy wychodzeniu edytor pyta czy zapisać zmiany (jeśli nie są już zapisane).
