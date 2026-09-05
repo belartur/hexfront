@@ -35,3 +35,5 @@ Jeśli mapa jest niezgodna z regułami gry to na ekranie wypisywane są błędy 
 Wciąż można zapisać (i potem wczytać) mapę z błędami.
 
 Widok i jego sterowanie jest taki jak w samej grze, poza kolidującymi cechami (np. bez WASD, bo koliduje klawisz `s` i bez panoramowania PPM).
+
+Nowo utworzona plansza ma wymiary 100 na 100 i w większości składa się z wody. Na jej środku jest prostokąt 20 na 13 o wysokości 1. Widok jest centrowany na ten prostokąt. Przy zapisie, puste (sama woda bez obiektów) początkowe oraz końcowe wiersze i kolumny są usuwane. Przy odczycie plansz o wymiarach poniżej 100 na 100 są one poszerzane (dopełniane do 100 na 100) o dodatkowe wiersze i kolumny (po równo na początku/końcu); widok także jest centrowany.
