@@ -16,8 +16,8 @@ neutralna baza czołgowa z zerem jednostek);
 * `t` wstawia utrudnienie lub cyklicznie zmienia jego rodzaj;
 * `m` wstawia most lub cyklicznie go obraca (jeśli na polu sąsiadującym jest most skierowany w stronę bieżącego pola, to wstawianemu mostowi jest nadawany ten sam kierunek, w przeciwnym razie obraca most tak by łaczył dwóch przeciwległych sąsiadów o tej samej wysokości, możliwe najwyższych);
 * `r` wstawia podjazd (o kierunku między dwoma przeciwległymi sąsiadami o różnych wysokościach, jeśli istnieją) lub cyklicznie go obraca;
-* `[` zmniejsza wysokość terenu o 1 (modulo 16);
-* `]` zwiększa wysokość terenu o 1 (modulo 16);
+* `[` zmniejsza wysokość terenu o 1 (nie robi nic gdy wysokość terenu wynosi 0);
+* `]` zwiększa wysokość terenu o 1 (nie robi nic gdy wysokość terenu wynosi 15);
 * `Del` lub prawy przycisk myszy - kasuje obiekt.
 * `l` ładuje mapę z pliku (wyświetla nazwy z katalogu maps do wskazania);
 * `s` zapisuje mapę do pliku (można podać nazwę albo wybrać jedną z istniejących; jeśli mapie nadano już nazwę wcześniej, to wyświetla się ona jako pierwsza i jest wyróżniona);
