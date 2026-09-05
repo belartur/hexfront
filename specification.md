@@ -25,8 +25,8 @@ Zasięgi działek są renderowane jako białe, a wież leczących jako jasnoziel
 
 Plansza rysowana jest algorytmem malarza, pole po polu, od najdalszych do najbliższych. Głębia pola uwzględnia zarówno pozycję na planszy, jak i wysokość: D = (x + y)·ISO_SIN + wysokość·ELEVATION_PX (wynika to z rzutu izometrycznego, w którym wyższy teren jest bliżej kamery). Każde pole rysowane jest w całości: najpierw ścianki (skarpy), potem wierzch, następnie zawartość — podjazd, utrudnienie i budynek (w tej kolejności). Dzięki wspólnemu kluczowi głębi ścianki są zawsze przyklejone do swojego pola: zasłaniają niższy teren znajdujący się za nimi, a są zasłaniane przez pola przed nimi; wyższy teren z tła pozostaje widoczny nad niższym terenem w tle pierwszym planu. Podjazd nie ma strzałek i nie zajmuje całego hexu — rysowany jest jako węższy pas w kolorze ziemi, biegnący przez środek pola wzdłuż osi podjazdu od krawędzi pola a do krawędzi pola b (na bokach pola p pozostaje zwykły teren). Górna powierzchnia pasa jest na ekranie prostokątem: jej krótsze krawędzie leżą na środkach krawędzi hexu od strony pól a i b, na wysokościach odpowiednich sąsiadów, więc nachylenie pasa jest proporcjonalne do różnicy wysokości łączonych pól (przy równej wysokości podjazd jest płaski). Korpus podjazdu jest pełny — przestrzeń pod pochyloną powierzchnią do poziomu podstawy wypełnia ciemniejsza ziemia, nie widać pod nim pustki. Na końcu rysowane są pomosty mostów, unoszące się ponad całym terenem. Pojazdy rysowane są w osobnym przejściu, po całym terenie. Liczba jednostek (kółko z liczbą) nad budynkami i pojazdami rysowana jest w osobnym, ostatnim przejściu — ponad wszystkim innym, nigdy zasłonięta przez teren ani obiekty.
 
-Po uruchomieniu gry wyświetla się menu, z poziomami: każdy poziom ma swoją wyświetlaną nazwę.
-Po wybraniu poziomu ładuje się on, pokazując mapę.
+Po uruchomieniu gry wyświetla się menu, z poziomami: każdy poziom ma swoją wyświetlaną nazwę (równą nazwie pliku z planszą w katalogu maps).
+Po wybraniu poziomu ładuje się on i gra się zaczyna.
 
 
 ## Sterowanie
@@ -53,6 +53,16 @@ Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są z
 
 FPS = 1/60
 
-### Generowanie planszy
-Jest jedna przykładowa plansza generowana z kodu.
-W przyszłości plansze będą projektowane w PyTMX (na razie jednak nie jest to obsługiwane i PyTMX nie jest wymagany).
+### Plansze i edytor plansz
+Edytor plansz jest osobną aplikacją. W miarę możliwości powinien dzielić kod rysujący plansze z grą.
+Plansze zapisywane są w katalogu maps, każda w osobnym pliku.
+
+### Format pliku planszy
+Plik planszy jest binarny. Znajdują się w nim, kolejno, następujące informacje:
+* Wymiary planszy (4 bajty): liczba kolumn k (2 bajty) i wierszy w (2 bajty).
+* k·w liczb 4 bitowych kodujących wysokości kolejnych pól planszy, zapisane na k·w/2 bajtach gdy k·w jest parzyste, w przeciwnym razie na (k·w+1)/2 bajtach (wtedy ostatnie 4 bity przechowują zero).
+* Obiekty znajdujące się na planszy. Liczba użytych bajtów zależy od typu obiektu. Pierwsze 4 bajty kodują położenie obiektu (2 bajty kolumnę i 2 bajty wiersz). Piąty bajt koduje typ obiektu, zaś kolejne (w razie potrzeby, czyli tylko w przypadku budynków) jego własności:
+  * Liczby z zakresu 0-19 kodują budynek wraz z jego rodzajem (część zakresu jest nieużywana). Wtedy kolejne 2 bajty kodują kolejno: numer właściciela budynku (0 - neutralny, 1 - niebieski, 2 - czerwony, 3 - zielony, 4 - żółty) i początkową liczbę jednostek w budynku.
+  * Liczby z zakresu 20-22 kodują most wraz z kierunkiem jego obrotu.
+  * Liczby z zakresu 23-25 kodują podjazd wraz z kierunkiem jego obrotu.
+  * Liczby od 26 w górę kodują utrudnienia (wraz z rodzajem).
