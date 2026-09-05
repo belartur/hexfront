@@ -19,7 +19,8 @@ Działanie poszczególnych klawiszy:
 * `]` zwiększa wysokość terenu o 1 (nie robi nic gdy wysokość terenu wynosi 15);
 * `Del` lub prawy przycisk myszy - kasuje obiekt.
 * `l` ładuje mapę z pliku (wyświetla nazwy z katalogu maps do wskazania);
-* `s` zapisuje mapę do pliku (można podać nazwę albo wybrać jedną z istniejących; jeśli mapie nadano już nazwę wcześniej, to wyświetla się ona jako pierwsza i jest wyróżniona);
+* `s` zapisuje mapę do pliku (można wpisać nazwę albo wybrać jedną z istniejących; jeśli mapie nadano już nazwę wcześniej, to wyświetla się ona jako pierwsza i jest wyróżniona);
+* `ctrl`+`s` zapisuje mapę pod wcześniej wybraną dla niej nazwą (albo działa jak `s` gdy nie wybrano jeszcze żadnej nazwy);
 * `ctrl`+`n` czyszczenie / tworzenie nowej mapy (bez żądania potwierdzenia).
 
 Wstawienie obiektu nadpisuje obiekt który znajdował się na polu wcześniej.
