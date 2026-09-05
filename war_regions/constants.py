@@ -223,6 +223,23 @@ MAP_EXTENSION = ".map"
 MAP_DEFAULT_AI_DIFFICULTY = "normal"
 
 # --------------------------------------------------------------------------
+# Board editor (specification_of_map_editor.md)
+# --------------------------------------------------------------------------
+#: Seconds after which an unfinished 1- or 2-digit units entry commits in
+#: the editor.  The editor spec says "chwile po wpisaniu pierwszej lub
+#: drugiej cyfry" without defining the delay; tweak freely.
+EDITOR_DIGIT_COMMIT_DELAY = 1.0
+
+#: Dimensions (cols, rows) of a brand-new editor board.  ctrl+n clears
+#: the current board keeping its dimensions; this size is used only by a
+#: fresh editor (the editor spec defines no way of setting dimensions).
+EDITOR_DEFAULT_SIZE = (20, 13)
+
+#: Owner of a newly placed building (the editor spec does not define it;
+#: neutral is the safest default - `o` cycles owners afterwards).
+EDITOR_DEFAULT_OWNER = None
+
+# --------------------------------------------------------------------------
 # AI difficulty (rules.md sec. 13.5, 13.8)
 # --------------------------------------------------------------------------
 from dataclasses import dataclass

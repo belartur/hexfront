@@ -14,6 +14,7 @@ import pygame                                                    # noqa: E402
 from war_regions import mapfile                                  # noqa: E402
 from war_regions.board import Board, Obstacle                    # noqa: E402
 from war_regions.constants import VehicleKind                    # noqa: E402
+from war_regions.constants import EDITOR_DIGIT_COMMIT_DELAY      # noqa: E402
 from war_regions.entities import Building, BuildingKind          # noqa: E402
 
 
@@ -119,79 +120,113 @@ def test_list_maps_and_seed():
         mapfile.level_seed("other/dir/x.map")
 
 
-def test_editor_tools():
-    """Editor tools build a rules-conforming board and save/load it."""
-    from editor import (Editor, EditorScene, TOOL_BRIDGE, TOOL_BUILDING,
-                        TOOL_ERASE, TOOL_RAMP, TOOL_RAISE)
+def test_editor_actions():
+    """Editor key actions build a board and save/load it (editor spec)."""
+    from editor import Editor, EditorScene
 
     ed = Editor()
     ed.scene = EditorScene(Board(10, 8), [])
     for t in ed.scene.board.tiles.values():
         t.height = 1
+    board = ed.scene.board
 
-    # terrain tool (and protected occupied tiles)
-    ed.tool, ed.scene.board.tiles[(2, 2)].height = TOOL_RAISE, 0
-    ed._apply_tool((2, 2))
-    assert ed.scene.board.height((2, 2)) == 1
+    # b: place a building, again: cycle the kind
+    ed._action_building((2, 2))
+    b = ed._building_at((2, 2))
+    assert b.kind == BuildingKind.BASE_TANK
+    assert b.owner is None and b.units == 0.0
+    ed._action_building((2, 2))
+    assert ed._building_at((2, 2)).kind == BuildingKind.BASE_HELICOPTER
 
-    # buildings only on land
-    ed.tool = TOOL_BUILDING
-    ed.scene.board.tiles[(1, 1)].height = 0
-    ed._apply_tool((1, 1))
-    assert not ed.scene.buildings
-    ed._apply_tool((2, 1))
-    assert len(ed.scene.buildings) == 1
+    # o: cycle the owner (no action without a building)
+    ed._action_owner((2, 2))
+    assert ed._building_at((2, 2)).owner == 0     # neutral -> blue
+    ed._action_owner((1, 1))
+    assert ed._building_at((1, 1)) is None
 
-    # ramp requires both opposite neighbours on the board
-    ed.tool = TOOL_RAMP
-    ed._apply_tool((0, 0))          # axis-0 neighbour lies off the board
-    assert ed.scene.board.tiles[(0, 0)].ramp is None
-    ed.scene.board.tiles[(4, 4)].height = 3
-    ed.scene.board.tiles[(6, 5)].height = 3
-    ed._apply_tool((5, 4))
-    assert ed.scene.board.tiles[(5, 4)].ramp is not None
-    assert ed.scene.board.height((5, 4)) == 3
+    # digits: three digits commit immediately; short entries need a delay
+    ed._action_digit((2, 2), "1")
+    ed._action_digit((2, 2), "2")
+    assert ed._building_at((2, 2)).units == 0.0   # not committed yet
+    ed._action_digit((2, 2), "3")
+    assert ed._building_at((2, 2)).units == 123.0
+    ed._action_digit((2, 2), "2")
+    ed._digit_tick(EDITOR_DIGIT_COMMIT_DELAY)
+    assert ed._building_at((2, 2)).units == 2.0
+    ed._action_digit((2, 2), "9")
+    ed._action_digit((2, 2), "9")
+    ed._action_digit((2, 2), "9")
+    assert ed._building_at((2, 2)).units == 255.0  # clamped to 0-255
 
-    # bridge: fragment between equal high ends forms a real bridge
-    # (odd column axis 0: the opposite neighbours of (3, 6) are
-    # (2, 6) and (4, 7))
-    ed.tool = TOOL_BRIDGE
-    ed.scene.board.tiles[(2, 6)].height = 3
-    ed.scene.board.tiles[(4, 7)].height = 3
-    ed.scene.board.tiles[(3, 6)].height = 0
-    ed._apply_tool((3, 6))
-    assert ed.scene.board.tiles[(3, 6)].bridge is not None
+    # t: place an obstacle, again: cycle the kind; overwrites the building
+    ed._action_obstacle((3, 3))
+    assert board.tiles[(3, 3)].obstacle.kind == Obstacle.WALL
+    ed._action_obstacle((3, 3))
+    assert board.tiles[(3, 3)].obstacle.kind == Obstacle.MINE
+    ed._action_obstacle((2, 2))
+    assert ed._building_at((2, 2)) is None
+    assert board.tiles[(2, 2)].obstacle.kind == Obstacle.WALL
 
-    # invalid bridge fragment (low ends) is rejected
-    ed._apply_tool((8, 6))
-    assert ed.scene.board.tiles[(8, 6)].bridge is None
+    # r: a new ramp prefers the axis with differing opposite neighbours
+    board.tiles[(4, 4)].height = 3                # (5, 4): dir0 -> (6, 5)
+    ed._action_ramp((5, 4))
+    ramp = board.tiles[(5, 4)].ramp
+    assert ramp is not None and set(ramp) == {(6, 5), (4, 4)}
+    assert board.height((5, 4)) == 1              # min of the ends (sec. 7)
+    ed._action_ramp((5, 4))                       # again: rotate
+    assert board.tiles[(5, 4)].ramp is not None \
+        and set(board.tiles[(5, 4)].ramp) != {(6, 5), (4, 4)}
 
-    # erase removes buildings (and bridge fragments)
-    ed.tool = TOOL_ERASE
-    ed._apply_tool((2, 1))
-    assert not ed.scene.buildings
+    # m: place a bridge fragment, again: rotate
+    board.tiles[(2, 6)].height = 3                # (3, 6) odd col, axis 0:
+    board.tiles[(4, 7)].height = 3                # (2, 6) and (4, 7)
+    board.tiles[(3, 6)].height = 0
+    ed._action_bridge((3, 6))
+    assert board.tiles[(3, 6)].bridge.direction == 0
+    ed._action_bridge((3, 6))
+    assert board.tiles[(3, 6)].bridge.direction == 1
+    # a neighbouring bridge directed at the tile imposes its axis
+    ed._action_bridge((3, 7))                     # (3, 6) axis 1 -> (3, 7)
+    assert board.tiles[(3, 7)].bridge.direction == 1
+    ed._action_bridge((3, 6))
+    assert board.tiles[(3, 6)].bridge.direction == 2
 
-    # save + load round trip through the editor itself
-    ed.tool = TOOL_BUILDING
-    ed._apply_tool((1, 5))              # one building for the round trip
+    # [ / ]: terrain changes wrap modulo 16
+    ed._change_height((0, 0), -1)                 # 1 -> 0 (water)
+    ed._change_height((0, 0), -1)                 # 0 -> 15 (modulo 16)
+    assert board.height((0, 0)) == 15
+    ed._change_height((0, 0), +1)
+    assert board.height((0, 0)) == 0
+
+    # Del deletes the object but not the terrain
+    ed._delete_object((3, 6))
+    assert board.tiles[(3, 6)].bridge is None
+    assert board.tiles[(3, 7)].bridge is not None  # remaining fragment
+
+    # dirty tracking, save and load round trip, ctrl+n
+    assert ed.dirty
     cwd = os.getcwd()
     try:
         os.chdir(tempfile.mkdtemp())
         ed._save("editor_test")
-        assert os.path.isfile("maps/editor_test.map")
+        assert not ed.dirty and ed.map_name == "editor_test"
         ed2 = Editor()
         ed2._load("editor_test")
-        assert ed2.scene.board.cols == 10
-        assert ed2.scene.board.rows == 8
-        assert len(ed2.scene.buildings) == 1
-        assert ed2.bridge_marks
+        assert not ed2.dirty and ed2.map_name == "editor_test"
+        assert ed2.scene.board.cols == 10 and ed2.scene.board.rows == 8
+        assert ed2._building_at((2, 2)) is None    # obstacle overwrote it
+        assert ed2.scene.board.tiles[(2, 2)].obstacle is not None
+        assert ed2.scene.board.tiles[(3, 7)].bridge is not None
+        ed2._new_map()                             # ctrl+n clears, no prompt
+        assert not ed2.scene.buildings
+        assert not ed2.map_name and not ed2.dirty
     finally:
         os.chdir(cwd)
     pygame.quit()
 
 
 TESTS = [test_round_trip, test_load_game, test_list_maps_and_seed,
-         test_editor_tools]
+         test_editor_actions]
 
 if __name__ == "__main__":
     failures = 0

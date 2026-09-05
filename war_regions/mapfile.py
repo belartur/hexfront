@@ -27,7 +27,7 @@ import zlib
 
 from . import hexgrid
 from . import constants as C
-from .board import Board, Obstacle
+from .board import Board, Bridge, Obstacle
 from .entities import Building, BuildingKind, Player
 from .game import Game
 
@@ -131,11 +131,13 @@ def _ramp_axis(tile: tuple, ramp: tuple):
 # ----------------------------------------------------------------------
 # Loading
 # ----------------------------------------------------------------------
-def load_board(path: str):
+def load_board(path: str, validate: bool = True):
     """Read a map file; returns ``(board, buildings)``.
 
     Structural corruption raises :class:`ValueError`; objects that violate
     the placement rules of rules.md sec. 1 are skipped with a warning.
+    With ``validate=False`` (used by the board editor) bridge fragments
+    are kept and previewed even when their geometry violates sec. 8.
     """
     with open(path, "rb") as f:
         data = f.read()
@@ -198,7 +200,7 @@ def load_board(path: str):
             else:
                 _warn(path, f"obstacle {kind} not allowed at {tile}")
 
-    rebuild_bridges(board, frag_marks)
+    rebuild_bridges(board, frag_marks, validate)
     return board, buildings
 
 
@@ -231,7 +233,8 @@ def list_maps(directory: str = None) -> list:
             if name.endswith(C.MAP_EXTENSION)]
 
 
-def rebuild_bridges(board: Board, frag_marks: dict) -> None:
+def rebuild_bridges(board: Board, frag_marks: dict,
+                    validate: bool = True) -> None:
     """(Re)build whole bridges from per-tile fragment marks.
 
     ``frag_marks`` maps a deck tile to the geometric axis 0-2 of its
@@ -239,6 +242,10 @@ def rebuild_bridges(board: Board, frag_marks: dict) -> None:
     :class:`~war_regions.board.Bridge` via :meth:`Board.add_bridge`,
     which validates the geometry of rules.md sec. 8 (equal end heights
     >= 3, fragments low enough); invalid runs are silently dropped.
+
+    With ``validate=False`` (the board editor's preview mode) geometry-
+    invalid runs still get a bridge object, rendered at the highest
+    involved terrain elevation; the game keeps validating on load.
     """
     board.bridges.clear()
     for t in board.tiles:
@@ -260,8 +267,15 @@ def rebuild_bridges(board: Board, frag_marks: dict) -> None:
         for f in run:
             del remaining[f]
         a = hexgrid.neighbor(start[0], start[1], back)
-        if board.contains(a) and board.contains(cur):
-            board.add_bridge(a, cur, axis)
+        bridge = board.add_bridge(a, cur, axis) \
+            if board.contains(a) and board.contains(cur) else None
+        if bridge is None and not validate:
+            w = max([board.height(a), board.height(cur)]
+                    + [board.height(f) for f in run])
+            bridge = Bridge(a, cur, w, axis, run)
+            for f in run:
+                board.tiles[f].bridge = bridge
+            board.bridges.append(bridge)
 
 
 def _obstacle_allowed(board: Board, buildings: list, tile: tuple,

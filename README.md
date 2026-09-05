@@ -42,9 +42,12 @@ is specified in `specification.md` ("Format pliku planszy") and implemented
 in `war_regions/mapfile.py`.
 
 The board editor is a separate application sharing the game's board
-renderer.  It offers terrain raise/lower, building, ramp, bridge and
-obstacle tools (with the placement rules of rules.md sec. 1, 7, 8
-enforced), saves to and loads from `maps/`:
+renderer and tile picking.  Editing is key-driven: point a tile with the
+mouse and press a key — `b` building (again: cycle kind), digits units,
+`o` owner, `t` obstacle, `m` bridge, `r` ramp, `[`/`]` terrain -/+,
+`Del`/RMB delete, `l` load, `s` save, ctrl+N new (placing overwrites the
+previous object; a legend is shown on screen; the editor asks about
+unsaved changes on exit; see `specification_of_map_editor.md`):
 
 ```bash
 python3 editor.py                # empty 20x13 board

@@ -218,21 +218,14 @@ class Application:
         return self.game.board.find_path(src_tile, dst_tile, kind)
 
     def _pick_tile(self, pos):
-        """Tile under the cursor, refined against terrain elevation."""
+        """Tile under the cursor, refined against terrain elevation.
+
+        Delegates to the shared :meth:`Board.pick_tile`, so the game and
+        the editor point at tiles with exactly the same code.
+        """
         if self.game is None or self.camera is None:
             return None
-        wx, wy = self.camera.screen_to_world(*pos)
-        tile = self.game.board.world_to_tile(wx, wy)
-        for _ in range(3):
-            if tile is None:
-                break
-            wz = self.game.board.height(tile) * C.ELEVATION_PX
-            wx, wy = self.camera.screen_to_world(pos[0], pos[1], wz)
-            refined = self.game.board.world_to_tile(wx, wy)
-            if refined == tile:
-                break
-            tile = refined
-        return tile
+        return self.game.board.pick_tile(self.camera, pos)
 
     def _start_map(self, map_path: str) -> None:
         """Load a map file and show it (loading state, spec).

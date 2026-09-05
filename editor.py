@@ -1,25 +1,39 @@
 #!/usr/bin/env python3
-"""Board editor of *War Regions* (a separate application, specification:
-"Planszy i edytor plansz").  Run with ``python3 editor.py [map file]``.
+"""Board editor of *War Regions* (a separate application; specification:
+``specification_of_map_editor.md``).  Run with ``python3 editor.py [map]``.
 
-The editor draws boards with the same renderer code as the game
-(:meth:`war_regions.render.Renderer.draw_editor`) and saves them in the
-binary map format described in the specification ("Format pliku planszy").
+Editing model: point a tile with the mouse (picked by exactly the same
+code as in the game) and press a key that modifies the tile or the object
+standing on it.  Placing an object overwrites the object previously on
+the tile; a legend is displayed on screen; on exit the editor asks
+whether to save unsaved changes.
 
-Controls
---------
-LMB              apply the selected tool (paint while dragging)
-RMB drag         pan the view
-wheel / + / -    zoom
-WASD / arrows    pan the view
-1..0, i          select a tool (the palette in the top-left corner)
-TAB              next building kind            O  cycle building owner
-[ / ]            change starting units         R  cycle ramp/bridge axis
-N                new board (type the size as COLSxROWS, e.g. 24x15)
-Ctrl+S           save to maps/<name>.map       Ctrl+L / Ctrl+O  load
-Esc              cancel text input / quit
+Keys
+----
+``b``           place a building / cycle the kind of the existing one
+digits          type the unit count of the building (0-255); committed
+                immediately after the third digit, or shortly after the
+                first or second one
+``o``           cycle the building owner (needs a building on the tile)
+``t``           place an obstacle / cycle its kind
+``m``           place a bridge fragment / rotate it (a bridge on a
+                neighbouring tile directed at this tile imposes its axis)
+``r``           place a ramp / rotate it (prefers the axis whose opposite
+                neighbours differ in height, when one exists)
+``[`` / ``]``   lower / raise the terrain by 1 (modulo 16)
+``Del`` / RMB   delete the object on the tile
+``l``           load a map (pick a name from the maps directory)
+``s``           save the map (type a name or pick an existing one; the
+                current name, if any, is listed first and highlighted)
+ctrl+n          clear / start a new map (no confirmation)
+
+View (the editor spec does not describe it; mirrors the game): LMB drag,
+arrow keys and screen-edge hover pan, wheel and ``+``/``-`` zoom
+(0.5x-2x).  There is no WASD panning because ``s`` saves the map, and no
+RMB panning because RMB deletes objects.
 """
 
+import math
 import os
 import sys
 
@@ -33,48 +47,32 @@ from war_regions.camera import Camera
 from war_regions.entities import Building, BuildingKind
 from war_regions.render import Renderer
 
-# ----------------------------------------------------------------------
-# Tools
-# ----------------------------------------------------------------------
-TOOL_RAISE = "raise"        # raise the terrain by 1 (up to 15)
-TOOL_LOWER = "lower"        # lower the terrain by 1 (down to 0 = water)
-TOOL_BUILDING = "building"  # place the currently configured building
-TOOL_ERASE = "erase"        # remove everything from a tile
-TOOL_RAMP = "ramp"          # ramp along the current axis (rules sec. 7)
-TOOL_BRIDGE = "bridge"      # bridge deck fragment (rules sec. 8)
-TOOL_WALL = "wall"          # obstacles (rules sec. 1, 4):
-TOOL_MINE = "mine"
-TOOL_MINE_WATER = "mine_water"
-TOOL_TRAP_FIRE = "trap_fire"
-TOOL_TRAP_ICE = "trap_ice"
-
-#: Palette entries: (hotkey, label, tool).
-TOOLS = [
-    ("1", "terrain +", TOOL_RAISE),
-    ("2", "terrain -", TOOL_LOWER),
-    ("3", "building", TOOL_BUILDING),
-    ("4", "erase", TOOL_ERASE),
-    ("5", "ramp", TOOL_RAMP),
-    ("6", "bridge", TOOL_BRIDGE),
-    ("7", "wall", TOOL_WALL),
-    ("8", "mine", TOOL_MINE),
-    ("9", "water mine", TOOL_MINE_WATER),
-    ("0", "fire trap", TOOL_TRAP_FIRE),
-    ("i", "ice trap", TOOL_TRAP_ICE),
-]
-
-#: Hotkey -> tool lookup.
-KEY_TOOLS = {key: tool for key, _label, tool in TOOLS}
-
-#: Building kinds placed by the building tool, in TAB-cycling order.
+#: Building kinds behind the ``b`` key, in cycling order.
 BUILDING_ORDER = list(BuildingKind)
 
-#: Owner choices of the building tool: None = neutral, then player ids
-#: (0 = blue/human, 1 = red, 2 = green, 3 = yellow; specification owner
-#: bytes are id + 1).
+#: Building owners behind the ``o`` key, in cycling order: None = neutral,
+#: then player ids (0 = blue/human, 1 = red, 2 = green, 3 = yellow).
 OWNER_ORDER = [None, 0, 1, 2, 3]
 OWNER_LABELS = {None: "neutral", 0: "blue", 1: "red", 2: "green",
                 3: "yellow"}
+
+#: Obstacle kinds behind the ``t`` key, in cycling order.
+OBSTACLE_ORDER = [Obstacle.WALL, Obstacle.MINE, Obstacle.MINE_WATER,
+                  Obstacle.TRAP_FIRE, Obstacle.TRAP_ICE]
+
+#: Digit keys accepted by the units entry (main row and keypad).
+DIGIT_KEYS = {getattr(pygame, f"K_{i}"): str(i) for i in range(10)}
+DIGIT_KEYS.update({getattr(pygame, f"K_KP{i}"): str(i) for i in range(10)})
+
+#: Legend lines displayed on screen (editor spec: "wyswietla legende").
+LEGEND = [
+    "b: building (again: cycle kind)    digits: units 0-255",
+    "o: cycle owner                     t: obstacle (again: cycle kind)",
+    "m: bridge (again: rotate)          r: ramp (again: rotate)",
+    "[ / ]: terrain -1 / +1 (mod 16)    Del / RMB: delete object",
+    "l: load   s: save   Ctrl+N: new    Esc: quit",
+    "LMB drag / arrows / screen edge: pan   wheel / + / -: zoom",
+]
 
 
 class EditorScene:
@@ -91,7 +89,7 @@ class EditorScene:
 
 
 class Editor:
-    """Owns the editor window, the edited board and all tool state."""
+    """Owns the editor window, the edited board and the key actions."""
 
     def __init__(self, size=(1180, 720)):
         pygame.init()
@@ -101,48 +99,47 @@ class Editor:
         self.renderer = Renderer(self.screen)
         self.camera = Camera(self.screen.get_size())
         self.scene = None
-        self.bridge_marks = {}       # tile -> axis 0-2 (deck fragments)
-        self._new_board(20, 13)
-        self.tool = TOOL_RAISE
-        self.building_index = 0      # index into BUILDING_ORDER
-        self.owner_index = 1         # index into OWNER_ORDER
-        self.units = 20              # starting units of placed buildings
-        self.axis = 0                # ramp/bridge axis 0-2
+        self.running = True
+        self.map_name = None         # current file name (without .map)
+        self.dirty = False           # unsaved changes since last save
+        self._new_board(*C.EDITOR_DEFAULT_SIZE)
         self.status = ""             # last status message
         self.status_timer = 0.0
-        self.palette_rects = []      # [(rect, tool), ...]
-        self.input_mode = None       # None | "save" | "load" | "new"
-        self.input_text = ""
-        self.painting = False
-        self.panning = False
-        self._last_painted = None
+        self.overlay = None          # None | "load" | "save" | "exit"
+        self.overlay_index = 0       # highlighted row of the overlay list
+        self.overlay_items = []      # names listed by load/save overlays
+        self.input_text = ""         # name typed in the save overlay
+        self._exit_after_save = False
+        self._digit_tile = None      # tile the pending digits apply to
+        self._digit_text = ""
+        self._digit_timer = 0.0
+        self._last_axis = 0          # fallback ramp/bridge axis
+        self._down_pos = None        # LMB press position (drag panning)
+        self._dragging = False
         self.mouse_pos = (0, 0)
 
     # ------------------------------------------------------------------
     def run(self) -> None:
-        """Main loop; exits when the window is closed."""
-        while True:
+        """Main loop; exits after the save-changes prompt is answered."""
+        while self.running:
             dt = min(self.clock.tick(C.FPS) / 1000.0, 0.1)
-            if not self._handle_events():
-                break
+            self._handle_events()
             self._update(dt)
             self._draw()
             pygame.display.flip()
         pygame.quit()
 
     # ------------------------------------------------------------------
-    # Board mutations
+    # Small helpers
     # ------------------------------------------------------------------
-    def _new_board(self, cols: int, rows: int) -> None:
-        """Replace the edited board with an empty cols x rows one."""
-        cols, rows = max(2, cols), max(2, rows)
-        board = Board(cols, rows)
-        for t in board.tiles.values():
-            t.height = 1
-        self.scene = EditorScene(board, [])
-        self.bridge_marks = {}
-        mid = (cols // 2, rows // 2)
-        self.camera.center_on_world(*board.center_world(mid))
+    def _say(self, message: str) -> None:
+        """Show a status message for a few seconds."""
+        self.status = message
+        self.status_timer = 4.0
+
+    def _mark_dirty(self) -> None:
+        """Flag the board as modified (drives the exit save prompt)."""
+        self.dirty = True
 
     def _building_at(self, tile: tuple):
         """Building standing on ``tile`` or ``None``."""
@@ -151,140 +148,279 @@ class Editor:
                 return b
         return None
 
-    def _tile_free(self, tile: tuple) -> bool:
-        """True when nothing stands on ``tile``."""
-        t = self.scene.board.tiles[tile]
-        return (t.obstacle is None and t.ramp is None and t.bridge is None
-                and self._building_at(tile) is None)
+    def _hover_tile(self):
+        """Tile under the cursor, picked exactly like in the game."""
+        return self.scene.board.pick_tile(self.camera, self.mouse_pos)
 
-    def _say(self, message: str) -> None:
-        """Show a status message for a few seconds."""
-        self.status = message
-        self.status_timer = 4.0
+    def _clear_digit_buffer(self) -> None:
+        """Drop a pending units entry (used by every other action)."""
+        self._digit_tile = None
+        self._digit_text = ""
+        self._digit_timer = 0.0
 
-    def _apply_tool(self, tile: tuple) -> None:
-        """Apply the current tool to ``tile`` (rules-constrained)."""
-        if not self.scene.board.contains(tile):
-            return
-        if self.tool == TOOL_RAISE:
-            self._change_height(tile, +1)
-        elif self.tool == TOOL_LOWER:
-            self._change_height(tile, -1)
-        elif self.tool == TOOL_BUILDING:
-            self._place_building(tile)
-        elif self.tool == TOOL_ERASE:
-            self._erase(tile)
-        elif self.tool == TOOL_RAMP:
-            self._place_ramp(tile)
-        elif self.tool == TOOL_BRIDGE:
-            self._place_bridge_fragment(tile)
-        else:
-            self._place_obstacle(tile)
+    def _bridge_marks(self) -> dict:
+        """Per-tile bridge fragment axes of the current board."""
+        return {tile: t.bridge.direction % 3
+                for tile, t in self.scene.board.tiles.items()
+                if t.bridge is not None}
 
-    def _change_height(self, tile: tuple, delta: int) -> None:
-        """Raise/lower terrain; tiles with objects are protected."""
-        t = self.scene.board.tiles[tile]
-        if not self._tile_free(tile):
-            self._say("tile occupied - erase it first")
-            return
-        new = max(0, min(15, t.height + delta))
-        if new != t.height:
-            t.height = new
+    def _rebuild_bridges(self) -> None:
+        """Re-derive the board's bridges from its deck fragments.
 
-    def _place_building(self, tile: tuple) -> None:
-        """Place the configured building on a free land tile (sec. 1)."""
-        if not self._tile_free(tile):
-            self._say("tile occupied - erase it first")
-            return
-        if self.scene.board.height(tile) == 0:
-            self._say("buildings need land (height > 0)")
-            return
-        kind = BUILDING_ORDER[self.building_index]
-        owner = OWNER_ORDER[self.owner_index]
-        self.scene.buildings.append(
-            Building(kind, owner, tile[0], tile[1], units=float(self.units)))
+        Uses the editor's preview mode: fragment runs that violate the
+        bridge geometry of rules.md sec. 8 are still rendered (the game
+        validates them when loading the saved file).
+        """
+        mapfile.rebuild_bridges(self.scene.board, self._bridge_marks(),
+                                validate=False)
 
-    def _place_ramp(self, tile: tuple) -> None:
-        """Ramp joining the two opposite neighbours along the axis."""
-        if not self._tile_free(tile):
-            self._say("tile occupied - erase it first")
-            return
-        board = self.scene.board
-        a = hexgrid.neighbor(tile[0], tile[1], self.axis)
-        b = hexgrid.neighbor(tile[0], tile[1], self.axis + 3)
-        if not (board.contains(a) and board.contains(b)):
-            self._say("both opposite neighbours must lie on the board")
-            return
-        board.set_ramp(tile, a, b)   # height becomes min(a, b), sec. 7
+    def _clear_objects(self, tile: tuple) -> None:
+        """Remove every object from ``tile``.
 
-    def _place_bridge_fragment(self, tile: tuple) -> None:
-        """Add a deck fragment and (re)form the whole bridge (sec. 8)."""
-        if not self._tile_free(tile):
-            self._say("tile occupied - erase it first")
-            return
-        self.bridge_marks[tile] = self.axis
-        mapfile.rebuild_bridges(self.scene.board, self.bridge_marks)
-        bridge = self.scene.board.tiles[tile].bridge
-        if bridge is None:
-            del self.bridge_marks[tile]
-            self._say("invalid bridge - the ends must be equal land of "
-                      "height >= 3 with low ground between")
-        else:
-            self.bridge_marks[tile] = bridge.direction % 3
-
-    def _place_obstacle(self, tile: tuple) -> None:
-        """Place an obstacle honouring the placement rules (sec. 1)."""
-        if not self._tile_free(tile):
-            self._say("tile occupied - erase it first")
-            return
-        t = self.scene.board.tiles[tile]
-        if self.tool == TOOL_MINE_WATER:
-            if t.height != 0:
-                self._say("water mines go on water (height 0)")
-                return
-        elif t.height == 0:
-            self._say("this obstacle needs land (height > 0)")
-            return
-        t.obstacle = Obstacle(self.tool)
-
-    def _erase(self, tile: tuple) -> None:
-        """Remove the building, obstacle, ramp or bridge fragment."""
-        board = self.scene.board
+        The editor spec says "wstawienie obiektu nadpisuje obiekt ktory
+        znajdowal sie na polu wczesniej", so every placing action starts
+        by clearing the tile.
+        """
         building = self._building_at(tile)
         if building is not None:
             self.scene.buildings.remove(building)
-        board.tiles[tile].obstacle = None
-        board.tiles[tile].ramp = None
-        if tile in self.bridge_marks:
-            del self.bridge_marks[tile]
-            mapfile.rebuild_bridges(board, self.bridge_marks)
+        t = self.scene.board.tiles[tile]
+        t.obstacle = None
+        t.ramp = None
+        t.bridge = None
+        self._rebuild_bridges()
 
     # ------------------------------------------------------------------
-    # Files
+    # Key actions (specification_of_map_editor.md)
     # ------------------------------------------------------------------
+    def _action_building(self, tile: tuple) -> None:
+        """``b``: place a building or cycle the kind of the existing one."""
+        self._clear_digit_buffer()
+        building = self._building_at(tile)
+        if building is not None:
+            building.kind = BUILDING_ORDER[
+                (BUILDING_ORDER.index(building.kind) + 1)
+                % len(BUILDING_ORDER)]
+        else:
+            self._clear_objects(tile)
+            self.scene.buildings.append(Building(
+                BUILDING_ORDER[0], C.EDITOR_DEFAULT_OWNER,
+                tile[0], tile[1], units=0.0))
+        self._mark_dirty()
+
+    def _action_owner(self, tile: tuple) -> None:
+        """``o``: cycle the owner of the building on ``tile``."""
+        self._clear_digit_buffer()
+        building = self._building_at(tile)
+        if building is None:
+            self._say("no building on the tile")
+            return
+        building.owner = OWNER_ORDER[
+            (OWNER_ORDER.index(building.owner) + 1) % len(OWNER_ORDER)]
+        self._mark_dirty()
+
+    def _action_digit(self, tile: tuple, digit: str) -> None:
+        """Digits: type the unit count of the building on ``tile``.
+
+        Three digits commit immediately; shorter entries commit after
+        ``EDITOR_DIGIT_COMMIT_DELAY`` seconds.
+        """
+        if self._digit_tile != tile:
+            self._digit_tile, self._digit_text = tile, ""
+        self._digit_text += digit
+        self._digit_timer = 0.0
+        if len(self._digit_text) >= 3:
+            self._commit_digits()
+        else:
+            self._say(f"units: {self._digit_text}")
+
+    def _digit_tick(self, dt: float) -> None:
+        """Commit a pending 1- or 2-digit entry after the delay."""
+        if not self._digit_text:
+            return
+        self._digit_timer += dt
+        if self._digit_timer >= C.EDITOR_DIGIT_COMMIT_DELAY:
+            self._commit_digits()
+
+    def _commit_digits(self) -> None:
+        """Apply the typed unit count to the building (clamped 0-255)."""
+        tile, text = self._digit_tile, self._digit_text
+        self._clear_digit_buffer()
+        if tile is None:
+            return
+        building = self._building_at(tile)
+        if building is None:
+            self._say("no building on the tile")
+            return
+        building.units = float(max(0, min(255, int(text))))
+        self._mark_dirty()
+
+    def _action_obstacle(self, tile: tuple) -> None:
+        """``t``: place an obstacle or cycle the kind of the existing one."""
+        self._clear_digit_buffer()
+        current = self.scene.board.tiles[tile].obstacle
+        if current is not None:
+            kind = OBSTACLE_ORDER[(OBSTACLE_ORDER.index(current.kind) + 1)
+                                  % len(OBSTACLE_ORDER)]
+        else:
+            kind = OBSTACLE_ORDER[0]
+        self._clear_objects(tile)
+        self.scene.board.tiles[tile].obstacle = Obstacle(kind)
+        self._mark_dirty()
+
+    def _inherited_bridge_axis(self, tile: tuple):
+        """Axis of a neighbouring bridge directed at ``tile``, or None."""
+        board = self.scene.board
+        for d in range(6):
+            n = hexgrid.neighbor(tile[0], tile[1], d)
+            if not board.contains(n):
+                continue
+            bridge = board.tiles[n].bridge
+            if bridge is None:
+                continue
+            axis = bridge.direction % 3
+            if tile in (hexgrid.neighbor(n[0], n[1], axis),
+                        hexgrid.neighbor(n[0], n[1], axis + 3)):
+                return axis
+        return None
+
+    def _action_bridge(self, tile: tuple) -> None:
+        """``m``: place a bridge fragment or rotate the existing one.
+
+        A fragment inherits the axis of a neighbouring bridge directed at
+        this tile (editor spec); otherwise the default axis 0 is used.
+        """
+        self._clear_digit_buffer()
+        existing = self.scene.board.tiles[tile].bridge
+        if existing is not None:
+            axis = (existing.direction + 1) % 3
+        else:
+            axis = self._inherited_bridge_axis(tile)
+            if axis is None:
+                axis = 0
+        self._clear_objects(tile)
+        marks = self._bridge_marks()
+        marks[tile] = axis
+        mapfile.rebuild_bridges(self.scene.board, marks, validate=False)
+        self._last_axis = axis
+        self._mark_dirty()
+
+    def _action_ramp(self, tile: tuple) -> None:
+        """``r``: place a ramp or rotate the existing one.
+
+        A new ramp prefers the axis whose opposite neighbours differ in
+        height (editor spec); when no such pair exists, the last used
+        axis is applied.  The ramp tile's height follows rules.md sec. 7
+        (min of both ends) via :meth:`Board.set_ramp`.
+        """
+        self._clear_digit_buffer()
+        board = self.scene.board
+        existing = board.tiles[tile].ramp
+        if existing is not None:
+            axis = (_ramp_axis(tile, existing) + 1) % 3
+        else:
+            axis = None
+            for d in range(3):
+                a = hexgrid.neighbor(tile[0], tile[1], d)
+                b = hexgrid.neighbor(tile[0], tile[1], d + 3)
+                if board.contains(a) and board.contains(b) \
+                        and board.height(a) != board.height(b):
+                    axis = d
+                    break
+            if axis is None:
+                axis = self._last_axis
+                self._say("no differing opposite neighbours "
+                          "- using the last axis")
+        a = hexgrid.neighbor(tile[0], tile[1], axis)
+        b = hexgrid.neighbor(tile[0], tile[1], axis + 3)
+        if not (board.contains(a) and board.contains(b)):
+            self._say("both opposite neighbours must lie on the board")
+            return
+        self._clear_objects(tile)
+        board.set_ramp(tile, a, b)
+        self._last_axis = axis
+        self._mark_dirty()
+
+    def _change_height(self, tile: tuple, delta: int) -> None:
+        """``[`` / ``]``: lower / raise the terrain by 1 (modulo 16)."""
+        self._clear_digit_buffer()
+        t = self.scene.board.tiles[tile]
+        t.height = (t.height + delta) % 16
+        if t.ramp is not None:
+            self._say("note: a ramp's height follows min(a, b) on load")
+        self._mark_dirty()
+
+    def _delete_object(self, tile: tuple) -> None:
+        """``Del`` / RMB: remove the object on ``tile`` (terrain stays)."""
+        self._clear_digit_buffer()
+        t = self.scene.board.tiles[tile]
+        building = self._building_at(tile)
+        changed = building is not None or t.obstacle is not None \
+            or t.ramp is not None or t.bridge is not None
+        if building is not None:
+            self.scene.buildings.remove(building)
+        t.obstacle = None
+        t.ramp = None
+        t.bridge = None
+        self._rebuild_bridges()
+        if changed:
+            self._mark_dirty()
+
+    def _delete_at(self, pos) -> None:
+        """RMB: delete the object under the cursor, if any."""
+        tile = self._hover_tile()
+        if tile is not None:
+            self._delete_object(tile)
+
+    # ------------------------------------------------------------------
+    # Files (``l`` / ``s`` / ctrl+n)
+    # ------------------------------------------------------------------
+    def _new_board(self, cols: int, rows: int) -> None:
+        """Replace the edited scene with an empty cols x rows board."""
+        cols, rows = max(2, cols), max(2, rows)
+        board = Board(cols, rows)
+        for t in board.tiles.values():
+            t.height = 1
+        self.scene = EditorScene(board, [])
+        self.map_name = None
+        self.dirty = False
+        mid = (cols // 2, rows // 2)
+        self.camera.center_on_world(*board.center_world(mid))
+
+    def _new_map(self) -> None:
+        """ctrl+n: clear the board keeping its dimensions (no prompt)."""
+        self._new_board(self.scene.board.cols, self.scene.board.rows)
+        self._clear_digit_buffer()
+        self._say("new map")
+
     def _save(self, name: str) -> None:
         """Save the board as ``maps/<name>.map``."""
-        path = os.path.join(C.MAPS_DIR, self._map_name(name))
+        name = self._map_name(name)
+        path = os.path.join(C.MAPS_DIR, name)
         os.makedirs(C.MAPS_DIR, exist_ok=True)
         try:
             mapfile.save_map(path, self.scene.board, self.scene.buildings)
-            self._say(f"saved {path}")
         except OSError as exc:
             self._say(f"save failed: {exc}")
+            return
+        self.map_name = os.path.splitext(name)[0]   # stem, like the lists
+        self.dirty = False
+        self._say(f"saved {path}")
 
     def _load(self, name: str) -> None:
         """Load the board from ``maps/<name>.map`` (or a full path)."""
         path = name if os.path.isfile(name) \
             else os.path.join(C.MAPS_DIR, self._map_name(name))
         try:
-            board, buildings = mapfile.load_board(path)
+            board, buildings = mapfile.load_board(path, validate=False)
         except (OSError, ValueError) as exc:
             self._say(f"load failed: {exc}")
             return
         self.scene = EditorScene(board, buildings)
-        self.bridge_marks = {
-            t: board.tiles[t].bridge.direction % 3
-            for t in board.tiles if board.tiles[t].bridge is not None}
+        self._rebuild_bridges()          # preview runs, incl. invalid ones
+        self.map_name = os.path.splitext(os.path.basename(path))[0]
+        self.dirty = False
+        self._clear_digit_buffer()
         mid = (board.cols // 2, board.rows // 2)
         self.camera.center_on_world(*board.center_world(mid))
         self._say(f"loaded {path}")
@@ -298,13 +434,23 @@ class Editor:
         return name
 
     # ------------------------------------------------------------------
+    # Exit prompt (editor spec: ask about unsaved changes)
+    # ------------------------------------------------------------------
+    def _request_exit(self) -> None:
+        """Ask whether to save unless everything is already saved."""
+        if self.dirty:
+            self.overlay = "exit"
+        else:
+            self.running = False
+
+    # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
-    def _handle_events(self) -> bool:
-        """Process one frame of events; False ends the editor."""
+    def _handle_events(self) -> None:
+        """Process one frame of events."""
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
-                return False
+                self._request_exit()
             elif ev.type == pygame.VIDEORESIZE:
                 self.screen = pygame.display.set_mode(ev.size,
                                                       pygame.RESIZABLE)
@@ -313,205 +459,325 @@ class Editor:
             elif ev.type == pygame.MOUSEWHEEL:
                 self.camera.zoom_at(
                     C.ZOOM_STEP if ev.y > 0 else 1.0 / C.ZOOM_STEP,
-                    *pygame.mouse.get_pos())
+                    *self.mouse_pos)
             elif ev.type == pygame.MOUSEBUTTONDOWN:
                 if ev.button == 1:
-                    if not self._palette_click(ev.pos):
-                        self.painting = True
-                        self._last_painted = None
-                        self._paint_at(ev.pos)
-                elif ev.button == 3:
-                    self.panning = True
-                elif ev.button in (4, 5):        # legacy wheel buttons
+                    if self.overlay is not None:
+                        self._overlay_click(ev.pos)
+                    else:
+                        self._down_pos = ev.pos
+                        self._dragging = False
+                elif ev.button == 3 and self.overlay is None:
+                    self._delete_at(ev.pos)      # RMB deletes the object
+                elif ev.button in (4, 5) and self.overlay is None:
                     self.camera.zoom_at(
                         C.ZOOM_STEP if ev.button == 4
                         else 1.0 / C.ZOOM_STEP, *ev.pos)
-            elif ev.type == pygame.MOUSEBUTTONUP:
-                if ev.button == 1:
-                    self.painting = False
-                    self._last_painted = None
-                elif ev.button == 3:
-                    self.panning = False
+            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
+                self._down_pos = None
             elif ev.type == pygame.MOUSEMOTION:
                 self.mouse_pos = ev.pos
-                if self.panning and ev.buttons[2]:
+                if (self.overlay is None and ev.buttons[0]
+                        and self._down_pos is not None
+                        and (self._dragging
+                             or math.hypot(ev.pos[0] - self._down_pos[0],
+                                           ev.pos[1] - self._down_pos[1])
+                             > C.DRAG_THRESHOLD)):
+                    self._dragging = True
                     self.camera.pan(ev.rel[0], ev.rel[1])
-                elif self.painting and ev.buttons[0]:
-                    self._paint_at(ev.pos, drag=True)
-            elif ev.type == pygame.TEXTINPUT and self.input_mode:
+            elif ev.type == pygame.TEXTINPUT and self.overlay == "save":
                 self.input_text += ev.text
             elif ev.type == pygame.KEYDOWN:
-                if not self._key(ev):
-                    return False
-        return True
+                self._key(ev)
 
-    def _paint_at(self, pos, drag: bool = False) -> None:
-        """Apply the tool to the tile under the cursor (once per drag)."""
-        if self.input_mode is not None:
-            return
-        wx, wy = self.camera.screen_to_world(*pos)
-        tile = self.scene.board.world_to_tile(wx, wy)
-        if tile is None or (drag and tile == self._last_painted):
-            return
-        self._last_painted = tile
-        self._apply_tool(tile)
-
-    def _palette_click(self, pos) -> bool:
-        """Select a palette tool under the cursor; True when hit."""
-        for rect, tool in self.palette_rects:
-            if rect.collidepoint(pos):
-                self.tool = tool
-                return True
-        return False
-
-    def _key(self, ev: pygame.event.Event) -> bool:
-        """Keyboard handling; False ends the editor."""
-        if self.input_mode is not None:
-            if ev.key == pygame.K_RETURN:
-                self._confirm_input()
+    def _key(self, ev: pygame.event.Event) -> None:
+        """Dispatch a key press depending on the overlay state."""
+        if self.overlay == "exit":
+            if ev.key == pygame.K_s:
+                self.overlay = None
+                if self.map_name is not None:
+                    self._save(self.map_name)
+                    self.running = False
+                else:
+                    self._exit_after_save = True
+                    self._open_save()
+            elif ev.key == pygame.K_n:
+                self.running = False             # discard the changes
             elif ev.key == pygame.K_ESCAPE:
-                self.input_mode = None
+                self.overlay = None              # keep editing
+            return
+
+        if self.overlay == "load":
+            if ev.key == pygame.K_RETURN:
+                self._confirm_load()
+            elif ev.key == pygame.K_ESCAPE:
+                self.overlay = None
+            elif ev.key in (pygame.K_UP, pygame.K_DOWN):
+                self._move_overlay_selection(ev.key == pygame.K_DOWN)
+            return
+
+        if self.overlay == "save":
+            if ev.key == pygame.K_RETURN:
+                self._confirm_save()
+            elif ev.key == pygame.K_ESCAPE:
+                self.overlay = None
             elif ev.key == pygame.K_BACKSPACE:
                 self.input_text = self.input_text[:-1]
-            return True
-
-        mods = pygame.key.get_mods()
-        if ev.key == pygame.K_ESCAPE:
-            return False
-        elif ev.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-            self.camera.zoom_at(C.ZOOM_STEP, *self.mouse_pos)
-        elif ev.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-            self.camera.zoom_at(1.0 / C.ZOOM_STEP, *self.mouse_pos)
-        elif ev.key == pygame.K_TAB:
-            self.building_index = (self.building_index + 1) \
-                % len(BUILDING_ORDER)
-        elif ev.key == pygame.K_o and not mods & pygame.KMOD_CTRL:
-            self.owner_index = (self.owner_index + 1) % len(OWNER_ORDER)
-        elif ev.key == pygame.K_r:
-            self.axis = (self.axis + 1) % 3
-        elif ev.key == pygame.K_LEFTBRACKET:
-            self.units = max(0, self.units - 5)
-        elif ev.key == pygame.K_RIGHTBRACKET:
-            self.units = min(255, self.units + 5)
-        elif ev.key == pygame.K_n:
-            self.input_mode, self.input_text = "new", ""
-        elif ev.key == pygame.K_s and mods & pygame.KMOD_CTRL:
-            self.input_mode, self.input_text = "save", ""
-        elif ev.key in (pygame.K_l, pygame.K_o) \
-                and mods & pygame.KMOD_CTRL:
-            self.input_mode, self.input_text = "load", ""
-        else:
-            name = pygame.key.name(ev.key)
-            if name in KEY_TOOLS:
-                self.tool = KEY_TOOLS[name]
-        return True
-
-    def _confirm_input(self) -> None:
-        """Finish a text input (save / load / new board)."""
-        mode, text = self.input_mode, self.input_text.strip()
-        self.input_mode = None
-        if not text:
+            elif ev.key in (pygame.K_UP, pygame.K_DOWN):
+                self._move_overlay_selection(ev.key == pygame.K_DOWN)
             return
-        if mode == "save":
-            self._save(text)
-        elif mode == "load":
-            self._load(text)
-        elif mode == "new":
-            try:
-                cols, rows = (int(part) for part in
-                              text.lower().split("x", 1))
-                self._new_board(cols, rows)
-                self._say(f"new {cols}x{rows} board")
-            except ValueError:
-                self._say("size must look like 24x15")
+
+        # ---- no overlay: board editing keys ----
+        mods = pygame.key.get_mods()
+        if ev.key == pygame.K_n and mods & pygame.KMOD_CTRL:
+            self._new_map()
+            return
+        if ev.key == pygame.K_ESCAPE:
+            self._request_exit()
+            return
+        if ev.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+            self.camera.zoom_at(C.ZOOM_STEP, *self.mouse_pos)
+            return
+        if ev.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+            self.camera.zoom_at(1.0 / C.ZOOM_STEP, *self.mouse_pos)
+            return
+
+        tile = self._hover_tile()
+        if ev.key == pygame.K_l:
+            self._open_load()
+        elif ev.key == pygame.K_s:
+            self._open_save()
+        elif tile is None:
+            return                               # keys below need a tile
+        elif ev.key == pygame.K_b:
+            self._action_building(tile)
+        elif ev.key == pygame.K_o:
+            self._action_owner(tile)
+        elif ev.key == pygame.K_t:
+            self._action_obstacle(tile)
+        elif ev.key == pygame.K_m:
+            self._action_bridge(tile)
+        elif ev.key == pygame.K_r:
+            self._action_ramp(tile)
+        elif ev.key == pygame.K_LEFTBRACKET:
+            self._change_height(tile, -1)
+        elif ev.key == pygame.K_RIGHTBRACKET:
+            self._change_height(tile, +1)
+        elif ev.key == pygame.K_DELETE:
+            self._delete_object(tile)
+        elif ev.key in DIGIT_KEYS:
+            self._action_digit(tile, DIGIT_KEYS[ev.key])
+
+    # ------------------------------------------------------------------
+    # Overlays (load / save / exit prompt)
+    # ------------------------------------------------------------------
+    def _open_load(self) -> None:
+        """``l``: show the map names of the maps directory."""
+        self.overlay_items = [os.path.splitext(os.path.basename(p))[0]
+                              for p in mapfile.list_maps()]
+        if not self.overlay_items:
+            self._say(f"no maps in {C.MAPS_DIR}/")
+            return
+        self.overlay, self.overlay_index = "load", 0
+
+    def _open_save(self) -> None:
+        """``s``: name entry + list of existing maps.
+
+        The current name of the map, if any, is listed first and
+        highlighted (editor spec).
+        """
+        existing = [os.path.splitext(os.path.basename(p))[0]
+                    for p in mapfile.list_maps()]
+        others = [n for n in existing if n != self.map_name]
+        self.overlay_items = ([self.map_name] if self.map_name else []) \
+            + others
+        self.overlay_index = 0 if self.map_name else -1
+        self.input_text = self.map_name or ""
+        self.overlay = "save"
+
+    def _move_overlay_selection(self, down: bool) -> None:
+        """Move the highlighted row of the overlay list (wraps around)."""
+        if not self.overlay_items:
+            return
+        self.overlay_index = ((self.overlay_index + (1 if down else -1))
+                              % len(self.overlay_items))
+        if self.overlay == "save":
+            self.input_text = self.overlay_items[self.overlay_index]
+
+    def _overlay_click(self, pos) -> None:
+        """Click inside an overlay: pick a list row (load/save overlays)."""
+        for rect, index in self._item_rects:
+            if rect.collidepoint(pos):
+                self.overlay_index = index
+                if self.overlay == "save":
+                    self.input_text = self.overlay_items[index]
+                return
+
+    def _confirm_load(self) -> None:
+        """Load the highlighted map name."""
+        if 0 <= self.overlay_index < len(self.overlay_items):
+            name = self.overlay_items[self.overlay_index]
+            self.overlay = None
+            self._load(name)
+
+    def _confirm_save(self) -> None:
+        """Save under the typed / selected name."""
+        name = self.input_text.strip()
+        if not name:
+            self._say("type a map name first")
+            return
+        self.overlay = None
+        self._save(name)
+        if self._exit_after_save:
+            self.running = False
 
     # ------------------------------------------------------------------
     # Update / draw
     # ------------------------------------------------------------------
     def _update(self, dt: float) -> None:
-        """Continuous pans and timers, with key panning like in the game."""
+        """Timers plus arrow-key and screen-edge panning (like the game)."""
+        self._digit_tick(dt)
+        if self.status_timer > 0:
+            self.status_timer -= dt
+        if self.overlay is not None:
+            return
         self.mouse_pos = pygame.mouse.get_pos()
         speed = C.PAN_SPEED * dt
         dx = dy = 0
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+        if keys[pygame.K_LEFT]:
             dx -= speed
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+        if keys[pygame.K_RIGHT]:
             dx += speed
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
+        if keys[pygame.K_UP]:
             dy -= speed
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+        if keys[pygame.K_DOWN]:
+            dy += speed
+        mx, my = self.mouse_pos
+        w, h = self.camera.screen_size
+        if mx < C.EDGE_PAN_MARGIN:
+            dx -= speed
+        if mx > w - C.EDGE_PAN_MARGIN:
+            dx += speed
+        if my < C.EDGE_PAN_MARGIN:
+            dy -= speed
+        if my > h - C.EDGE_PAN_MARGIN:
             dy += speed
         if dx or dy:
             self.camera.pan(-dx, -dy)
-        if self.status_timer > 0:
-            self.status_timer -= dt
 
     def _draw(self) -> None:
-        """One editor frame: board, palette, HUD and text input."""
-        hover = self._hover_tile()
+        """One editor frame: board, HUD, legend and an overlay if open."""
+        hover = self._hover_tile() if self.overlay is None else None
         self.renderer.draw_editor(self.scene, self.camera, hover)
-        self._draw_palette()
         self._draw_hud()
-        if self.input_mode is not None:
-            self._draw_input()
-
-    def _hover_tile(self):
-        """Tile under the cursor or ``None``."""
-        wx, wy = self.camera.screen_to_world(*self.mouse_pos)
-        return self.scene.board.world_to_tile(wx, wy)
-
-    def _draw_palette(self) -> None:
-        """Clickable tool palette in the top-left corner."""
-        self.palette_rects = []
-        f = self.renderer.font(22)
-        for i, (key, label, tool) in enumerate(TOOLS):
-            surf = f.render(f"{key}  {label}", True, C.UI_TEXT_COLOR)
-            rect = surf.get_rect(topleft=(10, 10 + i * 26)).inflate(10, 4)
-            active = tool == self.tool
-            pygame.draw.rect(self.screen,
-                             (52, 58, 78) if active else (30, 32, 40),
-                             rect, border_radius=6)
-            if active:
-                pygame.draw.rect(self.screen, (120, 140, 200), rect, 2,
-                                 border_radius=6)
-            self.screen.blit(surf, (rect.x + 5, rect.y + 2))
-            self.palette_rects.append((rect, tool))
+        self._draw_legend()
+        self._item_rects = []
+        if self.overlay == "exit":
+            self._draw_exit()
+        elif self.overlay == "load":
+            self._draw_list("load map", self.overlay_items)
+        elif self.overlay == "save":
+            self._draw_save()
 
     def _draw_hud(self) -> None:
-        """Current tool parameters and the status message."""
-        f = self.renderer.font(22)
+        """Map name (with an unsaved-changes marker) and status message."""
+        f = self.renderer.font(24)
         w, _h = self.screen.get_size()
-        kind = BUILDING_ORDER[self.building_index]
-        owner = OWNER_ORDER[self.owner_index]
-        lines = [
-            f"building: {kind.value}   owner: "
-            f"{OWNER_LABELS[owner]}   units: {self.units}",
-            f"axis (R): {self.axis}   N: new   Ctrl+S: save   "
-            f"Ctrl+L: load   Esc: quit",
-        ]
+        name = self.map_name or "(unnamed)"
+        if self.dirty:
+            name += " *"
+        surf = f.render(name, True, C.UI_TEXT_COLOR)
+        self.screen.blit(surf, (w - surf.get_width() - 10, 10))
         if self.status and self.status_timer > 0:
-            lines.append(self.status)
-        for i, line in enumerate(lines):
-            surf = f.render(line, True, C.UI_TEXT_COLOR)
-            self.screen.blit(surf, (w - surf.get_width() - 10, 10 + i * 24))
+            surf = f.render(self.status, True, (255, 230, 120))
+            self.screen.blit(surf, (w - surf.get_width() - 10, 36))
 
-    def _draw_input(self) -> None:
-        """Modal text input box (file name / board size)."""
-        f = self.renderer.font(30)
+    def _draw_legend(self) -> None:
+        """The key legend (editor spec: "wyswietla legende")."""
+        f = self.renderer.font(20)
+        _w, h = self.screen.get_size()
+        y = h - 12 - len(LEGEND) * 22
+        for line in LEGEND:
+            self.screen.blit(f.render(line, True, C.UI_TEXT_COLOR), (10, y))
+            y += 22
+
+    def _panel(self, title: str, height: int) -> pygame.Rect:
+        """Centred dialog panel with a title; returns the panel rect."""
         w, h = self.screen.get_size()
-        prompts = {"save": "save as (maps/NAME.map):",
-                   "load": "load (maps/NAME.map):",
-                   "new": "new board size (COLSxROWS):"}
-        prompt = f.render(prompts[self.input_mode], True, C.UI_TEXT_COLOR)
-        text = f.render(self.input_text + "_", True, (255, 255, 120))
-        box = pygame.Rect(0, 0, max(460, text.get_width() + 40), 96)
+        box = pygame.Rect(0, 0, 520, height)
         box.center = (w // 2, h // 2)
         pygame.draw.rect(self.screen, (30, 32, 40), box, border_radius=8)
         pygame.draw.rect(self.screen, (120, 140, 200), box, 2,
                          border_radius=8)
-        self.screen.blit(prompt, (box.x + 16, box.y + 12))
-        self.screen.blit(text, (box.x + 16, box.y + 50))
+        self.screen.blit(self.renderer.font(28).render(
+            title, True, C.UI_TEXT_COLOR), (box.x + 16, box.y + 12))
+        return box
+
+    def _draw_list(self, title: str, items: list) -> None:
+        """Scrollable name list with a highlighted selection row."""
+        self._panel(title, 440)
+        f = self.renderer.font(24)
+        visible = 12
+        start = 0
+        if len(items) > visible:
+            start = max(0, min(self.overlay_index - visible // 2,
+                               len(items) - visible))
+        w, h = self.screen.get_size()
+        y = h // 2 - 150
+        for index in range(start, min(start + visible, len(items))):
+            rect = pygame.Rect(w // 2 - 240, y, 480, 30)
+            if index == self.overlay_index:
+                pygame.draw.rect(self.screen, (52, 58, 78), rect,
+                                 border_radius=6)
+                pygame.draw.rect(self.screen, (150, 170, 230), rect, 2,
+                                 border_radius=6)
+            self.screen.blit(f.render(items[index], True, C.UI_TEXT_COLOR),
+                             (rect.x + 10, rect.y + 4))
+            self._item_rects.append((rect, index))
+            y += 32
+        hint = self.renderer.font(18).render(
+            "arrows / click: choose   Enter: confirm   Esc: cancel", True,
+            (130, 135, 150))
+        self.screen.blit(hint, hint.get_rect(center=(w // 2, h // 2 + 195)))
+
+    def _draw_save(self) -> None:
+        """Save dialog: name entry on top, existing names below.
+
+        The current name (if the map has one) is the first list entry and
+        is highlighted (editor spec).
+        """
+        self._panel("save map", 500)
+        f = self.renderer.font(26)
+        w, h = self.screen.get_size()
+        field = pygame.Rect(w // 2 - 240, h // 2 - 148, 480, 36)
+        pygame.draw.rect(self.screen, (18, 20, 26), field, border_radius=6)
+        self.screen.blit(f.render(self.input_text + "_", True,
+                                  (255, 255, 120)),
+                         (field.x + 10, field.y + 4))
+        self._draw_list("save map", self.overlay_items)
+
+    def _draw_exit(self) -> None:
+        """Prompt shown on exit when there are unsaved changes."""
+        self._panel("unsaved changes", 190)
+        lines = ["S - save and exit",
+                 "N - discard changes and exit",
+                 "Esc - keep editing"]
+        f = self.renderer.font(24)
+        w, h = self.screen.get_size()
+        y = h // 2 - 30
+        for line in lines:
+            self.screen.blit(f.render(line, True, C.UI_TEXT_COLOR),
+                             (w // 2 - 120, y))
+            y += 34
+
+
+def _ramp_axis(tile: tuple, ramp: tuple) -> int:
+    """Axis 0-2 of a ramp whose neighbour ``a`` is ``ramp[0]``."""
+    for d in range(6):
+        if hexgrid.neighbor(tile[0], tile[1], d) == ramp[0]:
+            return d % 3
+    return 0                                     # unreachable for ramps
 
 
 def main() -> None:

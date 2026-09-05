@@ -102,6 +102,27 @@ class Board:
         tile = hexgrid.world_to_hex(x, y, self.side)
         return tile if self.contains(tile) else None
 
+    def pick_tile(self, camera, pos):
+        """Tile under the screen position, refined against elevation.
+
+        Iteratively re-picks the tile assuming the elevation of the
+        previous guess, so tall terrain is pointed at correctly.  Shared
+        by the game and the editor, which both point at tiles "exactly
+        like in the game" (specification_of_map_editor.md).
+        """
+        wx, wy = camera.screen_to_world(*pos)
+        tile = self.world_to_tile(wx, wy)
+        for _ in range(3):
+            if tile is None:
+                break
+            wz = self.height(tile) * C.ELEVATION_PX
+            wx, wy = camera.screen_to_world(pos[0], pos[1], wz)
+            refined = self.world_to_tile(wx, wy)
+            if refined == tile:
+                break
+            tile = refined
+        return tile
+
     # ------------------------------------------------------------------
     # Map features
     # ------------------------------------------------------------------
