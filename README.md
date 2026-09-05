@@ -8,6 +8,7 @@ specification in [specification.md](specification.md).
 
 ```bash
 python3 main.py          # requires pygame (pip install pygame)
+python3 editor.py        # the board editor (separate application)
 ```
 
 ## Gameplay
@@ -32,6 +33,27 @@ python3 main.py          # requires pygame (pip install pygame)
 | `P`                            | pause                           |
 | `Esc`                          | back to menu (unless selecting) |
 
+## Levels and the board editor
+
+Levels live as binary map files in the `maps/` directory; the menu lists
+every `maps/*.map` file and shows the file name as the level name.  The
+file format (dimensions, 4-bit heights, buildings/ramps/bridges/obstacles)
+is specified in `specification.md` ("Format pliku planszy") and implemented
+in `war_regions/mapfile.py`.
+
+The board editor is a separate application sharing the game's board
+renderer.  It offers terrain raise/lower, building, ramp, bridge and
+obstacle tools (with the placement rules of rules.md sec. 1, 7, 8
+enforced), saves to and loads from `maps/`:
+
+```bash
+python3 editor.py                # empty 20x13 board
+python3 editor.py maps/Zatoka.map
+```
+
+`python3 make_maps.py` regenerates the bundled sample maps from the
+procedural generator in `war_regions/levels.py`.
+
 ## Code layout
 
 ```
@@ -42,13 +64,17 @@ war_regions/
   entities.py    players, buildings, vehicles
   game.py        real-time simulation (production, combat, turrets, ...)
   ai.py          AI decision loop (rules.md sec. 13)
-  levels.py      the menu levels, generated from code with fixed seeds
+  levels.py      procedural map generator (also feeds make_maps.py)
+  mapfile.py     binary map file format: save / load / list maps
   camera.py      isometric projection and view transforms
   render.py      code-drawn isometric renderer (no raster assets)
   app.py         menu, loading screen, input handling, HUD
 main.py          entry point
+editor.py        board editor entry point
+make_maps.py     regenerates the sample maps in maps/
 tests/test_logic.py   headless rule tests:      python3 -m tests.test_logic
 tests/test_render.py  rendering regression test: python3 -m tests.test_render
+tests/test_mapfile.py  map format & editor tests: python3 -m tests.test_mapfile
 ```
 
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in

@@ -14,13 +14,14 @@ Implements the controls from the specification:
 """
 
 import math
+import os
 
 import pygame
 
 from . import constants as C
 from .camera import Camera
 from .entities import vehicle_kind_of
-from .levels import LEVELS, build_level
+from .mapfile import list_maps, load_game, level_seed
 from .ai import AIController, AI_DIFFICULTIES
 from .render import Renderer
 
@@ -38,7 +39,8 @@ class Application:
         self.renderer = Renderer(self.screen)
         self.state = STATE_MENU
         self.running = True
-        self.menu_rects = []          # [(rect, LevelConfig), ...]
+        self.menu_rects = []          # [(rect, map file path), ...]
+        self.maps = list_maps()       # levels shown in the menu
         self.mouse_pos = (0, 0)
         self.game = None
         self.camera = None
@@ -118,7 +120,7 @@ class Application:
                 if self.selection is not None:
                     self._set_selection(None)  # first cancel the selection
                 else:
-                    self.state = STATE_MENU
+                    self._enter_menu()
             elif ev.key == pygame.K_p:
                 self.paused = not self.paused
             elif ev.key in (pygame.K_PLUS, pygame.K_EQUALS,
@@ -129,11 +131,16 @@ class Application:
         elif self.state == STATE_MENU and ev.key == pygame.K_ESCAPE:
             self.running = False
 
+    def _enter_menu(self) -> None:
+        """Return to the level menu, refreshing the map file list."""
+        self.state = STATE_MENU
+        self.maps = list_maps()
+
     def _click(self, pos) -> None:
         if self.state == STATE_MENU:
-            for rect, level in self.menu_rects:
+            for rect, map_path in self.menu_rects:
                 if rect.collidepoint(pos):
-                    self._start_level(level)
+                    self._start_map(map_path)
                     return
         elif self.state == STATE_PLAYING:
             self._game_click(pos)
@@ -227,15 +234,21 @@ class Application:
             tile = refined
         return tile
 
-    def _start_level(self, level) -> None:
-        """Build the level and show the map (loading state, spec)."""
-        self.game = build_level(level)
+    def _start_map(self, map_path: str) -> None:
+        """Load a map file and show it (loading state, spec).
+
+        The level name shown in the menu equals the map file name; the
+        players derive from the building owners in the file and the AI
+        plays with the default difficulty from the constants module.
+        """
+        self.game = load_game(map_path)
         self.camera = Camera(self.screen.get_size())
-        mid = (level.size[0] // 2, level.size[1] // 2)
+        mid = (self.game.board.cols // 2, self.game.board.rows // 2)
         self.camera.center_on_world(*self.game.board.center_world(mid))
-        self.ai = [AIController(self.game, p.id,
-                                AI_DIFFICULTIES[level.ai_difficulty],
-                                level.seed * 31 + p.id)
+        seed = level_seed(map_path)
+        difficulty = AI_DIFFICULTIES[C.MAP_DEFAULT_AI_DIFFICULTY]
+        self.ai = [AIController(self.game, p.id, difficulty,
+                                seed * 31 + p.id)
                    for p in self.game.players if not p.is_human]
         self.paused = False
         self._set_selection(None)
@@ -342,9 +355,8 @@ class Application:
         self.menu_rects = []
         y = int(h * 0.36)
         mouse = pygame.mouse.get_pos()
-        for level in LEVELS:
-            text = f"{level.name}   ({level.players} players, " \
-                   f"{level.ai_difficulty} AI)"
+        for map_path in self.maps:
+            text = os.path.splitext(os.path.basename(map_path))[0]
             surf = self.renderer.font(40).render(text, True,
                                                  C.UI_TEXT_COLOR)
             rect = surf.get_rect(center=(w // 2, y))
@@ -356,7 +368,7 @@ class Application:
                                  border_radius=8)
             self.screen.blit(surf, (rect.centerx - surf.get_width() // 2,
                                     rect.centery - surf.get_height() // 2))
-            self.menu_rects.append((rect, level))
+            self.menu_rects.append((rect, map_path))
             y += int(h * 0.13)
         hint = self.renderer.font(20).render(
             "click a level to play - LMB select, Esc menu, P pause", True,

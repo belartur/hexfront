@@ -208,6 +208,21 @@ UI_TEXT_COLOR = (235, 235, 235)
 UI_BACKGROUND = (24, 26, 34)
 
 # --------------------------------------------------------------------------
+# Map files and the board editor (specification: "Planszy i edytor plansz")
+# --------------------------------------------------------------------------
+#: Directory holding one binary map file per level (specification).
+MAPS_DIR = "maps"
+
+#: File name extension of the binary map files.
+MAP_EXTENSION = ".map"
+
+#: AI difficulty used for maps loaded from files.  The binary map format
+#: (specification: "Format pliku planszy") does not carry gameplay
+#: parameters, so every file-loaded level plays against this preset;
+#: change it here to experiment (rules.md sec. 13.8).
+MAP_DEFAULT_AI_DIFFICULTY = "normal"
+
+# --------------------------------------------------------------------------
 # AI difficulty (rules.md sec. 13.5, 13.8)
 # --------------------------------------------------------------------------
 from dataclasses import dataclass

@@ -328,6 +328,27 @@ class Renderer:
                                 C.RANGE_OUTLINE_WIDTH)
 
     # ------------------------------------------------------------------
+    # Static board rendering (shared with the board editor)
+    # ------------------------------------------------------------------
+    def draw_editor(self, scene, camera: Camera, hover_tile=None) -> None:
+        """Render a static board without a running game.
+
+        ``scene`` only needs the ``board`` and ``buildings`` attributes
+        used by the tile painter, so the editor draws its maps with
+        exactly the same code as the game (specification: the editor
+        shares the board-drawing code with the game).
+        """
+        self.screen.fill(C.WATER_COLOR)
+        self._draw_tiles(scene, camera)
+        self._draw_badges(scene, camera)
+        if hover_tile is not None and scene.board.contains(hover_tile):
+            z = scene.board.height(hover_tile) * C.ELEVATION_PX
+            pts = [camera.world_to_screen(x, y, z) for x, y in
+                   hexgrid.hex_corners(hover_tile[0], hover_tile[1],
+                                       scene.board.side)]
+            pygame.draw.polygon(self.screen, (255, 255, 255), pts, 2)
+
+    # ------------------------------------------------------------------
     # Dashed travel paths (vanish behind the vehicle - specification)
     # ------------------------------------------------------------------
     def _draw_paths(self, game, camera: Camera, selection) -> None:
