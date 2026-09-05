@@ -59,9 +59,9 @@ Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w 
 
 ## Format pliku planszy
 Plik planszy jest binarny. Znajdują się w nim, kolejno, następujące informacje:
-* Wymiary planszy (4 bajty): liczba kolumn k (2 bajty) i wierszy w (2 bajty).
+* Wymiary planszy (2 bajty): liczba kolumn k (1 bajt) i wierszy w (1 bajt).
 * k·w liczb 4 bitowych kodujących wysokości kolejnych pól planszy, zapisane na k·w/2 bajtach gdy k·w jest parzyste, w przeciwnym razie na (k·w+1)/2 bajtach (wtedy ostatnie 4 bity przechowują zero).
-* Obiekty znajdujące się na planszy. Liczba użytych bajtów zależy od typu obiektu. Pierwsze 4 bajty kodują położenie obiektu (2 bajty kolumnę i 2 bajty wiersz). Piąty bajt koduje typ obiektu, zaś kolejne (w razie potrzeby, czyli tylko w przypadku budynków) jego własności:
+* Obiekty znajdujące się na planszy. Liczba użytych bajtów zależy od typu obiektu. Pierwsze 2 bajty kodują położenie obiektu (1 bajt kolumnę i 1 bajt wiersz). Piąty bajt koduje typ obiektu, zaś kolejne (w razie potrzeby, czyli tylko w przypadku budynków) jego własności:
   * Liczby z zakresu 0-19 kodują budynek wraz z jego rodzajem (część zakresu jest nieużywana). Wtedy kolejne 2 bajty kodują kolejno: numer właściciela budynku (0 - neutralny, 1 - niebieski, 2 - czerwony, 3 - zielony, 4 - żółty) i początkową liczbę jednostek w budynku.
   * Liczby z zakresu 20-22 kodują most wraz z kierunkiem jego obrotu.
   * Liczby z zakresu 23-25 kodują podjazd wraz z kierunkiem jego obrotu.
