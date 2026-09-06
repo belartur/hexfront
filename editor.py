@@ -10,27 +10,34 @@ whether to save unsaved changes.
 
 Keys
 ----
-``b``           place a building / cycle the kind of the existing one
-digits          type the unit count of the building (0-255); committed
-                immediately after the third digit, or shortly after the
-                first or second one
+``b``           place a building / cycle the kind of the existing one;
+                newly placed buildings reuse the last used kind, owner
+                and unit count
+digits          type the unit count of the building (0-999); committed
+                immediately after the third digit, after a short delay,
+                or when another tile is pointed at
 ``o``           cycle the building owner (needs a building on the tile)
-``t``           place an obstacle / cycle its kind
+``t``           place an obstacle / cycle its kind; new obstacles reuse
+                the last used kind
 ``m``           place a bridge fragment / rotate it (a bridge on a
                 neighbouring tile directed at this tile imposes its axis)
 ``r``           place a ramp / rotate it (prefers the axis whose opposite
                 neighbours differ in height, when one exists)
-``[`` / ``]``   lower / raise the terrain by 1 (modulo 16)
+``[`` / ``]``   lower / raise the terrain by 1 (no-op at 0 / 15)
 ``Del`` / RMB   delete the object on the tile
-``l``           load a map (pick a name from the maps directory)
+``l``           load a map (pick a name from the maps directory); boards
+                smaller than the standard new map are padded up to it
 ``s``           save the map (type a name or pick an existing one; the
-                current name, if any, is listed first and highlighted)
+                current name, if any, is listed first and highlighted);
+                empty border rows/columns are trimmed on save
+ctrl+s          save under the current name (or acts like ``s``)
 ctrl+n          clear / start a new map (no confirmation)
 
-View (the editor spec does not describe it; mirrors the game): LMB drag,
-arrow keys and screen-edge hover pan, wheel and ``+``/``-`` zoom
-(0.5x-2x).  There is no WASD panning because ``s`` saves the map, and no
-RMB panning because RMB deletes objects.
+View (mirrors the game): LMB drag, arrow keys and screen-edge hover pan
+(limited to the board), wheel and ``+``/``-`` zoom (0.5x-2x), alt picks
+the tile as if all fields stood at height 0.  There is no WASD panning
+because ``s`` saves the map, and no RMB panning because RMB deletes
+objects.
 """
 
 import math
@@ -44,7 +51,7 @@ from war_regions import hexgrid
 from war_regions import mapfile
 from war_regions.board import Board, Obstacle
 from war_regions.camera import Camera
-from war_regions.entities import Building, BuildingKind
+from war_regions.entities import Building, BuildingKind, is_base
 from war_regions.render import Renderer
 
 #: Building kinds behind the ``b`` key, in cycling order.
@@ -66,12 +73,13 @@ DIGIT_KEYS.update({getattr(pygame, f"K_KP{i}"): str(i) for i in range(10)})
 
 #: Legend lines displayed on screen (editor spec: "wyswietla legende").
 LEGEND = [
-    "b: building (again: cycle kind)    digits: units 0-255",
+    "b: building (again: cycle kind)    digits: units 0-999",
     "o: cycle owner                     t: obstacle (again: cycle kind)",
     "m: bridge (again: rotate)          r: ramp (again: rotate)",
-    "[ / ]: terrain -1 / +1 (mod 16)    Del / RMB: delete object",
-    "l: load   s: save   Ctrl+N: new    Esc: quit",
+    "[ / ]: terrain -1 / +1             Del / RMB: delete object",
+    "l: load   s: save   Ctrl+S: save   Ctrl+N: new   Esc: quit",
     "LMB drag / arrows / screen edge: pan   wheel / + / -: zoom",
+    "Alt: pick as if all fields stood at height 0",
 ]
 
 
@@ -102,7 +110,7 @@ class Editor:
         self.running = True
         self.map_name = None         # current file name (without .map)
         self.dirty = False           # unsaved changes since last save
-        self._new_board(*C.EDITOR_DEFAULT_SIZE)
+        self._new_board()
         self.status = ""             # last status message
         self.status_timer = 0.0
         self.overlay = None          # None | "load" | "save" | "exit"
@@ -114,6 +122,13 @@ class Editor:
         self._digit_text = ""
         self._digit_timer = 0.0
         self._last_axis = 0          # fallback ramp/bridge axis
+        # Properties remembered by the editor and given to newly placed
+        # objects (editor spec: "sa one przez edytor zapamiętywane").
+        # The very first building is a neutral tank base with no units.
+        self._last_kind = BuildingKind.BASE_TANK
+        self._last_owner = None
+        self._last_units = 0.0
+        self._last_obstacle = Obstacle.WALL
         self._down_pos = None        # LMB press position (drag panning)
         self._dragging = False
         self.mouse_pos = (0, 0)
@@ -149,8 +164,15 @@ class Editor:
         return None
 
     def _hover_tile(self):
-        """Tile under the cursor, picked exactly like in the game."""
-        return self.scene.board.pick_tile(self.camera, self.mouse_pos)
+        """Tile under the cursor, picked exactly like in the game.
+
+        With alt held (specification: "gdy jest przycisniety klawisz
+        alt") the tile is picked as if every field stood at height zero.
+        """
+        keys = pygame.key.get_pressed()
+        flat = keys[pygame.K_LALT] or keys[pygame.K_RALT]
+        return self.scene.board.pick_tile(self.camera, self.mouse_pos,
+                                          flat=flat)
 
     def _clear_digit_buffer(self) -> None:
         """Drop a pending units entry (used by every other action)."""
@@ -194,18 +216,24 @@ class Editor:
     # Key actions (specification_of_map_editor.md)
     # ------------------------------------------------------------------
     def _action_building(self, tile: tuple) -> None:
-        """``b``: place a building or cycle the kind of the existing one."""
+        """``b``: place a building or cycle the kind of the existing one.
+
+        New buildings receive the remembered kind, owner and unit count
+        (editor spec); the very first building is a neutral tank base
+        with no units.
+        """
         self._clear_digit_buffer()
         building = self._building_at(tile)
         if building is not None:
             building.kind = BUILDING_ORDER[
                 (BUILDING_ORDER.index(building.kind) + 1)
                 % len(BUILDING_ORDER)]
+            self._last_kind = building.kind
         else:
             self._clear_objects(tile)
-            self.scene.buildings.append(Building(
-                BUILDING_ORDER[0], C.EDITOR_DEFAULT_OWNER,
-                tile[0], tile[1], units=0.0))
+            building = Building(self._last_kind, self._last_owner,
+                                tile[0], tile[1], units=self._last_units)
+            self.scene.buildings.append(building)
         self._mark_dirty()
 
     def _action_owner(self, tile: tuple) -> None:
@@ -217,16 +245,20 @@ class Editor:
             return
         building.owner = OWNER_ORDER[
             (OWNER_ORDER.index(building.owner) + 1) % len(OWNER_ORDER)]
+        self._last_owner = building.owner
         self._mark_dirty()
 
     def _action_digit(self, tile: tuple, digit: str) -> None:
         """Digits: type the unit count of the building on ``tile``.
 
         Three digits commit immediately; shorter entries commit after
-        ``EDITOR_DIGIT_COMMIT_DELAY`` seconds.
+        ``EDITOR_DIGIT_COMMIT_DELAY`` seconds or when another tile gets
+        pointed at (editor spec: "wskazanie innego pola w trakcie
+        wpisywania akceptuje wpisana wartosc").
         """
         if self._digit_tile != tile:
-            self._digit_tile, self._digit_text = tile, ""
+            self._commit_digits()          # accept the previous entry
+            self._digit_tile = tile
         self._digit_text += digit
         self._digit_timer = 0.0
         if len(self._digit_text) >= 3:
@@ -243,27 +275,31 @@ class Editor:
             self._commit_digits()
 
     def _commit_digits(self) -> None:
-        """Apply the typed unit count to the building (clamped 0-255)."""
+        """Apply the typed unit count to the building (clamped 0-999)."""
         tile, text = self._digit_tile, self._digit_text
         self._clear_digit_buffer()
-        if tile is None:
+        if tile is None or not text:
             return
         building = self._building_at(tile)
         if building is None:
-            self._say("no building on the tile")
-            return
-        building.units = float(max(0, min(255, int(text))))
+            return                         # no building: no effect (spec)
+        building.units = float(max(0, min(C.EDITOR_MAX_UNITS, int(text))))
+        self._last_units = building.units
         self._mark_dirty()
 
     def _action_obstacle(self, tile: tuple) -> None:
-        """``t``: place an obstacle or cycle the kind of the existing one."""
+        """``t``: place an obstacle or cycle the kind of the existing one.
+
+        New obstacles reuse the remembered kind (editor spec).
+        """
         self._clear_digit_buffer()
         current = self.scene.board.tiles[tile].obstacle
         if current is not None:
             kind = OBSTACLE_ORDER[(OBSTACLE_ORDER.index(current.kind) + 1)
                                   % len(OBSTACLE_ORDER)]
         else:
-            kind = OBSTACLE_ORDER[0]
+            kind = self._last_obstacle
+        self._last_obstacle = kind
         self._clear_objects(tile)
         self.scene.board.tiles[tile].obstacle = Obstacle(kind)
         self._mark_dirty()
@@ -342,10 +378,13 @@ class Editor:
         self._mark_dirty()
 
     def _change_height(self, tile: tuple, delta: int) -> None:
-        """``[`` / ``]``: lower / raise the terrain by 1 (modulo 16)."""
+        """``[`` / ``]``: lower / raise the terrain by 1 (no-op at 0 / 15)."""
         self._clear_digit_buffer()
         t = self.scene.board.tiles[tile]
-        t.height = (t.height + delta) % 16
+        new_height = t.height + delta
+        if not 0 <= new_height <= 15:
+            return                         # editor spec: no wrap-around
+        t.height = new_height
         if t.ramp is not None:
             self._say("note: a ramp's height follows min(a, b) on load")
         self._mark_dirty()
@@ -375,32 +414,49 @@ class Editor:
     # ------------------------------------------------------------------
     # Files (``l`` / ``s`` / ctrl+n)
     # ------------------------------------------------------------------
-    def _new_board(self, cols: int, rows: int) -> None:
-        """Replace the edited scene with an empty cols x rows board."""
-        cols, rows = max(2, cols), max(2, rows)
+    def _new_board(self) -> None:
+        """Replace the edited scene with the standard new map.
+
+        Mostly water, with a small land rectangle in the middle; the view
+        is centred on that rectangle (editor spec).
+        """
+        cols, rows = C.EDITOR_NEW_SIZE
         board = Board(cols, rows)
         for t in board.tiles.values():
-            t.height = 1
+            t.height = 0                     # mostly water (editor spec)
+        lw, lh = C.EDITOR_LAND_SIZE
+        q0 = (cols - lw) // 2
+        r0 = (rows - lh) // 2
+        for q in range(q0, q0 + lw):
+            for r in range(r0, r0 + lh):
+                board.tiles[(q, r)].height = C.EDITOR_LAND_HEIGHT
         self.scene = EditorScene(board, [])
         self.map_name = None
         self.dirty = False
-        mid = (cols // 2, rows // 2)
-        self.camera.center_on_world(*board.center_world(mid))
+        self.camera.limit_to_board(board)
+        self.camera.center_on_world(
+            *board.center_world((q0 + lw // 2, r0 + lh // 2)))
 
     def _new_map(self) -> None:
-        """ctrl+n: clear the board keeping its dimensions (no prompt)."""
-        self._new_board(self.scene.board.cols, self.scene.board.rows)
+        """ctrl+n: start the standard new map (no prompt)."""
+        self._new_board()
         self._clear_digit_buffer()
         self._say("new map")
 
     def _save(self, name: str) -> None:
-        """Save the board as ``maps/<name>.map``."""
+        """Save the board as ``maps/<name>.map``.
+
+        Empty border rows and columns (pure water, no objects) are
+        trimmed from the saved file, down to the 1 x 1 minimum (editor
+        spec); the edited board itself keeps its full size.
+        """
         name = self._map_name(name)
         path = os.path.join(C.MAPS_DIR, name)
         os.makedirs(C.MAPS_DIR, exist_ok=True)
+        board, buildings = trim_map(self.scene.board, self.scene.buildings)
         try:
-            mapfile.save_map(path, self.scene.board, self.scene.buildings)
-        except OSError as exc:
+            mapfile.save_map(path, board, buildings)
+        except (OSError, ValueError) as exc:
             self._say(f"save failed: {exc}")
             return
         self.map_name = os.path.splitext(name)[0]   # stem, like the lists
@@ -408,7 +464,12 @@ class Editor:
         self._say(f"saved {path}")
 
     def _load(self, name: str) -> None:
-        """Load the board from ``maps/<name>.map`` (or a full path)."""
+        """Load the board from ``maps/<name>.map`` (or a full path).
+
+        Boards smaller than the standard new map size are padded up to
+        it, evenly at the start and the end, and the view is centred
+        (editor spec).
+        """
         path = name if os.path.isfile(name) \
             else os.path.join(C.MAPS_DIR, self._map_name(name))
         try:
@@ -416,13 +477,15 @@ class Editor:
         except (OSError, ValueError) as exc:
             self._say(f"load failed: {exc}")
             return
+        board, buildings = pad_map(board, buildings)
         self.scene = EditorScene(board, buildings)
         self._rebuild_bridges()          # preview runs, incl. invalid ones
         self.map_name = os.path.splitext(os.path.basename(path))[0]
         self.dirty = False
         self._clear_digit_buffer()
-        mid = (board.cols // 2, board.rows // 2)
-        self.camera.center_on_world(*board.center_world(mid))
+        self.camera.limit_to_board(board)
+        self.camera.center_on_world(*board.center_world(
+            (board.cols // 2, board.rows // 2)))
         self._say(f"loaded {path}")
 
     @staticmethod
@@ -546,7 +609,15 @@ class Editor:
         if ev.key == pygame.K_l:
             self._open_load()
         elif ev.key == pygame.K_s:
-            self._open_save()
+            if mods & pygame.KMOD_CTRL:
+                # ctrl+s: save under the current name (like ``s`` without
+                # one) - editor spec.
+                if self.map_name is not None:
+                    self._save(self.map_name)
+                else:
+                    self._open_save()
+            else:
+                self._open_save()
         elif tile is None:
             return                               # keys below need a tile
         elif ev.key == pygame.K_b:
@@ -642,6 +713,13 @@ class Editor:
         if self.overlay is not None:
             return
         self.mouse_pos = pygame.mouse.get_pos()
+        # Pointing at another tile accepts the pending units entry
+        # (editor spec: "wskazanie innego pola w trakcie wpisywania
+        # akceptuje wpisana wartosc").
+        if self._digit_text:
+            hover = self._hover_tile()
+            if hover is not None and hover != self._digit_tile:
+                self._commit_digits()
         speed = C.PAN_SPEED * dt
         dx = dy = 0
         keys = pygame.key.get_pressed()
@@ -667,10 +745,11 @@ class Editor:
             self.camera.pan(-dx, -dy)
 
     def _draw(self) -> None:
-        """One editor frame: board, HUD, legend and an overlay if open."""
+        """One editor frame: board, HUD, errors, legend, an overlay if open."""
         hover = self._hover_tile() if self.overlay is None else None
         self.renderer.draw_editor(self.scene, self.camera, hover)
         self._draw_hud()
+        self._draw_errors()
         self._draw_legend()
         self._item_rects = []
         if self.overlay == "exit":
@@ -692,6 +771,56 @@ class Editor:
         if self.status and self.status_timer > 0:
             surf = f.render(self.status, True, (255, 230, 120))
             self.screen.blit(surf, (w - surf.get_width() - 10, 36))
+
+    # ------------------------------------------------------------------
+    # Rule violations (editor spec: errors listed in red on screen)
+    # ------------------------------------------------------------------
+    def _errors(self) -> list:
+        """Rule violations of the edited map, as display lines.
+
+        Buildings on water, bridges over too-high land or joining
+        different heights, ramps with a wrong height or joining equal
+        heights, and missing player/opponent bases (editor spec).  Saving
+        and loading maps with errors stays possible.
+        """
+        board, buildings = self.scene.board, self.scene.buildings
+        errors = []
+        for b in buildings:
+            if board.height(b.tile) == 0:
+                errors.append(f"budynek na wodzie {b.tile}")
+        for bridge in board.bridges:
+            ha, hb = board.height(bridge.a), board.height(bridge.b)
+            if ha != hb:
+                errors.append("most łączący dwa pola o różnej wysokości "
+                              f"{bridge.a}-{bridge.b}")
+            for f in bridge.fragments:
+                if board.height(f) > ha - 3:
+                    errors.append(f"most nad za wysokim lądem {f}")
+        for tile, t in board.tiles.items():
+            if t.ramp is None:
+                continue
+            a, b = t.ramp
+            if board.height(a) == board.height(b):
+                errors.append("podjazd łączący pola o tych samych "
+                              f"wysokościach {tile}")
+            if board.height(tile) != min(board.height(a), board.height(b)):
+                errors.append("podjazd na polu o innej wysokości niż "
+                              f"niższe z łączonych pól {tile}")
+        if not any(is_base(b.kind) and b.owner == 0 for b in buildings):
+            errors.append("brak bazy gracza")
+        if not any(is_base(b.kind) and b.owner not in (None, 0)
+                   for b in buildings):
+            errors.append("brak bazy przynajmniej jednego przeciwnika")
+        return errors
+
+    def _draw_errors(self) -> None:
+        """The rule-violation lines, top-left, in red (editor spec)."""
+        f = self.renderer.font(22)
+        y = 8
+        for message in self._errors():
+            surf = f.render(message, True, C.EDITOR_ERROR_COLOR)
+            self.screen.blit(surf, (10, y))
+            y += 24
 
     def _draw_legend(self) -> None:
         """The key legend (editor spec: "wyswietla legende")."""
@@ -778,6 +907,101 @@ def _ramp_axis(tile: tuple, ramp: tuple) -> int:
         if hexgrid.neighbor(tile[0], tile[1], d) == ramp[0]:
             return d % 3
     return 0                                     # unreachable for ramps
+
+
+# ----------------------------------------------------------------------
+# Border trimming / padding (editor spec: "Przy zapisie, puste... oraz
+# końcowe wiersze i kolumny są usuwane"; loading pads back up)
+# ----------------------------------------------------------------------
+def _tile_occupied(board: Board, tile: tuple, buildings: list) -> bool:
+    """True when ``tile`` holds anything a trimmed map must keep."""
+    t = board.tiles[tile]
+    if t.height != 0 or t.obstacle is not None:
+        return True
+    if t.ramp is not None or t.bridge is not None:
+        return True
+    return any(b.tile == tile for b in buildings)
+
+
+def trim_map(board: Board, buildings: list):
+    """Remove empty border rows and columns from ``board``.
+
+    Empty means pure water (height 0) without any object (editor spec).
+    Every kept ramp endpoint and bridge end is kept on the board as
+    well, so no object loses its neighbours.  Returns a new
+    ``(board, buildings)`` pair with shifted coordinates; the smallest
+    possible result is a 1 x 1 board.
+    """
+    occupied_cols, occupied_rows = set(), set()
+    for (q, r), _t in board.tiles.items():
+        if _tile_occupied(board, (q, r), buildings):
+            occupied_cols.add(q)
+            occupied_rows.add(r)
+    for t in board.tiles.values():               # keep object end tiles
+        ends = list(t.ramp or ())
+        if t.bridge is not None:
+            ends += [t.bridge.a, t.bridge.b]     # may lie off-board
+        for end in ends:
+            if board.contains(end):
+                occupied_cols.add(end[0])
+                occupied_rows.add(end[1])
+    if not occupied_cols:                        # empty board -> 1 x 1
+        occupied_cols, occupied_rows = {0}, {0}
+    q0, r0 = min(occupied_cols), min(occupied_rows)
+    cols = max(occupied_cols) - q0 + 1
+    rows = max(occupied_rows) - r0 + 1
+
+    new_board = Board(cols, rows)
+    frag_marks = {}
+    for q in range(q0, q0 + cols):
+        for r in range(r0, r0 + rows):
+            t = board.tiles[(q, r)]
+            nt = new_board.tiles[(q - q0, r - r0)]
+            nt.height = t.height
+            if t.obstacle is not None:
+                nt.obstacle = Obstacle(t.obstacle.kind)
+            if t.ramp is not None:
+                nt.ramp = tuple((a - q0, b - r0) for a, b in t.ramp)
+            if t.bridge is not None:
+                frag_marks[(q - q0, r - r0)] = t.bridge.direction % 3
+    new_buildings = [Building(b.kind, b.owner, b.tile[0] - q0,
+                              b.tile[1] - r0, units=b.units)
+                     for b in buildings]
+    mapfile.rebuild_bridges(new_board, frag_marks, validate=False)
+    return new_board, new_buildings
+
+
+def pad_map(board: Board, buildings: list, size: tuple = None):
+    """Pad ``board`` up to ``size`` (default the standard new map size).
+
+    Extra rows and columns are added evenly at the beginning and the end
+    (editor spec: "po równo na początku/konćcu").  Returns a new
+    ``(board, buildings)`` pair with shifted coordinates.
+    """
+    cols, rows = size or C.EDITOR_NEW_SIZE
+    pad_q = max(0, cols - board.cols)
+    pad_r = max(0, rows - board.rows)
+    if pad_q == 0 and pad_r == 0:
+        return board, buildings              # nothing to add
+    q0, r0 = pad_q // 2, pad_r // 2              # even split start/end
+    new_board = Board(cols, rows)
+    for t in new_board.tiles.values():
+        t.height = 0                            # padding is pure water
+    frag_marks = {}
+    for (q, r), t in board.tiles.items():
+        nt = new_board.tiles[(q + q0, r + r0)]
+        nt.height = t.height
+        if t.obstacle is not None:
+            nt.obstacle = Obstacle(t.obstacle.kind)
+        if t.ramp is not None:
+            nt.ramp = tuple((a + q0, b + r0) for a, b in t.ramp)
+        if t.bridge is not None:
+            frag_marks[(q + q0, r + r0)] = t.bridge.direction % 3
+    new_buildings = [Building(b.kind, b.owner, b.tile[0] + q0,
+                              b.tile[1] + r0, units=b.units)
+                     for b in buildings]
+    mapfile.rebuild_bridges(new_board, frag_marks, validate=False)
+    return new_board, new_buildings
 
 
 def main() -> None:

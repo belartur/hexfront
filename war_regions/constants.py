@@ -230,14 +230,23 @@ MAP_DEFAULT_AI_DIFFICULTY = "normal"
 #: drugiej cyfry" without defining the delay; tweak freely.
 EDITOR_DIGIT_COMMIT_DELAY = 1.0
 
-#: Dimensions (cols, rows) of a brand-new editor board.  ctrl+n clears
-#: the current board keeping its dimensions; this size is used only by a
-#: fresh editor (the editor spec defines no way of setting dimensions).
-EDITOR_DEFAULT_SIZE = (20, 13)
+#: Dimensions (cols, rows) of a newly created editor board: mostly water,
+#: with the land rectangle below in the middle (editor spec).
+EDITOR_NEW_SIZE = (256, 256)
 
-#: Owner of a newly placed building (the editor spec does not define it;
-#: neutral is the safest default - `o` cycles owners afterwards).
-EDITOR_DEFAULT_OWNER = None
+#: Dimensions (cols, rows) of the land rectangle at height
+#: EDITOR_LAND_HEIGHT in the middle of a new board (editor spec: 20 x 13
+#: of height 1).
+EDITOR_LAND_SIZE = (20, 13)
+
+#: Terrain height of the central land rectangle of a new board.
+EDITOR_LAND_HEIGHT = 1
+
+#: Highest unit count typed in the editor (the map format stores 0-999).
+EDITOR_MAX_UNITS = 999
+
+#: Colour of the rule-violation lines listed on the editor screen.
+EDITOR_ERROR_COLOR = (255, 80, 80)
 
 # --------------------------------------------------------------------------
 # AI difficulty (rules.md sec. 13.5, 13.8)

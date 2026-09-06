@@ -339,7 +339,12 @@ class Renderer:
         shares the board-drawing code with the game).
         """
         self.screen.fill(C.WATER_COLOR)
+        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        # Ranges of turrets and (owned) healing towers are shown in the
+        # editor too, drawn exactly like in the game (editor spec).
+        self._draw_ranges(scene, camera, overlay)
         self._draw_tiles(scene, camera)
+        self.screen.blit(overlay, (0, 0))
         self._draw_badges(scene, camera)
         if hover_tile is not None and scene.board.contains(hover_tile):
             z = scene.board.height(hover_tile) * C.ELEVATION_PX

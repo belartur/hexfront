@@ -13,6 +13,7 @@ affects rendering only, never simulation distances.
 import math
 
 from . import constants as C
+from .hexgrid import SQRT3
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -28,6 +29,9 @@ class Camera:
         self.y = 0.0
         self.zoom = 1.0
         self.screen_size = tuple(screen_size)
+        #: Projected-space bounds ((min_x, max_x), (min_y, max_y)) the view
+        #: centre may not leave, or ``None`` for unlimited panning.
+        self.bounds = None
 
     # ------------------------------------------------------------------
     def world_to_screen(self, wx: float, wy: float, wz: float = 0.0) -> tuple:
@@ -49,11 +53,13 @@ class Camera:
         """Pan the view by a screen-space delta (already zoom-corrected)."""
         self.x -= dx / self.zoom
         self.y -= dy / self.zoom
+        self._clamp_to_bounds()
 
     def pan_projected(self, dx: float, dy: float) -> None:
         """Pan the view directly in projected space."""
         self.x += dx
         self.y += dy
+        self._clamp_to_bounds()
 
     def zoom_at(self, factor: float, sx: float, sy: float) -> None:
         """Multiplicative zoom keeping the world point under the cursor."""
@@ -63,11 +69,40 @@ class Camera:
         py = (wx + wy) * C.ISO_SIN
         self.x = px - (sx - self.screen_size[0] / 2) / self.zoom
         self.y = py - (sy - self.screen_size[1] / 2) / self.zoom
+        self._clamp_to_bounds()
 
     def center_on_world(self, wx: float, wy: float, wz: float = 0.0) -> None:
         """Center the view on a world point."""
         self.x = (wx - wy) * C.ISO_COS
         self.y = (wx + wy) * C.ISO_SIN - wz
+        self._clamp_to_bounds()
+
+    # ------------------------------------------------------------------
+    # Panning limits (specification: panning stays within the board, with
+    # the farthest board tile allowed to reach the screen centre)
+    # ------------------------------------------------------------------
+    def limit_to_board(self, board) -> None:
+        """Constrain panning to the projected area of ``board``.
+
+        The screen centre corresponds to the projected point ``(x, y)``,
+        so the bounds are the projected bounding box of the four corner
+        tile centres: at the farthest pan an extreme board tile sits at
+        the centre of the screen (specification: "Przesuwanie jest
+        ograniczone do granic planszy").
+        """
+        xmax = 1.5 * board.side * (board.cols - 1)
+        ymax = (SQRT3 * board.side
+                * (board.rows - 1 + 0.5 * ((board.cols - 1) & 1)))
+        self.bounds = ((-ymax * C.ISO_COS, xmax * C.ISO_COS),
+                       (0.0, (xmax + ymax) * C.ISO_SIN))
+
+    def _clamp_to_bounds(self) -> None:
+        """Keep the view centre inside :attr:`bounds`, if they are set."""
+        if self.bounds is None:
+            return
+        (lo_x, hi_x), (lo_y, hi_y) = self.bounds
+        self.x = clamp(self.x, lo_x, hi_x)
+        self.y = clamp(self.y, lo_y, hi_y)
 
     # ------------------------------------------------------------------
     def screen_circle_poly(self, cx: float, cy: float, radius: float,

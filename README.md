@@ -27,8 +27,9 @@ python3 editor.py        # the board editor (separate application)
 
 | Input                          | Action                          |
 |--------------------------------|---------------------------------|
-| LMB drag / arrows / WASD / edge| pan the view                    |
+| LMB drag / arrows / WASD / edge| pan the view (within the board) |
 | mouse wheel / `+` / `-`        | zoom (0.5x - 2x)                |
+| `Alt`                          | pick the tile as if all fields stood at height 0 |
 | LMB, RMB, Esc                 | selecting & sending vehicles    |
 | `P`                            | pause                           |
 | `Esc`                          | back to menu (unless selecting) |
@@ -43,14 +44,18 @@ in `war_regions/mapfile.py`.
 
 The board editor is a separate application sharing the game's board
 renderer and tile picking.  Editing is key-driven: point a tile with the
-mouse and press a key — `b` building (again: cycle kind), digits units,
-`o` owner, `t` obstacle, `m` bridge, `r` ramp, `[`/`]` terrain -/+,
-`Del`/RMB delete, `l` load, `s` save, ctrl+N new (placing overwrites the
-previous object; a legend is shown on screen; the editor asks about
-unsaved changes on exit; see `specification_of_map_editor.md`):
+mouse and press a key — `b` building (again: cycle kind; new buildings
+reuse the last kind/owner/units), digits units 0-999, `o` owner, `t`
+obstacle (again: cycle kind; new obstacles reuse the last kind), `m`
+bridge, `r` ramp, `[`/`]` terrain -/+ (no wrap), `Del`/RMB delete, `l`
+load, `s` save (empty water borders are trimmed on save), ctrl+S save,
+ctrl+N new 256x256 board, `Alt` pick at height 0 (placing overwrites the
+previous object; a legend is shown on screen; rule violations are listed
+in red; the editor asks about unsaved changes on exit; see
+`specification_of_map_editor.md`):
 
 ```bash
-python3 editor.py                # empty 20x13 board
+python3 editor.py                # new 256x256 board with a 20x13 island
 python3 editor.py maps/Zatoka.map
 ```
 

@@ -2,13 +2,14 @@
 
 Layout of a ``.map`` file, all integers big-endian:
 
-* 4 header bytes: number of columns ``k`` (2 B) and rows ``w`` (2 B);
+* 2 header bytes: number of columns ``k`` (1 B) and rows ``w`` (1 B);
 * ``k * w`` 4-bit heights, two tiles per byte (the *high* nibble holds the
   earlier tile of each pair, tiles ordered row-major: ``r * k + q``).
   When ``k * w`` is odd the final low nibble stores zero;
-* objects, one record each: 2 B column + 2 B row + 1 B type, followed by
-  2 extra bytes for buildings (owner 0-4, where 0 is neutral, and the
-  starting unit count).  Type codes:
+* objects, one record each: 1 B column + 1 B row + 1 B type, followed by
+  2 extra bytes for buildings: a 16-bit word holding the owner code on
+  the high 6 bits (0 neutral, 1 blue, 2 red, 3 green, 4 yellow) and the
+  starting unit count 0-999 on the low 10 bits.  Type codes:
 
   - 0-19 building kinds (part of the range unused), see ``BUILDING_CODES``,
   - 20-22 bridge fragment, code - 20 = the geometric axis (0-2) of the
@@ -67,15 +68,24 @@ OBSTACLE_CODES = {
 #: Inverse of :data:`OBSTACLE_CODES`.
 CODE_OBSTACLES = {kind: code for code, kind in OBSTACLE_CODES.items()}
 
+#: Highest starting unit count storable for a building (10 bits, the
+#: specification defines the in-map range as 0-999).
+MAX_SAVED_UNITS = 999
+
 #: Building owner codes (specification): 0 neutral, 1 blue (the human
-#: player), 2 red, 3 green, 4 yellow.
+#: player), 2 red, 3 green, 4 yellow.  The code uses 6 bits.
 OWNER_CODE_NEUTRAL = 0
+OWNER_CODE_BITS = 6
+OWNER_CODE_LIMIT = 1 << OWNER_CODE_BITS
 
 # ----------------------------------------------------------------------
 # Saving
 # ----------------------------------------------------------------------
 def save_map(path: str, board: Board, buildings: list) -> None:
     """Write ``board`` and its ``buildings`` to the binary file ``path``."""
+    if board.cols > 255 or board.rows > 255:
+        raise ValueError(f"{path}: {board.cols}x{board.rows} board does not "
+                         "fit the 1-byte-per-dimension map format")
     nibbles = []
     for r in range(board.rows):                     # row-major order
         for q in range(board.cols):
@@ -92,27 +102,31 @@ def save_map(path: str, board: Board, buildings: list) -> None:
         if code is None:
             continue
         owner = (OWNER_CODE_NEUTRAL if b.owner is None else b.owner + 1)
-        units = max(0, min(255, int(round(b.units))))
-        records.append(struct.pack(">HHBBB", b.tile[0], b.tile[1],
-                                   code, owner, units))
+        if not 0 <= owner < OWNER_CODE_LIMIT:
+            raise ValueError(f"{path}: building owner {owner} at {b.tile} "
+                             "does not fit the 6-bit owner field")
+        units = max(0, min(MAX_SAVED_UNITS, int(round(b.units))))
+        props = (owner << 10) | units               # 6-bit owner + 10-bit units
+        records.append(struct.pack(">BBBH", b.tile[0], b.tile[1],
+                                   code, props))
     for tile in sorted(board.tiles):
         t = board.tiles[tile]
         if t.ramp is not None:
             axis = _ramp_axis(tile, t.ramp)
             if axis is not None:
-                records.append(struct.pack(">HHB", tile[0], tile[1],
+                records.append(struct.pack(">BBB", tile[0], tile[1],
                                            RAMP_CODE_BASE + axis))
         elif t.bridge is not None:
-            records.append(struct.pack(">HHB", tile[0], tile[1],
+            records.append(struct.pack(">BBB", tile[0], tile[1],
                                        BRIDGE_CODE_BASE
                                        + t.bridge.direction % 3))
         elif t.obstacle is not None:
             code = CODE_OBSTACLES.get(t.obstacle.kind)
             if code is not None:
-                records.append(struct.pack(">HHB", tile[0], tile[1], code))
+                records.append(struct.pack(">BBB", tile[0], tile[1], code))
 
     with open(path, "wb") as f:
-        f.write(struct.pack(">HH", board.cols, board.rows))
+        f.write(struct.pack(">BB", board.cols, board.rows))
         f.write(bytes(heights))
         for rec in records:
             f.write(rec)
@@ -141,16 +155,16 @@ def load_board(path: str, validate: bool = True):
     """
     with open(path, "rb") as f:
         data = f.read()
-    if len(data) < 4:
+    if len(data) < 2:
         raise ValueError(f"{path}: file too short for the header")
-    cols, rows = struct.unpack_from(">HH", data, 0)
+    cols, rows = struct.unpack_from(">BB", data, 0)
     if cols == 0 or rows == 0:
         raise ValueError(f"{path}: empty board")
     board = Board(cols, rows)
 
     n = cols * rows
     nibbles = []
-    for byte in data[4:4 + (n + 1) // 2]:
+    for byte in data[2:2 + (n + 1) // 2]:
         nibbles.append(byte >> 4)
         nibbles.append(byte & 0x0F)
     if len(nibbles) < n:
@@ -161,18 +175,23 @@ def load_board(path: str, validate: bool = True):
 
     buildings = []
     frag_marks = {}
-    off = 4 + (n + 1) // 2
-    while off + 5 <= len(data):
-        q, r, code = struct.unpack_from(">HHB", data, off)
-        off += 5
+    off = 2 + (n + 1) // 2
+    while off + 3 <= len(data):
+        q, r, code = struct.unpack_from(">BBB", data, off)
+        off += 3
         tile = (q, r)
         if not board.contains(tile):
             raise ValueError(f"{path}: object outside the board at {tile}")
         if code <= 19:
             if off + 2 > len(data):
                 raise ValueError(f"{path}: truncated building at {tile}")
-            owner, units = struct.unpack_from(">BB", data, off)
+            props, = struct.unpack_from(">H", data, off)
             off += 2
+            owner = (props >> 10) & 0x3F
+            units = props & 0x3FF
+            if units > MAX_SAVED_UNITS:
+                _warn(path, f"unit count {units} out of range at {tile}")
+                units = MAX_SAVED_UNITS
             kind = BUILDING_CODES.get(code)
             if kind is None:
                 _warn(path, f"unused building code {code} at {tile}")
@@ -207,7 +226,7 @@ def load_board(path: str, validate: bool = True):
 def load_game(path: str) -> Game:
     """Load a map file as a ready-to-run :class:`Game`.
 
-    Players derive from the building owners found in the file (owner byte
+    Players derive from the building owners found in the file (owner code
     1 is the blue, human player); the AI randomness seed derives from the
     file name so every level is deterministic (rules.md sec. 13.2).
     """

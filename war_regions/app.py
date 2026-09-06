@@ -220,12 +220,17 @@ class Application:
     def _pick_tile(self, pos):
         """Tile under the cursor, refined against terrain elevation.
 
-        Delegates to the shared :meth:`Board.pick_tile`, so the game and
-        the editor point at tiles with exactly the same code.
+        With the alt key held the tile is picked as if every field stood
+        at height zero (specification: "Lecz gdy jest przyciśnięty
+        klawisz alt...").  Delegates to the shared :meth:`Board.pick_tile`,
+        so the game and the editor point at tiles with exactly the same
+        code.
         """
         if self.game is None or self.camera is None:
             return None
-        return self.game.board.pick_tile(self.camera, pos)
+        keys = pygame.key.get_pressed()
+        flat = keys[pygame.K_LALT] or keys[pygame.K_RALT]
+        return self.game.board.pick_tile(self.camera, pos, flat=flat)
 
     def _start_map(self, map_path: str) -> None:
         """Load a map file and show it (loading state, spec).
@@ -237,6 +242,7 @@ class Application:
         self.game = load_game(map_path)
         self.camera = Camera(self.screen.get_size())
         mid = (self.game.board.cols // 2, self.game.board.rows // 2)
+        self.camera.limit_to_board(self.game.board)
         self.camera.center_on_world(*self.game.board.center_world(mid))
         seed = level_seed(map_path)
         difficulty = AI_DIFFICULTIES[C.MAP_DEFAULT_AI_DIFFICULTY]
@@ -328,7 +334,7 @@ class Application:
         lines = ["RMB: select building   LMB: select / send units   "
                  "Esc: cancel",
                  "Drag/WASD/arrows/edge: pan   wheel/+/-: zoom   P: pause   "
-                 "Esc: menu"]
+                 "Alt: flat pick   Esc: menu"]
         for i, line in enumerate(lines):
             surf = self.renderer.font(18).render(line, True,
                                                  C.UI_TEXT_COLOR)

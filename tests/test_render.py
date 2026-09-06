@@ -37,12 +37,16 @@ def test_view_clears_on_pan_and_zoom():
         app._draw()
     assert app.state == 2                          # now PLAYING
 
-    # The whole board panned far off-screen: every pixel must be water.
+    # Panning is limited to the board (specification): a huge pan clamps
+    # so that an extreme board tile sits at the screen centre.  The view
+    # still shows board plus open sea, with no stale pixels.
     app.camera.pan_projected(-50000, -50000)
+    (lo_x, hi_x), (lo_y, hi_y) = app.camera.bounds
+    assert lo_x <= app.camera.x <= hi_x and lo_y <= app.camera.y <= hi_y
     app.renderer.draw_world(app.game, app.camera)
     pygame.display.flip()
     frac = water_fraction(pygame.display.get_surface())
-    assert frac > 0.999, f"artefacts outside the board after pan ({frac})"
+    assert 0.0 < frac < 1.0, "expected board + sea at the pan limit"
 
     # Back on the board, zoom to both extremes: mixed view, no crash and
     # still no stale pixels from earlier frames.
