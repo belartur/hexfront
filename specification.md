@@ -31,7 +31,7 @@ Po wybraniu poziomu ładuje się on i gra się zaczyna.
 
 ## Sterowanie
 
-**Widok:** planszę można przesuwać, przeciągając ją myszą z wciśniętym LMB, klawiszami strzałek, klawiszami WASD oraz przez przytrzymanie kursora na krawędzi ekranu. Zoom wykonuje się kółkiem myszy albo klawiszami + i −, w zakresie od 0,5× do 2×.
+**Widok:** planszę można przesuwać, przeciągając ją myszą z wciśniętym LMB, klawiszami strzałek, klawiszami WASD oraz przez przytrzymanie kursora na krawędzi ekranu. Przesuwanie jest ograniczone do granic planszy (przy najdalszym przesunięciu, skrajne pole planszy może znaleźć się na środku ekranu). Zoom wykonuje się kółkiem myszy albo klawiszami + i −, w zakresie od 0,5× do 2×.
 
 **Zaznaczanie budynku:** kliknięcie PPM zawsze zaznacza wskazany własny budynek (z dodatnią liczbą jednostek w środku) jako budynek źródłowy; kolejne kliknięcia PPM zmieniają zaznaczenie na inny budynek. Kliknięcie PPM poza własnym budynkiem z jednostkami anuluje zaznaczenie.
 
@@ -62,7 +62,7 @@ Plik planszy jest binarny. Znajdują się w nim, kolejno, następujące informac
 * Wymiary planszy (2 bajty): liczba kolumn k (1 bajt) i wierszy w (1 bajt).
 * k·w liczb 4 bitowych kodujących wysokości kolejnych pól planszy, zapisane na k·w/2 bajtach gdy k·w jest parzyste, w przeciwnym razie na (k·w+1)/2 bajtach (wtedy ostatnie 4 bity przechowują zero).
 * Obiekty znajdujące się na planszy. Liczba użytych bajtów zależy od typu obiektu. Pierwsze 2 bajty kodują położenie obiektu (1 bajt kolumnę i 1 bajt wiersz). Piąty bajt koduje typ obiektu, zaś kolejne (w razie potrzeby, czyli tylko w przypadku budynków) jego własności:
-  * Liczby z zakresu 0-19 kodują budynek wraz z jego rodzajem (część zakresu jest nieużywana). Wtedy kolejne 2 bajty kodują kolejno: numer właściciela budynku (0 - neutralny, 1 - niebieski, 2 - czerwony, 3 - zielony, 4 - żółty) i początkową liczbę jednostek w budynku.
+  * Liczby z zakresu 0-19 kodują budynek wraz z jego rodzajem (część zakresu jest nieużywana). Wtedy kolejne 2 bajty kodują: numer właściciela budynku (na 6 bitach, za pomocą wartości: 0 - neutralny, 1 - niebieski, 2 - czerwony, 3 - zielony, 4 - żółty) i początkową liczbę jednostek w budynku z zakresu 0-999 (na 10 bitach).
   * Liczby z zakresu 20-22 kodują most wraz z kierunkiem jego obrotu.
   * Liczby z zakresu 23-25 kodują podjazd wraz z kierunkiem jego obrotu.
   * Liczby od 26 w górę kodują utrudnienia (wraz z rodzajem).
