@@ -127,10 +127,41 @@ class Renderer:
         return ((x + y) * C.ISO_SIN
                 + game.board.height(tile) * C.ELEVATION_PX)
 
+    def _visible_tiles(self, game, camera: Camera) -> set:
+        """Tiles that can appear on the screen (view culling).
+
+        The four screen corners are mapped back to the world plane at
+        zero and at the maximum elevation; the bounding box of the eight
+        world points, padded by two hexes, bounds every tile whose hex
+        or cliff could reach the screen.  Drawing only this subset keeps
+        huge boards (e.g. the editor's 256 x 256) fast; the painter
+        order of the visible subset is unchanged.
+        """
+        board = game.board
+        w, h = self.screen.get_size()
+        xs, ys = [], []
+        for wz in (0.0, 15 * C.ELEVATION_PX):
+            for sx, sy in ((0, 0), (w, 0), (0, h), (w, h)):
+                wx, wy = camera.screen_to_world(sx, sy, wz)
+                xs.append(wx)
+                ys.append(wy)
+        pad = 2.0 * board.side
+        col = 1.5 * board.side
+        row = math.sqrt(3.0) * board.side
+        q_lo = int(math.floor((min(xs) - pad) / col)) - 1
+        q_hi = int(math.ceil((max(xs) + pad) / col)) + 1
+        r_lo = int(math.floor((min(ys) - pad) / row)) - 1
+        r_hi = int(math.ceil((max(ys) + pad) / row)) + 1
+        return {(q, r) for q in range(q_lo, q_hi + 1)
+                for r in range(r_lo, r_hi + 1)
+                if board.contains((q, r))}
+
     def _draw_tiles(self, game, camera: Camera) -> None:
         board = game.board
         building_at = {b.tile: b for b in game.buildings}
-        for tile in sorted(board.tiles, key=lambda t: self._tile_depth(game, t)):
+        visible = self._visible_tiles(game, camera)
+        tiles = sorted(visible, key=lambda t: self._tile_depth(game, t))
+        for tile in tiles:
             t = board.tiles[tile]
             # Skirts first, then the top: the wall fills the gap below
             # its own hex and covers the lower terrain behind it.
@@ -146,7 +177,8 @@ class Renderer:
         # Bridge decks float above every terrain surface.
         for bridge in board.bridges:
             for frag in sorted(bridge.fragments):
-                self._draw_bridge_fragment(game, camera, bridge, frag)
+                if frag in visible:
+                    self._draw_bridge_fragment(game, camera, bridge, frag)
 
     # ------------------------------------------------------------------
     # Shadows of flying and ground vehicles
@@ -295,10 +327,8 @@ class Renderer:
     # ------------------------------------------------------------------
     # Range overlays (white turrets, light-green healers - specification)
     # ------------------------------------------------------------------
-    def _draw_ranges(self, game, camera: Camera, overlay) -> None:
-        """Range overlays: every translucent fill first, then every
-        outline (same hue, less transparent), so an outline covers the
-        fills of other ranges instead of blending into them."""
+    def _range_circles(self, game, camera: Camera) -> list:
+        """Polygons + colours of every range overlay of the state."""
         circles = []
         for b in game.buildings:
             z = game.board.height(b.tile) * C.ELEVATION_PX
@@ -321,11 +351,23 @@ class Renderer:
             circles.append((camera.screen_circle_poly(
                 v.x, v.y, C.BUFFER_HEAL_RADIUS, z),
                 C.RANGE_HEAL_COLOR, C.RANGE_HEAL_OUTLINE))
+        return circles
+
+    def _paint_range_circles(self, camera: Camera, circles: list,
+                             overlay) -> None:
+        """Every translucent fill first, then every outline (same hue,
+        less transparent), so an outline covers the fills of other
+        ranges instead of blending into them."""
         for pts, fill, _outline in circles:
             pygame.draw.polygon(overlay, fill, pts)
         for pts, _fill, outline in circles:
             pygame.draw.polygon(overlay, outline, pts,
                                 C.RANGE_OUTLINE_WIDTH)
+
+    def _draw_ranges(self, game, camera: Camera, overlay) -> None:
+        """Range overlays: white turrets, light-green healers (spec)."""
+        self._paint_range_circles(camera, self._range_circles(game, camera),
+                                  overlay)
 
     # ------------------------------------------------------------------
     # Static board rendering (shared with the board editor)
@@ -339,12 +381,15 @@ class Renderer:
         shares the board-drawing code with the game).
         """
         self.screen.fill(C.WATER_COLOR)
-        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
         # Ranges of turrets and (owned) healing towers are shown in the
-        # editor too, drawn exactly like in the game (editor spec).
-        self._draw_ranges(scene, camera, overlay)
+        # editor too, drawn exactly like in the game (editor spec); the
+        # translucent layer is only built when there is anything to draw.
+        circles = self._range_circles(scene, camera)
+        if circles:
+            overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+            self._paint_range_circles(camera, circles, overlay)
+            self.screen.blit(overlay, (0, 0))
         self._draw_tiles(scene, camera)
-        self.screen.blit(overlay, (0, 0))
         self._draw_badges(scene, camera)
         if hover_tile is not None and scene.board.contains(hover_tile):
             z = scene.board.height(hover_tile) * C.ELEVATION_PX

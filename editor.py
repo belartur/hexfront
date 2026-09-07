@@ -208,7 +208,7 @@ class Editor:
             self.scene.buildings.remove(building)
         t = self.scene.board.tiles[tile]
         t.obstacle = None
-        t.ramp = None
+        self.scene.board.remove_ramp(tile)
         t.bridge = None
         self._rebuild_bridges()
 
@@ -399,7 +399,7 @@ class Editor:
         if building is not None:
             self.scene.buildings.remove(building)
         t.obstacle = None
-        t.ramp = None
+        self.scene.board.remove_ramp(tile)
         t.bridge = None
         self._rebuild_bridges()
         if changed:
@@ -781,7 +781,8 @@ class Editor:
         Buildings on water, bridges over too-high land or joining
         different heights, ramps with a wrong height or joining equal
         heights, and missing player/opponent bases (editor spec).  Saving
-        and loading maps with errors stays possible.
+        and loading maps with errors stays possible.  The ramp scan only
+        walks the board's ramp registry, so huge boards stay cheap.
         """
         board, buildings = self.scene.board, self.scene.buildings
         errors = []
@@ -796,10 +797,8 @@ class Editor:
             for f in bridge.fragments:
                 if board.height(f) > ha - 3:
                     errors.append(f"most nad za wysokim lądem {f}")
-        for tile, t in board.tiles.items():
-            if t.ramp is None:
-                continue
-            a, b = t.ramp
+        for tile, ramp in board.ramps.items():
+            a, b = ramp
             if board.height(a) == board.height(b):
                 errors.append("podjazd łączący pola o tych samych "
                               f"wysokościach {tile}")
@@ -968,6 +967,8 @@ def trim_map(board: Board, buildings: list):
                               b.tile[1] - r0, units=b.units)
                      for b in buildings]
     mapfile.rebuild_bridges(new_board, frag_marks, validate=False)
+    new_board.ramps = {tile: t.ramp for tile, t in new_board.tiles.items()
+                       if t.ramp is not None}
     return new_board, new_buildings
 
 
@@ -1001,6 +1002,8 @@ def pad_map(board: Board, buildings: list, size: tuple = None):
                               b.tile[1] + r0, units=b.units)
                      for b in buildings]
     mapfile.rebuild_bridges(new_board, frag_marks, validate=False)
+    new_board.ramps = {tile: t.ramp for tile, t in new_board.tiles.items()
+                       if t.ramp is not None}
     return new_board, new_buildings
 
 

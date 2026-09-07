@@ -71,6 +71,10 @@ class Board:
         self.tiles = {(q, r): Tile() for q in range(cols)
                       for r in range(rows)}
         self.bridges = []
+        #: Tiles carrying a ramp: ``{tile: (a, b)}`` (see :meth:`set_ramp`).
+        #: Kept in sync by :meth:`set_ramp` / :meth:`remove_ramp`, so
+        #: whole-board scans can iterate ramps only.
+        self.ramps = {}
 
     # ------------------------------------------------------------------
     # Basic queries
@@ -142,6 +146,12 @@ class Board:
         t.height = min(self.height(a), self.height(b))
         t.obstacle = None
         t.bridge = None
+        self.ramps[p] = t.ramp
+
+    def remove_ramp(self, p: tuple) -> None:
+        """Remove the ramp from tile ``p``, if any."""
+        self.tiles[p].ramp = None
+        self.ramps.pop(p, None)
 
     def add_bridge(self, a: tuple, b: tuple, direction: int):
         """Try to build a bridge from ``a`` towards ``b`` in ``direction``.
