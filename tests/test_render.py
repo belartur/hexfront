@@ -95,9 +95,55 @@ def test_view_culling_covers_screen():
     pygame.quit()
 
 
+def test_vehicle_on_bridge_deck_not_on_ground():
+    """Vehicles travelling along a bridge stand on the deck (rules.md sec. 8).
+
+    Regression test: ground (non-helicopter) vehicles crossing a bridge
+    were drawn at the terrain height under the deck (e.g. at the bottom
+    of the water they span), instead of on the deck itself.
+    """
+    from war_regions.entities import Vehicle
+    from war_regions.constants import VehicleKind
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(14, 14)
+    for t in board.tiles.values():
+        t.height = 3
+    for t in [(5, 6), (5, 7)]:
+        board.tiles[t].height = 0
+    bridge = board.add_bridge((5, 5), (5, 8), 1)
+    assert bridge is not None
+    scene = SimpleNamespace(board=board)
+    deck_z = bridge.w * C.ELEVATION_PX
+    # A tank driving along the deck: source -> fragments -> far end.
+    route = [(5, 6), (5, 7), (5, 8)]
+    for pos_tile, index in [((5, 5), 0), ((5, 6), 1), ((5, 7), 2)]:
+        x, y = board.center_world(pos_tile)
+        v = Vehicle(VehicleKind.TANK, 0, 10.0, route,
+                    board.center_world((5, 5)), src_tile=(5, 5))
+        v.route_index = index
+        v.x, v.y = x, y
+        tile = board.world_to_tile(x, y)
+        prev, nxt = renderer._route_endpoints(v)
+        assert renderer._ground_z(scene, tile, (x, y), prev, nxt) \
+            == deck_z, (pos_tile, tile, prev, nxt)
+        assert renderer._vehicle_z(scene, v) == deck_z + 6.0
+    # A hovercraft sailing *under* the bridge stays at water level.
+    h = Vehicle(VehicleKind.HOVERCRAFT, 1, 10.0, [(4, 6)],
+                board.center_world((6, 6)), src_tile=(6, 6))
+    h.x, h.y = board.center_world((5, 6))
+    tile = board.world_to_tile(h.x, h.y)
+    assert renderer._ground_z(scene, tile, (h.x, h.y),
+                              *renderer._route_endpoints(h)) == 0.0
+    assert renderer._vehicle_z(scene, h) == 6.0
+    pygame.quit()
+
+
 if __name__ == "__main__":
     test_view_clears_on_pan_and_zoom()
     test_view_culling_covers_screen()
+    test_vehicle_on_bridge_deck_not_on_ground()
     print("OK   test_view_clears_on_pan_and_zoom")
     print("OK   test_view_culling_covers_screen")
+    print("OK   test_vehicle_on_bridge_deck_not_on_ground")
     print("\nAll render tests passed.")

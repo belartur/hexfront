@@ -69,7 +69,8 @@ class Game:
         route = self.board.find_path(src.tile, dst.tile, kind)
         if route is None:
             return False
-        vehicle = Vehicle(kind, owner, src.units, route, src.pos)
+        vehicle = Vehicle(kind, owner, src.units, route, src.pos,
+                          src_tile=src.tile)
         src.units = 0.0
         # Sending a vehicle never shows a floating -x number (spec sec.
         # "Grafika"), so drop any accumulated loss.
@@ -143,6 +144,18 @@ class Game:
                 "color": (C.NEUTRAL_COLOR if b.owner is None
                           else C.PLAYER_COLORS[b.owner % 4]),
                 "rocket": tk == C.TurretKind.ROCKET,
+                # Snapshot of the target's route context so the renderer
+                # can draw the tracer at deck height when the target is
+                # on a bridge (and at terrain height when under it).
+                "to_tile": self.board.world_to_tile(*target.pos),
+                "to_prev": (target.route[target.route_index - 1]
+                            if target.route
+                            and 0 < target.route_index <= len(target.route)
+                            else getattr(target, "src_tile", None)),
+                "to_next": (target.route[target.route_index]
+                            if target.route
+                            and 0 <= target.route_index < len(target.route)
+                            else None),
             })
 
     def _turret_target(self, b: Building, rng: float):

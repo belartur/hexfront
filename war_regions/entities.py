@@ -115,7 +115,7 @@ class Vehicle:
     _next_id = 1
 
     def __init__(self, kind: VehicleKind, owner: int, units: float,
-                 route: list, start_pos: tuple):
+                 route: list, start_pos: tuple, src_tile=None):
         self.id = Vehicle._next_id
         Vehicle._next_id += 1
         self.kind = kind
@@ -124,6 +124,10 @@ class Vehicle:
         self.route = list(route)          # tiles after source, incl. target
         self.route_index = 0              # next waypoint into ``route``
         self.x, self.y = start_pos        # continuous world position
+        #: Source tile the route starts from (``None`` for ad-hoc test
+        #: vehicles).  Lets the renderer tell a bridge deck apart from the
+        #: ground below on the very first route segment.
+        self.src_tile = src_tile
         self.combat_target = None         # Vehicle | None (sec. 9)
         self.last_opponent = None         # last vehicle we shot at
         self.fire_timer = 0.0             # combat shot cooldown progress
