@@ -41,6 +41,7 @@ class Application:
         self.running = True
         self.menu_rects = []          # [(rect, map file path), ...]
         self.maps = list_maps()       # levels shown in the menu
+        self.menu_scroll = 0          # vertical scroll of the menu grid (px)
         self.mouse_pos = (0, 0)
         self.game = None
         self.camera = None
@@ -88,6 +89,10 @@ class Application:
                 if ev.button == 1:
                     self._down_pos = ev.pos
                     self._dragging = False
+                elif self.state == STATE_MENU and ev.button in (4, 5):
+                    self._scroll_menu(C.MENU_SCROLL_STEP
+                                      if ev.button == 5
+                                      else -C.MENU_SCROLL_STEP)
                 elif ev.button == 3 and self.state == STATE_PLAYING:
                     self._select_rmb(ev.pos)       # RMB always selects
                 elif ev.button in (4, 5) and self.camera is not None:
@@ -95,7 +100,9 @@ class Application:
                         C.ZOOM_STEP if ev.button == 4 else 1.0 / C.ZOOM_STEP,
                         *ev.pos)
             elif ev.type == pygame.MOUSEWHEEL:
-                if self.camera is not None:
+                if self.state == STATE_MENU:
+                    self._scroll_menu(-ev.y * C.MENU_SCROLL_STEP)
+                elif self.camera is not None:
                     self.camera.zoom_at(
                         C.ZOOM_STEP if ev.y > 0 else 1.0 / C.ZOOM_STEP,
                         *self.mouse_pos)
@@ -130,11 +137,65 @@ class Application:
                 self.camera.zoom_at(1.0 / C.ZOOM_STEP, *self.mouse_pos)
         elif self.state == STATE_MENU and ev.key == pygame.K_ESCAPE:
             self.running = False
+        elif self.state == STATE_MENU and ev.key in (pygame.K_UP,
+                                                     pygame.K_PAGEUP):
+            self._scroll_menu(-C.MENU_SCROLL_STEP)
+        elif self.state == STATE_MENU and ev.key in (pygame.K_DOWN,
+                                                     pygame.K_PAGEDOWN):
+            self._scroll_menu(C.MENU_SCROLL_STEP)
 
     def _enter_menu(self) -> None:
         """Return to the level menu, refreshing the map file list."""
         self.state = STATE_MENU
         self.maps = list_maps()
+        self.menu_scroll = 0
+
+    def _menu_grid_metrics(self) -> dict:
+        """Geometry of the three-column menu grid for the current window.
+
+        Returns column count/width, row stride, visible area and the
+        maximum scroll offset, so scrolling and drawing stay consistent.
+        """
+        w, h = self.screen.get_size()
+        n = len(self.maps)
+        cols = min(C.MENU_COLUMNS, n) if n else 1
+        cols = max(1, cols)
+        avail_w = max(1, w - 2 * C.MENU_SIDE_MARGIN)
+        col_w = max(1, avail_w // cols)
+        font = self.renderer.font(C.MENU_FONT_SIZE)
+        cell_h = font.get_linesize() + 2 * C.MENU_CELL_PAD_Y
+        stride = cell_h + C.MENU_ROW_GAP
+        rows = (n + cols - 1) // cols if n else 0
+        content_h = rows * stride - (C.MENU_ROW_GAP if rows else 0)
+        grid_top = int(h * C.MENU_GRID_TOP_FRACTION)
+        grid_bottom = h - C.MENU_GRID_BOTTOM_MARGIN
+        visible_h = max(1, grid_bottom - grid_top)
+        max_scroll = max(0, content_h - visible_h)
+        return {"cols": cols, "col_w": col_w, "cell_h": cell_h,
+                "stride": stride, "rows": rows, "content_h": content_h,
+                "grid_top": grid_top, "grid_bottom": grid_bottom,
+                "visible_h": visible_h, "max_scroll": max_scroll}
+
+    def _scroll_menu(self, delta: int) -> None:
+        """Scroll the menu grid by ``delta`` pixels, clamped to content."""
+        m = self._menu_grid_metrics()
+        self.menu_scroll = max(0, min(m["max_scroll"],
+                                      self.menu_scroll + delta))
+
+    def _fit_menu_text(self, font: pygame.font.Font, text: str,
+                       max_w: int) -> pygame.Surface:
+        """Render ``text`` truncated with an ellipsis to fit ``max_w``."""
+        if font.size(text)[0] <= max_w:
+            return font.render(text, True, C.UI_TEXT_COLOR)
+        ellipsis = "\u2026"
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if font.size(text[:mid] + ellipsis)[0] <= max_w:
+                lo = mid
+            else:
+                hi = mid - 1
+        return font.render(text[:lo] + ellipsis, True, C.UI_TEXT_COLOR)
 
     def _click(self, pos) -> None:
         if self.state == STATE_MENU:
@@ -343,23 +404,38 @@ class Application:
     def _draw_menu(self) -> None:
         self.screen.fill(C.UI_BACKGROUND)
         w, h = self.screen.get_size()
-        title = self.renderer.font(72).render("WAR REGIONS", True,
-                                              C.UI_TEXT_COLOR)
+        title_size = 64 if h < 620 or w < 640 else 72
+        title = self.renderer.font(title_size).render("WAR REGIONS", True,
+                                                      C.UI_TEXT_COLOR)
         self.screen.blit(title, (w // 2 - title.get_width() // 2,
-                                 int(h * 0.14)))
-        sub = self.renderer.font(26).render("choose a level", True,
+                                 int(h * 0.08)))
+        sub = self.renderer.font(24).render("choose a level", True,
                                             (150, 155, 170))
         self.screen.blit(sub, (w // 2 - sub.get_width() // 2,
-                               int(h * 0.14) + title.get_height() + 6))
-        self.menu_rects = []
-        y = int(h * 0.36)
+                               int(h * 0.08) + title.get_height() + 4))
+        m = self._menu_grid_metrics()
+        self.menu_scroll = max(0, min(m["max_scroll"], self.menu_scroll))
+        scroll = self.menu_scroll
+        cols, col_w = m["cols"], m["col_w"]
+        font = self.renderer.font(C.MENU_FONT_SIZE)
+        max_text_w = max(1, col_w - 2 * C.MENU_CELL_PAD_X - 12)
         mouse = pygame.mouse.get_pos()
-        for map_path in self.maps:
+        self.menu_rects = []
+        for i, map_path in enumerate(self.maps):
+            col, row = i % cols, i // cols
+            cx = C.MENU_SIDE_MARGIN + col * col_w + col_w // 2
+            cy = m["grid_top"] + row * m["stride"] + m["cell_h"] // 2 \
+                - scroll
             text = os.path.splitext(os.path.basename(map_path))[0]
-            surf = self.renderer.font(40).render(text, True,
-                                                 C.UI_TEXT_COLOR)
-            rect = surf.get_rect(center=(w // 2, y))
-            rect = rect.inflate(48, 20)
+            surf = self._fit_menu_text(font, text, max_text_w)
+            rect = pygame.Rect(0, 0,
+                               surf.get_width() + 2 * C.MENU_CELL_PAD_X,
+                               m["cell_h"])
+            rect.center = (cx, cy)
+            self.menu_rects.append((rect, map_path))
+            if cy + m["cell_h"] // 2 < m["grid_top"] \
+                    or cy - m["cell_h"] // 2 > m["grid_bottom"]:
+                continue
             if rect.collidepoint(mouse):
                 pygame.draw.rect(self.screen, (52, 58, 78), rect,
                                  border_radius=8)
@@ -367,9 +443,21 @@ class Application:
                                  border_radius=8)
             self.screen.blit(surf, (rect.centerx - surf.get_width() // 2,
                                     rect.centery - surf.get_height() // 2))
-            self.menu_rects.append((rect, map_path))
-            y += int(h * 0.13)
-        hint = self.renderer.font(20).render(
-            "click a level to play - LMB select, Esc menu, P pause", True,
-            (120, 125, 140))
-        self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h - 50))
+        if m["max_scroll"] > 0:
+            bar_h = max(24, int(m["visible_h"] * m["visible_h"]
+                                / max(1, m["content_h"])))
+            bar_y = m["grid_top"] + int(
+                (m["visible_h"] - bar_h) * scroll / m["max_scroll"])
+            pygame.draw.rect(self.screen, (52, 58, 78),
+                             pygame.Rect(w - 14, m["grid_top"], 6,
+                                         m["visible_h"]),
+                             border_radius=3)
+            pygame.draw.rect(self.screen, (120, 140, 200),
+                             pygame.Rect(w - 14, bar_y, 6, bar_h),
+                             border_radius=3)
+            hint_text = "click a level to play - wheel/Up/Down scrolls"
+        else:
+            hint_text = "click a level to play"
+        hint = self.renderer.font(20).render(hint_text, True,
+                                             (120, 125, 140))
+        self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h - 40))

@@ -207,6 +207,20 @@ PATH_PREVIEW_COLOR = (255, 240, 120)
 UI_TEXT_COLOR = (235, 235, 235)
 UI_BACKGROUND = (24, 26, 34)
 
+#: Level-menu grid layout (specification.md "Menu poziomow"; UI only,
+#: no gameplay rule section).  The menu shows one clickable cell per
+#: map in a compact grid so dozens of levels fit on screen; extra rows
+#: are reached with the mouse wheel / Up/Down keys.
+MENU_COLUMNS = 3
+MENU_FONT_SIZE = 26
+MENU_CELL_PAD_X = 18
+MENU_CELL_PAD_Y = 8
+MENU_ROW_GAP = 6
+MENU_SIDE_MARGIN = 40
+MENU_GRID_TOP_FRACTION = 0.30
+MENU_GRID_BOTTOM_MARGIN = 70
+MENU_SCROLL_STEP = 48
+
 # --------------------------------------------------------------------------
 # Map files and the board editor (specification: "Planszy i edytor plansz")
 # --------------------------------------------------------------------------
