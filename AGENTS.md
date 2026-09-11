@@ -65,6 +65,7 @@ Menu gry listuje dynamicznie wszystkie `maps/*.map` przez `mapfile.list_maps()` 
 7. Uruchamianie: `python3 main.py`, `python3 editor.py`, `python3 make_maps.py` (wymaga `pygame`; testy renderujące także `numpy`).
 8. Po każdej zmianie logiki/formatu uruchom odpowiadające testy headless (`python3 -m tests.test_logic`, `python3 -m tests.test_mapfile`, przy zmianach graficznych także `python3 -m tests.test_render`) i dopisz test przy nowej regule.
 9. Respektuj `.gitignore` — to on jest źródłem prawdy, co commitować; nie dodawaj na siłę plików ignorowanych. Katalog `maps/` jest ignorowany, więc po świeżym klonie odtwórz mapy poleceniem `python3 make_maps.py`.
+10. Pilnuj zgodności kodu ze specyfikacją: jeśli zadanie zmienia zachowanie, parametr lub format opisany w `specification.md` / `specification_of_map_editor.md` / `rules.md` (w tym format mapy), zaktualizuj w tym samym commicie i kod, i odpowiedni dokument, żeby pozostały zgodne.
 
 ## 5. Obowiązek aktualizacji tego pliku
 
