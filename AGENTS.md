@@ -44,14 +44,14 @@ Menu gry listuje dynamicznie wszystkie `maps/*.map` przez `mapfile.list_maps()` 
 - `war_regions/game.py` — symulacja czasu rzeczywistego: `Game` (`try_send()`, `update()` o stałym kroku `SIM_DT`, produkcja baz, przeludnienie, działka, wieże, aura bufora, ruch/walka/pułapki/miny/ściany, przejęcia budynków, eliminacja/zwycięstwo). Nic o pygame.
 - `war_regions/ai.py` — `AIController` (pętla decyzyjna z sekcji 13 `rules.md`: scoring `W1–W6`, próg, szum, opóźnienie reakcji, reguły bezpieczeństwa). Determinystyczne dla danego seeda.
 - `war_regions/levels.py` — generator proceduralny: `LevelConfig`, `LEVELS`, `build_level()`. Używany przez `make_maps.py` i testy.
-- `war_regions/mapfile.py` — format binarny `.map` (nagłówek, 4-bitowe wysokości, rekordy obiektów, kody `BUILDING_CODES` / `OBSTACLE_CODES` / osie mostów i podjazdów): `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
+- `war_regions/mapfile.py` — implementacja formatu `.map` opisanego w `specification.md`: `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
 - `war_regions/camera.py` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`). Zoom dotyczy tylko renderingu.
 - `war_regions/render.py` — rysowanie z kodu (bez assetów rastrowych): `Renderer.draw_world()` + helpery terenu, zasięgów, dróg, obiektów, badge z liczbą jednostek, pływające `-x/+x`. Kolor gracza zawsze jako argument.
 - `war_regions/app.py` — okno, menu poziomów, input i HUD: `Application` (`run()`, obsługa LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza). Wybór poziomu kliknięciem; Esc wraca do menu.
 
 ### Testy `tests/`
 - `tests/test_logic.py` — reguły headless (`python3 -m tests.test_logic`): ruch, produkcja, walki, działka, leczenie, ściany/miny/pułapki, eliminacja, AI, pełne symulacje poziomów.
-- `tests/test_mapfile.py` — format map i edytor (`python3 -m tests.test_mapfile`): round-trip, bity właściciela/jednostek, `load_game`, `trim_map`/`pad_map`, akcje i błędy edytora, `pick_tile(flat=True)`.
+- `tests/test_mapfile.py` — format map i edytor (`python3 -m tests.test_mapfile`): `load_game`, `trim_map`/`pad_map`, akcje i błędy edytora, `pick_tile(flat=True)`.
 - `tests/test_render.py` — regresja renderingu (`python3 -m tests.test_render`, wymaga `numpy`): czyszczenie widoku przy pan/zoom, culling kafelków.
 
 ## 4. Zasady pracy AI
@@ -59,11 +59,12 @@ Menu gry listuje dynamicznie wszystkie `maps/*.map` przez `mapfile.list_maps()` 
 1. Przed kodem przeczytaj właściwy dokument z sekcji 1 i docstringi edytowanego modułu. Nie zgaduj wartości — sprawdź `constants.py` i wskazaną sekcję `rules.md`.
 2. Trzymaj separację: logika w `game.py` / `board.py` / `ai.py`, rysowanie w `render.py`, input w `app.py` / `editor.py`. Wyjątki od reguły tylko z uzasadnieniem w komentarzu.
 3. Nowe liczby tylko do `constants.py` z komentarzem dokumentującym (która sekcja zasad). Nigdy nie hardkoduj zasięgów/prędkości/obrażeń w logice ani w rendererze.
-4. Format `.map` zmieniasz wyłącznie w `mapfile.py` (i testach w `test_mapfile.py`) i pilnuj zgodności z jego opisem w `specification.md`
+4. Opis formatu `.map` jest w `specification.md`; implementację zmieniasz wyłącznie w `mapfile.py` (i testach w `test_mapfile.py`).
 5. Edytor i gra współdzielą `Renderer` i `Board.pick_tile()` — nie rozjeżdżaj ich (pick z Alt jako `flat=True`).
 6. Zachowaj konwencje: angielskie identyfikatory i docstringi, czytelne funkcje, pełne sygnatury bez placeholderów.
 7. Uruchamianie: `python3 main.py`, `python3 editor.py`, `python3 make_maps.py` (wymaga `pygame`; testy renderujące także `numpy`).
 8. Po każdej zmianie logiki/formatu uruchom odpowiadające testy headless (`python3 -m tests.test_logic`, `python3 -m tests.test_mapfile`, przy zmianach graficznych także `python3 -m tests.test_render`) i dopisz test przy nowej regule.
+9. Respektuj `.gitignore` — to on jest źródłem prawdy, co commitować; nie dodawaj na siłę plików ignorowanych. Katalog `maps/` jest ignorowany, więc po świeżym klonie odtwórz mapy poleceniem `python3 make_maps.py`.
 
 ## 5. Obowiązek aktualizacji tego pliku
 
