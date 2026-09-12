@@ -14,12 +14,12 @@ import pygame                                               # noqa: E402
 
 from types import SimpleNamespace                           # noqa: E402
 
-from war_regions import constants as C                      # noqa: E402
-from war_regions.app import Application                     # noqa: E402
-from war_regions.board import Board                         # noqa: E402
-from war_regions.camera import Camera                       # noqa: E402
-from war_regions.constants import WATER_COLOR               # noqa: E402
-from war_regions.render import Renderer                     # noqa: E402
+from hexfront import constants as C                      # noqa: E402
+from hexfront.app import Application                     # noqa: E402
+from hexfront.board import Board                         # noqa: E402
+from hexfront.camera import Camera                       # noqa: E402
+from hexfront.constants import WATER_COLOR               # noqa: E402
+from hexfront.render import Renderer                     # noqa: E402
 
 
 def water_fraction(surf: pygame.Surface) -> float:
@@ -102,8 +102,8 @@ def test_vehicle_on_bridge_deck_not_on_ground():
     were drawn at the terrain height under the deck (e.g. at the bottom
     of the water they span), instead of on the deck itself.
     """
-    from war_regions.entities import Vehicle
-    from war_regions.constants import VehicleKind
+    from hexfront.entities import Vehicle
+    from hexfront.constants import VehicleKind
     screen = pygame.display.set_mode((640, 480))
     renderer = Renderer(screen)
     board = Board(14, 14)

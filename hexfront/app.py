@@ -34,7 +34,7 @@ class Application:
     def __init__(self, size=(1180, 720)):
         pygame.init()
         self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
-        pygame.display.set_caption("War Regions")
+        pygame.display.set_caption("Hexfront")
         self.clock = pygame.time.Clock()
         self.renderer = Renderer(self.screen)
         self.state = STATE_MENU
@@ -405,7 +405,7 @@ class Application:
         self.screen.fill(C.UI_BACKGROUND)
         w, h = self.screen.get_size()
         title_size = 64 if h < 620 or w < 640 else 72
-        title = self.renderer.font(title_size).render("WAR REGIONS", True,
+        title = self.renderer.font(title_size).render("HEXFRONT", True,
                                                       C.UI_TEXT_COLOR)
         self.screen.blit(title, (w // 2 - title.get_width() // 2,
                                  int(h * 0.08)))

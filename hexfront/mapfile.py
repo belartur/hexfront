@@ -18,7 +18,7 @@ Layout of a ``.map`` file, all integers big-endian:
     opposite neighbours,
   - 26 and up obstacle kinds, see ``OBSTACLE_CODES``.
 
-Bridge fragments are reassembled into whole :class:`~war_regions.board.Bridge`
+Bridge fragments are reassembled into whole :class:`~hexfront.board.Bridge`
 objects by :func:`rebuild_bridges` (shared with the editor).
 """
 
@@ -258,7 +258,7 @@ def rebuild_bridges(board: Board, frag_marks: dict,
 
     ``frag_marks`` maps a deck tile to the geometric axis 0-2 of its
     bridge.  Every maximal straight run of same-axis fragments becomes one
-    :class:`~war_regions.board.Bridge` via :meth:`Board.add_bridge`,
+    :class:`~hexfront.board.Bridge` via :meth:`Board.add_bridge`,
     which validates the geometry of rules.md sec. 8 (equal end heights
     >= 3, fragments low enough); invalid runs are silently dropped.
 

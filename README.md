@@ -1,4 +1,4 @@
-# War Regions
+# Hexfront
 
 A real-time strategy game on a hexagonal board, implemented in Python with
 **pygame**.  The game rules live in [rules.md](rules.md), the implementation
@@ -40,7 +40,7 @@ Levels live as binary map files in the `maps/` directory; the menu lists
 every `maps/*.map` file and shows the file name as the level name.  The
 file format (dimensions, 4-bit heights, buildings/ramps/bridges/obstacles)
 is specified in `specification.md` ("Format pliku planszy") and implemented
-in `war_regions/mapfile.py`.
+in `hexfront/mapfile.py`.
 
 The board editor is a separate application sharing the game's board
 renderer and tile picking.  Editing is key-driven: point a tile with the
@@ -60,12 +60,12 @@ python3 editor.py maps/Zatoka.map
 ```
 
 `python3 make_maps.py` regenerates the bundled sample maps from the
-procedural generator in `war_regions/levels.py`.
+procedural generator in `hexfront/levels.py`.
 
 ## Code layout
 
 ```
-war_regions/
+hexfront/
   constants.py   every tunable value (documented; rules.md units "j")
   hexgrid.py     flat-top hex geometry (odd-q offset coordinates)
   board.py       tiles, obstacles, ramps, bridges, path-finding
@@ -86,5 +86,5 @@ tests/test_mapfile.py  map format & editor tests: python3 -m tests.test_mapfile
 ```
 
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in
-`war_regions/constants.py` (`UNIT_J_TO_PX`); zoom and window scaling affect
+`hexfront/constants.py` (`UNIT_J_TO_PX`); zoom and window scaling affect
 rendering only.  The hexagon side is 36 j (flat-top layout).

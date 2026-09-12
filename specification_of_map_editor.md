@@ -1,4 +1,4 @@
-# War Regions — specyfikacja implementacji gry
+# Hexfront — specyfikacja implementacji gry
 
 ## Wstęp
 Ten plik uzupełnia specyfikację [specification.md](specification.md), o szczegóły edytora map do gry o zasadach opisanych w [rules.md](rules.md).

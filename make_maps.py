@@ -4,14 +4,14 @@
 Run with ``python3 make_maps.py``.  The menu of the game lists every
 ``.map`` file of the ``maps`` directory (specification: "Planszy i edytor
 plansz"), so this script just materialises the levels from
-:mod:`war_regions.levels` as map files; the editor can modify them and
+:mod:`hexfront.levels` as map files; the editor can modify them and
 save copies under new names.
 """
 
 import os
 
-from war_regions.levels import LEVELS, build_level
-from war_regions.mapfile import save_map
+from hexfront.levels import LEVELS, build_level
+from hexfront.mapfile import save_map
 
 
 def main() -> None:

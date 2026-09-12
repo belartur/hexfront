@@ -1,6 +1,6 @@
 """Game entities: players, buildings and vehicles.
 
-Pure data + small helpers; all rule logic lives in :mod:`war_regions.game`.
+Pure data + small helpers; all rule logic lives in :mod:`hexfront.game`.
 """
 
 from dataclasses import dataclass

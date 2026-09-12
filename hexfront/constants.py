@@ -1,4 +1,4 @@
-"""Global constants of *War Regions*.
+"""Global constants of *Hexfront*.
 
 Every gameplay value (distances, ranges, speeds, radii, amounts) is taken
 from ``rules.md`` and expressed in distance units **j**.  The conversion

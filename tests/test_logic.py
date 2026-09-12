@@ -1,4 +1,4 @@
-"""Headless logic tests for War Regions.
+"""Headless logic tests for Hexfront.
 
 Run with:  python3 -m tests.test_logic
 Uses controlled, hand-built boards so every rule is verified exactly.
@@ -10,13 +10,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from war_regions import constants as C                     # noqa: E402
-from war_regions.board import Board, Obstacle              # noqa: E402
-from war_regions.constants import VehicleKind              # noqa: E402
-from war_regions.entities import (Building, BuildingKind, Player,  # noqa: E402
+from hexfront import constants as C                     # noqa: E402
+from hexfront.board import Board, Obstacle              # noqa: E402
+from hexfront.constants import VehicleKind              # noqa: E402
+from hexfront.entities import (Building, BuildingKind, Player,  # noqa: E402
                                   Vehicle)
-from war_regions.game import Game                          # noqa: E402
-from war_regions import hexgrid                            # noqa: E402
+from hexfront.game import Game                          # noqa: E402
+from hexfront import hexgrid                            # noqa: E402
 
 
 def make_game(board):
@@ -277,8 +277,8 @@ def test_elimination_and_victory():
 
 def test_ai_sends_units():
     """AI decides on its interval and sends vehicles (sec. 13)."""
-    from war_regions.levels import build_level, LEVELS
-    from war_regions.ai import AIController, AI_DIFFICULTIES
+    from hexfront.levels import build_level, LEVELS
+    from hexfront.ai import AIController, AI_DIFFICULTIES
     game = build_level(LEVELS[0])
     base = next(b for b in game.buildings if b.owner == 1)
     base.units = 90.0                 # enough to survive en-route turret fire
@@ -292,8 +292,8 @@ def test_ai_sends_units():
 
 def test_full_sims():
     """Two minutes of every level with AI - no crashes, sane state."""
-    from war_regions.levels import build_level, LEVELS
-    from war_regions.ai import AIController, AI_DIFFICULTIES
+    from hexfront.levels import build_level, LEVELS
+    from hexfront.ai import AIController, AI_DIFFICULTIES
     for cfg in LEVELS:
         game = build_level(cfg)
         ais = [AIController(game, p.id, AI_DIFFICULTIES[cfg.ai_difficulty],

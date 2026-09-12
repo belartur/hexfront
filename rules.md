@@ -1,8 +1,8 @@
-# War Regions — Zasady Gry
+# Hexfront — Zasady Gry
 
 ## 1. Mapa
 
-Gra War Regions rozgrywa się na planszy zbudowanej z sąsiadujących (czyli mających wspólny bok) **sześciokątnych pól**.
+Gra Hexfront rozgrywa się na planszy zbudowanej z sąsiadujących (czyli mających wspólny bok) **sześciokątnych pól**.
 
 W rozgrywce bierze udział od 2 do 4 graczy, w tym 1 sterowany przez człowieka, i reszta przez komputer.
 

@@ -11,14 +11,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame                                                    # noqa: E402
-from war_regions import mapfile                                  # noqa: E402
-from war_regions.board import Board, Obstacle                    # noqa: E402
-from war_regions.camera import Camera                            # noqa: E402
-from war_regions.constants import VehicleKind                    # noqa: E402
-from war_regions.constants import (                              # noqa: E402
+from hexfront import mapfile                                  # noqa: E402
+from hexfront.board import Board, Obstacle                    # noqa: E402
+from hexfront.camera import Camera                            # noqa: E402
+from hexfront.constants import VehicleKind                    # noqa: E402
+from hexfront.constants import (                              # noqa: E402
     EDITOR_DIGIT_COMMIT_DELAY, EDITOR_LAND_HEIGHT, EDITOR_LAND_SIZE,
     EDITOR_NEW_SIZE)
-from war_regions.entities import Building, BuildingKind          # noqa: E402
+from hexfront.entities import Building, BuildingKind          # noqa: E402
 from editor import Editor, EditorScene, pad_map, trim_map        # noqa: E402
 
 

@@ -1,7 +1,7 @@
-# War Regions — specyfikacja implementacji gry
+# Hexfront — specyfikacja implementacji gry
 
 ## Wstęp
-War Regions to gra komputerowa napisana w Pythonie, przy użyciu bibliotek PyGame.
+Hexfront to gra komputerowa napisana w Pythonie, przy użyciu bibliotek PyGame.
 
 Reguły gry znajdują się w pliku [rules.md](rules.md).
 
@@ -58,11 +58,11 @@ Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_o
 Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku.
 
 ## Format pliku planszy
-Plik planszy jest binarny. Znajdują się w nim, kolejno, następujące informacje:
-* Wymiary planszy (2 bajty): liczba kolumn k (1 bajt) i wierszy w (1 bajt).
-* k·w liczb 4 bitowych kodujących wysokości kolejnych pól planszy, zapisane na k·w/2 bajtach gdy k·w jest parzyste, w przeciwnym razie na (k·w+1)/2 bajtach (wtedy ostatnie 4 bity przechowują zero).
-* Obiekty znajdujące się na planszy. Liczba użytych bajtów zależy od typu obiektu. Pierwsze 2 bajty kodują położenie obiektu (1 bajt kolumnę i 1 bajt wiersz). Piąty bajt koduje typ obiektu, zaś kolejne (w razie potrzeby, czyli tylko w przypadku budynków) jego własności:
-  * Liczby z zakresu 0-19 kodują budynek wraz z jego rodzajem (część zakresu jest nieużywana). Wtedy kolejne 2 bajty kodują: numer właściciela budynku (na 6 bitach, za pomocą wartości: 0 - neutralny, 1 - niebieski, 2 - czerwony, 3 - zielony, 4 - żółty) i początkową liczbę jednostek w budynku z zakresu 0-999 (na 10 bitach).
-  * Liczby z zakresu 20-22 kodują most wraz z kierunkiem jego obrotu.
-  * Liczby z zakresu 23-25 kodują podjazd wraz z kierunkiem jego obrotu.
-  * Liczby od 26 w górę kodują utrudnienia (wraz z rodzajem).
+Plik planszy jest binarny, wszystkie liczby wielobajtowe zapisane są big-endian. Znajdują się w nim, kolejno, następujące informacje:
+* Wymiary planszy (2 bajty): liczba kolumn k (1 bajt) i wierszy w (1 bajt), każda z zakresu 1–255 (maksimum wynika z 1 bajta na wymiar; `0` jest odrzucane przy odczycie jako pusta plansza).
+* k·w liczb 4-bitowych kodujących wysokości kolejnych pól planszy (0–15, 0 to woda) w kolejności row-major: indeks `r·k+q`. Zapisane są na `ceil(k·w/2) = (k·w+1)//2` bajtach, po dwa pola na bajt: wcześniejsze pole pary na starszych 4 bitach (high nibble, bity 7–4), późniejsze na młodszych 4 bitach (low nibble, bity 3–0). Gdy k·w jest nieparzyste, młodsze 4 bity (low nibble) ostatniego bajta przechowują zero (padding).
+* Obiekty znajdujące się na planszy, jeden rekord za drugim aż do końca pliku (bez licznika ani terminatora). Rekord nie-budynkowy ma 3 bajty, rekord budynkowy 5 bajtów. Pierwsze 2 bajty kodują położenie obiektu (1 bajt kolumnę `q` i 1 bajt wiersz `r`). Trzeci bajt koduje typ obiektu, zaś kolejne 2 bajty (wyłącznie w przypadku budynków) jego własności:
+  * Liczby z zakresu 0–19 kodują budynek wraz z jego rodzajem (odwzorowanie kod → rodzaj definiuje `BUILDING_CODES` w `hexfront/mapfile.py`; kody 8–19 są obecnie nieużywane). Wtedy kolejne 2 bajty to jedno 16-bitowe słowo big-endian `props = (owner << 10) | units`: numer właściciela budynku na 6 starszych bitach (bity 15–10, wartości: 0 — neutralny, 1 — niebieski, 2 — czerwony, 3 — zielony, 4 — żółty; wartości 5–63 rezerwowe) i początkowa liczba jednostek w budynku na 10 młodszych bitach (bity 9–0, zakres mapy 0–999). 10 bitów mieści fizycznie 0–1023, więc wartości 1000–1023 są przy odczycie sprowadzane z ostrzeżeniem do 999.
+  * Liczby z zakresu 20–22 kodują fragment pokładu mostu: `kod − 20` to oś geometryczna mostu `0–2` (kierunek mostu modulo 3, por. `BRIDGE_CODE_BASE` w `hexfront/mapfile.py`). Cały most zapisywany jest jako jeden rekord na każdy fragment pokładu; przy odczycie fragmenty są składane w całe mosty przez `rebuild_bridges()`.
+  * Liczby z zakresu 23–25 kodują podjazd: `kod − 23` to oś geometryczna `0–2` pary łączonych przeciwległych sąsiadów (por. `RAMP_CODE_BASE` w `hexfront/mapfile.py`); przy odczycie końce to `a = neighbor(tile, oś)` i `b = neighbor(tile, oś+3)`.
+  * Liczby od 26 w górę kodują utrudnienia wraz z rodzajem (odwzorowanie kod → rodzaj definiuje `OBSTACLE_CODES` w `hexfront/mapfile.py`, obecnie 26 — ściana, 27 — mina lądowa, 28 — mina wodna, 29 — pułapka ogniowa, 30 — pułapka lodowa; nieznane kody są przy odczycie pomijane z ostrzeżeniem).

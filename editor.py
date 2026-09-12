@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Board editor of *War Regions* (a separate application; specification:
+"""Board editor of *Hexfront* (a separate application; specification:
 ``specification_of_map_editor.md``).  Run with ``python3 editor.py [map]``.
 
 Editing model: point a tile with the mouse (picked by exactly the same
@@ -46,13 +46,13 @@ import sys
 
 import pygame
 
-from war_regions import constants as C
-from war_regions import hexgrid
-from war_regions import mapfile
-from war_regions.board import Board, Obstacle
-from war_regions.camera import Camera
-from war_regions.entities import Building, BuildingKind, is_base
-from war_regions.render import Renderer
+from hexfront import constants as C
+from hexfront import hexgrid
+from hexfront import mapfile
+from hexfront.board import Board, Obstacle
+from hexfront.camera import Camera
+from hexfront.entities import Building, BuildingKind, is_base
+from hexfront.render import Renderer
 
 #: Building kinds behind the ``b`` key, in cycling order.
 BUILDING_ORDER = list(BuildingKind)
@@ -102,7 +102,7 @@ class Editor:
     def __init__(self, size=(1180, 720)):
         pygame.init()
         self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
-        pygame.display.set_caption("War Regions - Board Editor")
+        pygame.display.set_caption("Hexfront - Board Editor")
         self.clock = pygame.time.Clock()
         self.renderer = Renderer(self.screen)
         self.camera = Camera(self.screen.get_size())
