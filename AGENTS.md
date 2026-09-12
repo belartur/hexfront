@@ -13,7 +13,7 @@ Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasa
 
 Zasada: nie przepisuj liczb ani reguł z `rules.md` / `specification*.md` do kodu ani do tego pliku. W kodzie używaj stałych z `hexfront/constants.py`; w dokumentacji dawaj odnośniki do sekcji źródłowych.
 
-Język: dokumenty (`rules.md`, `specification*.md`, ten plik) są po polsku. Kod, komentarze i docstringi są po angielsku — nowe funkcje/metody/klasy/pola też pisz po angielsku z dokumentacją.
+Język: dokumenty (`rules.md`, `specification*.md`, ten plik) są po polsku. Kod, komentarze i docstringi są po angielsku — nowe funkcje/metody/klasy/pola też pisz po angielsku z dokumentacją. Commity gita opisuj po angielsku.
 
 ## 2. Układ repozytorium
 
