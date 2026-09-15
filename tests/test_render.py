@@ -95,6 +95,102 @@ def test_view_culling_covers_screen():
     pygame.quit()
 
 
+def test_far_building_does_not_cover_near_high_terrain():
+    """Far buildings/vehicles must not cover nearer high terrain.
+
+    Regression test: tiles used to paint in one pass (skirts + tops)
+    and buildings/vehicles in later passes, so a building or vehicle
+    behind a nearer hill was painted *over* that hill.  The painter
+    now interleaves terrain and objects far -> near, so the nearer
+    high tile covers the farther object's body, while a nearer
+    object still covers terrain behind it (checked below both ways).
+    """
+    from hexfront.entities import Building, BuildingKind, Vehicle
+    from hexfront.constants import VehicleKind
+    pygame.init()
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    camera = Camera(screen.get_size())
+    ref = Board(10, 10)
+    camera.center_on_world(*ref.center_world((4, 4)))
+    scene_of = lambda board, buildings, vehicles: \
+        SimpleNamespace(board=board, buildings=buildings, vehicles=vehicles)
+
+    def frame(board, buildings, vehicles):
+        scene = scene_of(board, buildings, vehicles)
+        screen.fill((0, 0, 0))
+        renderer._draw_tiles(scene, camera)
+        renderer._draw_objects(scene, camera, None, None)
+        return pygame.surfarray.array3d(screen).copy()
+
+    def body_pixels(draw_fn, scene):
+        screen.fill((0, 0, 0))
+        draw_fn(scene)
+        alone = pygame.surfarray.array3d(screen).copy()
+        return (np.abs(alone.astype(int)).sum(axis=2) > 30)
+
+    def visible_body_pixels(composed, bare, body):
+        diff = (np.abs(composed.astype(int)
+                       - bare.astype(int)).sum(axis=2) > 30)
+        return int((body & diff).sum())
+
+    # Far building (4, 5) behind the near hill (5, 5, h=8): most of the
+    # body must be hidden by the hill painted after it.
+    board = Board(10, 10)
+    for t in board.tiles.values():
+        t.height = 1
+    far, near = (4, 5), (5, 5)
+    board.tiles[near].height = 8
+    b = Building(BuildingKind.BASE_TANK, 1, *far, units=10)
+    scene = scene_of(board, [b], [])
+    body = body_pixels(lambda s: renderer._draw_building(s, camera, b,
+                                                         False), scene)
+    assert int(body.sum()) > 1000
+    visible = visible_body_pixels(frame(board, [b], []),
+                                  frame(board, [], []), body)
+    assert visible < int(body.sum()) // 2, (visible, int(body.sum()))
+
+    # Reverse: a building on the near tile covers the terrain behind.
+    board2 = Board(10, 10)
+    for t in board2.tiles.values():
+        t.height = 1
+    b2 = Building(BuildingKind.BASE_TANK, 1, *near, units=10)
+    scene2 = scene_of(board2, [b2], [])
+    body2 = body_pixels(lambda s: renderer._draw_building(s, camera, b2,
+                                                          False), scene2)
+    visible2 = visible_body_pixels(frame(board2, [b2], []),
+                                   frame(board2, [], []), body2)
+    assert visible2 == int(body2.sum()), (visible2, int(body2.sum()))
+    # Vehicle climbing onto the hill tile: its lower part must be hidden
+    # by the hill painted after it.
+    fx, fy = board.center_world(far)
+    nx, ny = board.center_world(near)
+    vx, vy = fx + (nx - fx) * 0.7, fy + (ny - fy) * 0.7
+    v = Vehicle(VehicleKind.TANK, 1, 10.0, [], (vx, vy), src_tile=far)
+    v.x, v.y = vx, vy
+    scenev = scene_of(board, [], [v])
+    bodyv = body_pixels(lambda s: renderer._draw_vehicle(s, camera, v),
+                        scenev)
+    assert int(bodyv.sum()) > 300
+    visiblev = visible_body_pixels(frame(board, [], [v]),
+                                   frame(board, [], []), bodyv)
+    assert visiblev < int(bodyv.sum()), (visiblev, int(bodyv.sum()))
+    # Same vehicle on open flat ground stays fully visible.
+    board3 = Board(10, 10)
+    for t in board3.tiles.values():
+        t.height = 1
+    ox, oy = board3.center_world((4, 4))
+    vo = Vehicle(VehicleKind.TANK, 1, 10.0, [], (ox, oy), src_tile=(4, 4))
+    vo.x, vo.y = ox, oy
+    sceneo = scene_of(board3, [], [vo])
+    bodyo = body_pixels(lambda s: renderer._draw_vehicle(s, camera, vo),
+                        sceneo)
+    visibleo = visible_body_pixels(frame(board3, [], [vo]),
+                                   frame(board3, [], []), bodyo)
+    assert visibleo == int(bodyo.sum()), (visibleo, int(bodyo.sum()))
+    pygame.quit()
+
+
 def test_vehicle_on_bridge_deck_not_on_ground():
     """Vehicles travelling along a bridge stand on the deck (rules.md sec. 8).
 
@@ -301,6 +397,7 @@ def test_editor_draws_turret_and_heal_ranges():
 if __name__ == "__main__":
     test_view_clears_on_pan_and_zoom()
     test_view_culling_covers_screen()
+    test_far_building_does_not_cover_near_high_terrain()
     test_vehicle_on_bridge_deck_not_on_ground()
     test_ramp_frame_and_height()
     test_ramp_strip_stays_visible_over_high_skirt()
@@ -308,6 +405,7 @@ if __name__ == "__main__":
     test_editor_draws_turret_and_heal_ranges()
     print("OK   test_view_clears_on_pan_and_zoom")
     print("OK   test_view_culling_covers_screen")
+    print("OK   test_far_building_does_not_cover_near_high_terrain")
     print("OK   test_vehicle_on_bridge_deck_not_on_ground")
     print("OK   test_ramp_frame_and_height")
     print("OK   test_ramp_strip_stays_visible_over_high_skirt")

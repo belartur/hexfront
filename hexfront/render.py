@@ -104,11 +104,11 @@ class Renderer:
         pygame.draw.polygon(self.screen, edge, pts, 1)
 
     # ------------------------------------------------------------------
-    # Board painter: tile skirts+tops back-to-front, then ramp strips,
-    # then obstacles/buildings; bridge decks float above everything.
-    # Ramps need their own pass because the low end of a strip lies in
-    # front of the high neighbour's skirt, which is painted later under
-    # a single per-tile depth key.
+    # Board painter: tile skirts+tops back-to-front, each immediately
+    # followed by the objects standing on it; then ramp strips keyed by
+    # the high end.  Ramps need their own pass because the low end of a
+    # strip lies in front of the high neighbour's skirt, which is
+    # painted later under a single per-tile depth key.
     # ------------------------------------------------------------------
     def _tile_depth(self, game, tile: tuple) -> float:
         """Painter depth key of a tile: bigger = closer to the camera.
@@ -153,17 +153,82 @@ class Renderer:
                 for r in range(r_lo, r_hi + 1)
                 if board.contains((q, r))}
 
+    def _object_depth(self, game, tile: tuple) -> float:
+        """Painter depth key of an object standing on ``tile``.
+
+        Buildings, walls and bridge decks rise above their ground, so
+        their bodies overlap the screen area of tiles slightly behind
+        them.  Lifting the sort key by one elevation step over
+        :meth:`_tile_depth` keeps a nearer high tile (whose own depth
+        already contains its full elevation) painted after -- and
+        therefore in front of -- a farther object's body, while a
+        nearer object's body still covers farther terrain.
+        """
+        x, y = game.board.center_world(tile)
+        return ((x + y) * C.ISO_SIN
+                + (game.board.height(tile) + 1) * C.ELEVATION_PX)
+
+    def _vehicle_depth(self, game, v) -> float:
+        """Painter depth key of a vehicle: ground under it, object-lifted.
+
+        Same scale as :meth:`_object_depth`, so a vehicle behind a
+        nearer high tile is painted before (under) that tile, while a
+        nearer vehicle still covers farther terrain.  Vehicles on water
+        (height 0) get a one-step lift so they do not sink into the
+        flat open sea around them.  Helicopters keep the ground key of
+        the tile they fly over: their body renders higher on screen via
+        :meth:`_vehicle_z`, but for occlusion they are ordered like any
+        other vehicle on that ground.
+        """
+        tile = game.board.world_to_tile(v.x, v.y)
+        prev, nxt = self._route_endpoints(v)
+        ground = self._ground_z(game, tile, (v.x, v.y), prev, nxt)
+        lift = 0.0
+        if tile is None or game.board.tile(tile) is None:
+            lift = C.ELEVATION_PX
+        elif game.board.height(tile) <= 0:
+            lift = C.ELEVATION_PX
+        return (v.x + v.y) * C.ISO_SIN + ground + lift
+
     def _draw_tiles(self, game, camera: Camera) -> None:
         board = game.board
         building_at = {b.tile: b for b in game.buildings}
         visible = self._visible_tiles(game, camera)
         tiles = sorted(visible, key=lambda t: self._tile_depth(game, t))
+        # Single far -> near stream: each tile paints its skirts, its top
+        # and then the objects standing on it, so terrain in front of a
+        # farther object is painted after (over) it while a nearer
+        # object still covers terrain behind it.  Ramp strips keep their
+        # own pass keyed by the high end (see below).
+        entries = []
         for tile in tiles:
             t = board.tiles[tile]
-            # Skirts first, then the top: the wall fills the gap below
-            # its own hex and covers the lower terrain behind it.
-            self._draw_skirts(game, camera, tile, t)
-            self._draw_top(game, camera, tile, t)
+            d = self._tile_depth(game, tile)
+            entries.append((d, 0, tile))
+            if t.obstacle is not None or building_at.get(tile) is not None \
+                    or t.bridge is not None:
+                entries.append((self._object_depth(game, tile), 1, tile))
+        for v in game.vehicles:
+            entries.append((self._vehicle_depth(game, v), 2, v))
+        for _d, _phase, item in sorted(entries, key=lambda e: (e[0], e[1])):
+            if _phase == 2:
+                self._draw_vehicle(game, camera, item)
+                continue
+            tile = item
+            t = board.tiles[tile]
+            if _phase == 0:
+                # Skirts first, then the top: the wall fills the gap below
+                # its own hex and covers the lower terrain behind it.
+                self._draw_skirts(game, camera, tile, t)
+                self._draw_top(game, camera, tile, t)
+            else:
+                if t.obstacle is not None:
+                    self._draw_obstacle(game, camera, tile, t.obstacle)
+                b = building_at.get(tile)
+                if b is not None:
+                    self._draw_building(game, camera, b, False)
+                if t.bridge is not None and t.bridge.a is not None:
+                    self._draw_bridge_fragment(game, camera, t.bridge, tile)
         # Ramp strips after every hex top: the low end of the strip
         # lies in front of (below on screen of) the high neighbour's
         # skirt, so only a later pass keeps the strip visible when the
@@ -181,18 +246,6 @@ class Renderer:
                               + max(ha, hb) * C.ELEVATION_PX, tile))
         for __, tile in sorted(ramps):
             self._draw_ramp(game, camera, tile, board.tiles[tile])
-        for tile in tiles:
-            t = board.tiles[tile]
-            if t.obstacle is not None:
-                self._draw_obstacle(game, camera, tile, t.obstacle)
-            b = building_at.get(tile)
-            if b is not None:
-                self._draw_building(game, camera, b, False)
-        # Bridge decks float above every terrain surface.
-        for bridge in board.bridges:
-            for frag in sorted(bridge.fragments):
-                if frag in visible:
-                    self._draw_bridge_fragment(game, camera, bridge, frag)
 
     # ------------------------------------------------------------------
     # Bridge-deck aware ground elevation
@@ -613,7 +666,8 @@ class Renderer:
                     left = dash if drawing else gap
 
     # ------------------------------------------------------------------
-    # Vehicles, depth-sorted (buildings are drawn with their tiles)
+    # Vehicles, merged into the tile stream (buildings are drawn with
+    # their tiles)
     # ------------------------------------------------------------------
     def _draw_objects(self, game, camera: Camera, selection,
                       hover_tile) -> None:
@@ -624,12 +678,8 @@ class Renderer:
                    hexgrid.hex_corners(hover_tile[0], hover_tile[1],
                                        board.side)]
             pygame.draw.polygon(self.screen, (255, 255, 255), pts, 1)
-        items = []
-        for v in game.vehicles:
-            items.append((v.x + v.y + 0.1, "v", v))
-        items.sort(key=lambda it: it[0])
-        for _, kind, obj in items:
-            self._draw_vehicle(game, camera, obj)
+        # Vehicles already painted inside _draw_tiles() in depth order;
+        # _draw_objects() only adds the selection marker on top.
         if selection is not None and selection.get("src") is not None:
             src = game.building_at_tile(selection["src"])
             if src is not None:
