@@ -104,14 +104,11 @@ class Renderer:
         pygame.draw.polygon(self.screen, edge, pts, 1)
 
     # ------------------------------------------------------------------
-    # One painter pass: each tile is drawn together with everything that
-    # stands on it (ramp, bridge deck, obstacle, building), all sorted by
-    # the same depth key, so tall terrain properly occludes the contents
-    # of lower tiles behind it.
-    # ------------------------------------------------------------------
-    # ------------------------------------------------------------------
-    # Board painter: tiles back-to-front, each with its cliff skirts, top
-    # and contents drawn together, so walls stay attached to their tile.
+    # Board painter: tile skirts+tops back-to-front, then ramp strips,
+    # then obstacles/buildings; bridge decks float above everything.
+    # Ramps need their own pass because the low end of a strip lies in
+    # front of the high neighbour's skirt, which is painted later under
+    # a single per-tile depth key.
     # ------------------------------------------------------------------
     def _tile_depth(self, game, tile: tuple) -> float:
         """Painter depth key of a tile: bigger = closer to the camera.
@@ -167,8 +164,25 @@ class Renderer:
             # its own hex and covers the lower terrain behind it.
             self._draw_skirts(game, camera, tile, t)
             self._draw_top(game, camera, tile, t)
+        # Ramp strips after every hex top: the low end of the strip
+        # lies in front of (below on screen of) the high neighbour's
+        # skirt, so only a later pass keeps the strip visible when the
+        # height difference is large.  Ramps in front of their high
+        # neighbour paint first (sorted by the high-end depth), so a
+        # nearer high tile still occludes a farther strip correctly.
+        ramps = []
+        for tile in tiles:
+            t = board.tiles[tile]
             if t.ramp is not None:
-                self._draw_ramp(game, camera, tile, t)
+                (__, ___, ____, ha, hb) = self._ramp_frame(board, tile, t)
+                hi = t.ramp[0] if ha >= hb else t.ramp[1]
+                ax, ay = board.center_world(hi)
+                ramps.append(((ax + ay) * C.ISO_SIN
+                              + max(ha, hb) * C.ELEVATION_PX, tile))
+        for __, tile in sorted(ramps):
+            self._draw_ramp(game, camera, tile, board.tiles[tile])
+        for tile in tiles:
+            t = board.tiles[tile]
             if t.obstacle is not None:
                 self._draw_obstacle(game, camera, tile, t.obstacle)
             b = building_at.get(tile)
@@ -260,42 +274,98 @@ class Renderer:
     # Ramp, bridge, obstacle and building drawing primitives
     # ------------------------------------------------------------------
 
+    def _ramp_frame(self, board, tile: tuple, t):
+        """World-space frame of the ramp strip on ``tile``.
+
+        Returns ``(axis, edge_a, edge_b, ha, hb)`` where ``axis`` is the
+        unit world vector from the edge facing neighbour ``a`` towards
+        the edge facing neighbour ``b``, ``edge_a``/``edge_b`` are the
+        world (x, y) midpoints of those hex edges, and ``ha``/``hb``
+        are the terrain heights of the joined neighbours.
+
+        The edge facing a neighbour is the one whose midpoint is
+        nearest to that neighbour's centre (the neighbour centre lies
+        on the edge-midpoint ray); the axis therefore coincides with
+        the line joining the two neighbour centres.
+        """
+        from . import hexgrid as _hexgrid
+        q, r = tile
+        corners = _hexgrid.hex_corners(q, r, board.side)
+        mids = []
+        for k in range(6):
+            c1 = corners[k]
+            c2 = corners[(k + 1) % 6]
+            mx = (c1[0] + c2[0]) / 2.0
+            my = (c1[1] + c2[1]) / 2.0
+            mids.append((mx, my))
+
+        def _nearest(target):
+            tx, ty = board.center_world(target)
+            best, best_d = 0, None
+            for k in range(6):
+                d2 = (mids[k][0] - tx) ** 2 + (mids[k][1] - ty) ** 2
+                if best_d is None or d2 < best_d:
+                    best, best_d = k, d2
+            return best
+
+        edge_a = mids[_nearest(t.ramp[0])]
+        edge_b = mids[_nearest(t.ramp[1])]
+        dx = edge_b[0] - edge_a[0]
+        dy = edge_b[1] - edge_a[1]
+        length = math.hypot(dx, dy) or 1.0
+        axis = (dx / length, dy / length)
+        a, b = t.ramp
+        ha = board.height(a) if board.contains(a) else 0
+        hb = board.height(b) if board.contains(b) else 0
+        return (axis, edge_a, edge_b, ha, hb)
+
+    def _ramp_z(self, board, tile: tuple, pos: tuple) -> float:
+        """Elevation of the ramp deck under world point ``pos``.
+
+        Linear interpolation between the heights of the joined
+        neighbours along the ramp axis, clamped to the strip ends.
+        """
+        t = board.tiles.get(tile)
+        if t is None or t.ramp is None or pos is None:
+            return board.height(tile) * C.ELEVATION_PX
+        (axis, edge_a, edge_b, ha, hb) = self._ramp_frame(board, tile, t)
+        dx = edge_b[0] - edge_a[0]
+        dy = edge_b[1] - edge_a[1]
+        length = math.hypot(dx, dy) or 1.0
+        frac = ((pos[0] - edge_a[0]) * axis[0]
+                + (pos[1] - edge_a[1]) * axis[1]) / length
+        frac = max(0.0, min(1.0, frac))
+        return ((1.0 - frac) * ha + frac * hb) * C.ELEVATION_PX
+
     def _draw_ramp(self, game, camera: Camera, tile: tuple, t) -> None:
         """A ramp tile: a solid inclined *strip* along the ramp axis.
 
-        The strip's top face is a true on-screen rectangle anchored at
-        the midpoints of the hex edges facing neighbours a and b, drawn
-        at their respective heights, so the tilt is exactly the joined
-        fields' height difference.  The body below the top face is
+        The strip's short edges lie on the midpoints of the hex edges
+        facing neighbours a and b, drawn at their respective heights,
+        so the tilt is exactly the joined fields' height difference.  The body below the top face is
         filled with darker dirt down to the base elevation -- no empty
         space is visible under the ramp.  The strip is narrower than the
         hex; normal ground of tile ``p`` stays visible at both sides.
         """
         board = game.board
-        cx, cy = board.center_world(tile)
-        a, b = t.ramp
-        za = board.height(a) * C.ELEVATION_PX
-        zb = board.height(b) * C.ELEVATION_PX
+        (axis, edge_a, edge_b, ha, hb) = self._ramp_frame(board, tile, t)
+        za = ha * C.ELEVATION_PX
+        zb = hb * C.ELEVATION_PX
         z_lo = min(za, zb)
-        ax, ay = board.center_world(a)
-        bx, by = board.center_world(b)
-        length = math.hypot(bx - ax, by - ay) or 1.0
-        ux, uy = (bx - ax) / length, (by - ay) / length  # points a -> b
-        apo = board.side * math.sqrt(3.0) / 2.0   # centre -> edge midpoint
+        ux, uy = axis                               # points a -> b (world)
         hw = board.side * 0.45                    # strip half-width (<= s/2)
-        # Screen anchors: edge midpoints at the neighbours' heights.
-        m1 = camera.world_to_screen(cx - ux * apo, cy - uy * apo, za)
-        m2 = camera.world_to_screen(cx + ux * apo, cy + uy * apo, zb)
-        dx, dy = m2[0] - m1[0], m2[1] - m1[1]
-        seg = math.hypot(dx, dy) or 1.0
-        nx, ny = -dy / seg, dx / seg              # lateral unit (screen)
-        o0 = camera.world_to_screen(cx, cy, 0.0)
-        o1 = camera.world_to_screen(cx - uy * hw, cy + ux * hw, 0.0)
-        w = math.hypot(o1[0] - o0[0], o1[1] - o0[1])  # half-width (screen)
-        a1 = (m1[0] + nx * w, m1[1] + ny * w)
-        a2 = (m1[0] - nx * w, m1[1] - ny * w)
-        b1 = (m2[0] + nx * w, m2[1] + ny * w)
-        b2 = (m2[0] - nx * w, m2[1] - ny * w)
+        # Long edges stay parallel to the tilted axis in world space
+        # (a sheared projection of the flat strip), so the strip always
+        # runs edge to edge and never drifts past the hex border.
+        px, py = -uy, ux
+        a1 = camera.world_to_screen(edge_a[0] + px * hw,
+                                    edge_a[1] + py * hw, za)
+        a2 = camera.world_to_screen(edge_a[0] - px * hw,
+                                    edge_a[1] - py * hw, za)
+        b1 = camera.world_to_screen(edge_b[0] + px * hw,
+                                    edge_b[1] + py * hw, zb)
+        b2 = camera.world_to_screen(edge_b[0] - px * hw,
+                                    edge_b[1] - py * hw, zb)
         # Solid body: both sides filled from the tilted top edges down to
         # the base elevation -- the union covers everything under the ramp.
         da, db = int(za - z_lo), int(zb - z_lo)

@@ -139,6 +139,96 @@ def test_vehicle_on_bridge_deck_not_on_ground():
     pygame.quit()
 
 
+def test_ramp_frame_and_height():
+    """Ramp edges face the joined neighbours; deck height interpolates.
+
+    Regression test: the strip used centre-based anchors and there was
+    no Renderer._ramp_z at all (AttributeError for vehicles/shadows on
+    ramps); the frame must run edge-midpoint to edge-midpoint and the
+    deck height must span ha..hb (rules.md sec. 7).
+    """
+    import math
+    from hexfront import hexgrid
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(14, 12)
+    for t in board.tiles.values():
+        t.height = 1
+    p = (7, 6)
+    for d in range(3):
+        a = hexgrid.neighbor(p[0], p[1], d)
+        b = hexgrid.neighbor(p[0], p[1], (d + 3) % 6)
+        board.tiles[a].height = 1
+        board.tiles[b].height = 4
+        board.set_ramp(p, a, b)
+        t = board.tiles[p]
+        axis, edge_a, edge_b, ha, hb = renderer._ramp_frame(board, p, t)
+        assert (ha, hb) == (1, 4)
+        # Edges face their neighbours: midpoint nearest to its centre.
+        ac = board.center_world(a)
+        bc = board.center_world(b)
+        assert math.hypot(edge_a[0] - ac[0], edge_a[1] - ac[1]) < 32.0
+        assert math.hypot(edge_b[0] - bc[0], edge_b[1] - bc[1]) < 32.0
+        # Axis points a -> b and is perpendicular to both hex edges.
+        assert (edge_b[0] - edge_a[0]) * axis[0] +             (edge_b[1] - edge_a[1]) * axis[1] > 0
+        scene = SimpleNamespace(board=board)
+        assert abs(renderer._ground_z(scene, p, edge_a)
+                   - ha * C.ELEVATION_PX) < 1e-6
+        assert abs(renderer._ground_z(scene, p, edge_b)
+                   - hb * C.ELEVATION_PX) < 1e-6
+        mid = ((edge_a[0] + edge_b[0]) / 2.0,
+               (edge_a[1] + edge_b[1]) / 2.0)
+        assert abs(renderer._ground_z(scene, p, mid)
+                   - (ha + hb) / 2.0 * C.ELEVATION_PX) < 1e-6
+        board.remove_ramp(p)
+    pygame.quit()
+
+
+def test_ramp_strip_stays_visible_over_high_skirt():
+    """The strip end in front is not covered by the high wall behind.
+
+    Regression test: with a large height gap the high neighbour (drawn
+    later under a single per-tile depth key) painted its full-width
+    skirt over the narrower strip lying in front of it.
+    """
+    from hexfront import hexgrid
+    screen = pygame.display.set_mode((800, 600))
+    renderer = Renderer(screen)
+    board = Board(14, 12)
+    for t in board.tiles.values():
+        t.height = 1
+    p = (7, 6)
+    a = hexgrid.neighbor(p[0], p[1], 0)
+    b = hexgrid.neighbor(p[0], p[1], 3)
+    board.tiles[a].height = 1
+    board.tiles[b].height = 6
+    board.set_ramp(p, a, b)
+    scene = SimpleNamespace(board=board, buildings=[], vehicles=[])
+    camera = Camera(screen.get_size())
+    camera.center_on_world(*board.center_world(p))
+    renderer._draw_tiles(scene, camera)
+    axis, edge_a, edge_b, ha, hb = renderer._ramp_frame(
+        board, p, board.tiles[p])
+    za = ha * C.ELEVATION_PX
+    mx = (edge_a[0] + edge_b[0]) / 2.0
+    my = (edge_a[1] + edge_b[1]) / 2.0
+    mza = (ha + hb) / 2.0 * C.ELEVATION_PX
+    mid = camera.world_to_screen(mx, my, mza)
+    surf = pygame.surfarray.array3d(screen)
+    got = tuple(int(v) for v in surf[mid[0], mid[1]])
+    assert got == (172, 158, 120), (mid, got)
+    # ... and the tall grey wall of the high neighbour is still there.
+    top_z = hb * C.ELEVATION_PX
+    bcx, bcy = board.center_world(b)
+    skirt_probe = camera.world_to_screen(bcx, bcy, (hb - 1) * C.ELEVATION_PX)
+    sx = max(0, min(screen.get_width() - 1, skirt_probe[0]))
+    sy = max(0, min(screen.get_height() - 1, skirt_probe[1]))
+    got2 = tuple(int(v) for v in surf[sx, sy])
+    assert got2 != (172, 158, 120), ((sx, sy), got2)
+    _ = (za, top_z)
+    pygame.quit()
+
+
 def test_turret_barrels_differ():
     """The three turret kinds draw different barrels (Wariant A)."""
     from hexfront.entities import Building, BuildingKind
@@ -212,11 +302,15 @@ if __name__ == "__main__":
     test_view_clears_on_pan_and_zoom()
     test_view_culling_covers_screen()
     test_vehicle_on_bridge_deck_not_on_ground()
+    test_ramp_frame_and_height()
+    test_ramp_strip_stays_visible_over_high_skirt()
     test_turret_barrels_differ()
     test_editor_draws_turret_and_heal_ranges()
     print("OK   test_view_clears_on_pan_and_zoom")
     print("OK   test_view_culling_covers_screen")
     print("OK   test_vehicle_on_bridge_deck_not_on_ground")
+    print("OK   test_ramp_frame_and_height")
+    print("OK   test_ramp_strip_stays_visible_over_high_skirt")
     print("OK   test_turret_barrels_differ")
     print("OK   test_editor_draws_turret_and_heal_ranges")
     print("\nAll render tests passed.")
