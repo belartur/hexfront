@@ -139,11 +139,84 @@ def test_vehicle_on_bridge_deck_not_on_ground():
     pygame.quit()
 
 
+def test_turret_barrels_differ():
+    """The three turret kinds draw different barrels (Wariant A)."""
+    from hexfront.entities import Building, BuildingKind
+    pygame.init()
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(10, 10)
+    for t in board.tiles.values():
+        t.height = 1
+    camera = Camera(screen.get_size())
+    camera.center_on_world(*board.center_world((5, 5)))
+    scene = SimpleNamespace(board=board, buildings=[], vehicles=[])
+    kinds = [BuildingKind.TURRET_NORMAL, BuildingKind.TURRET_RAPID,
+             BuildingKind.TURRET_ROCKET]
+    shots = []
+    for kind in kinds:
+        screen.fill((0, 0, 0))
+        b = Building(kind, 0, 5, 5, units=10)
+        scene.buildings = [b]
+        renderer._draw_tiles(scene, camera)
+        renderer._draw_objects(scene, camera, None, None)
+        shots.append(pygame.surfarray.array3d(screen).copy())
+    import numpy as _np
+    for i in range(3):
+        for j in range(i + 1, 3):
+            diff = _np.abs(shots[i].astype(int) - shots[j].astype(int)).sum()
+            assert diff > 0, (kinds[i], kinds[j])
+    pygame.quit()
+
+
+def test_editor_draws_turret_and_heal_ranges():
+    """Editor shows turret + owned-heal ranges (editor spec, sec. 30)."""
+    from editor import EditorScene
+    from hexfront.entities import Building, BuildingKind
+    pygame.init()
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(16, 12)
+    for t in board.tiles.values():
+        t.height = 1
+    buildings = [
+        Building(BuildingKind.TURRET_NORMAL, 0, 4, 6, units=10),
+        Building(BuildingKind.TURRET_RAPID, 0, 8, 6, units=10),
+        Building(BuildingKind.TURRET_ROCKET, 0, 12, 6, units=10),
+        Building(BuildingKind.HEAL_TOWER, 0, 6, 8, units=10),
+        Building(BuildingKind.HEAL_TOWER, None, 10, 8, units=10),
+    ]
+    scene = EditorScene(board, buildings)
+    camera = Camera(screen.get_size())
+    camera.center_on_world(*board.center_world((8, 6)))
+    # 3 turrets + 1 owned heal tower; the neutral heal tower has no
+    # range overlay (editor spec).
+    assert len(renderer._range_circles(scene, camera)) == 4
+    # The translucent fills must survive draw_editor (regression: the
+    # overlay used to be painted before the tiles, so the opaque tiles
+    # covered the fills and only the outlines stayed visible).  Compare
+    # the full editor frame against bare tiles: the ranges must tint a
+    # significant part of the view.
+    import numpy as _np2
+    renderer.draw_editor(scene, camera)
+    with_ranges = pygame.surfarray.array3d(screen).astype(int).copy()
+    scene.buildings = []
+    renderer.draw_editor(scene, camera)
+    bare = pygame.surfarray.array3d(screen).astype(int)
+    changed = (_np2.abs(with_ranges - bare).sum(axis=2) > 30).mean()
+    assert changed > 0.05, changed
+    pygame.quit()
+
+
 if __name__ == "__main__":
     test_view_clears_on_pan_and_zoom()
     test_view_culling_covers_screen()
     test_vehicle_on_bridge_deck_not_on_ground()
+    test_turret_barrels_differ()
+    test_editor_draws_turret_and_heal_ranges()
     print("OK   test_view_clears_on_pan_and_zoom")
     print("OK   test_view_culling_covers_screen")
     print("OK   test_vehicle_on_bridge_deck_not_on_ground")
+    print("OK   test_turret_barrels_differ")
+    print("OK   test_editor_draws_turret_and_heal_ranges")
     print("\nAll render tests passed.")

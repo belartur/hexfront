@@ -12,7 +12,7 @@ import pygame
 from . import constants as C
 from . import hexgrid
 from .board import Obstacle
-from .constants import VehicleKind
+from .constants import TurretKind, VehicleKind
 from .camera import Camera
 from .entities import (BuildingKind, is_base, is_turret, turret_kind_of)
 
@@ -448,15 +448,18 @@ class Renderer:
         shares the board-drawing code with the game).
         """
         self.screen.fill(C.WATER_COLOR)
+        self._draw_tiles(scene, camera)
         # Ranges of turrets and (owned) healing towers are shown in the
         # editor too, drawn exactly like in the game (editor spec); the
-        # translucent layer is only built when there is anything to draw.
+        # translucent layer is painted after the tiles so the fills stay
+        # visible (before only the outlines were drawn, the tiles were
+        # painted over the fills later). The translucent layer is only
+        # built when there is anything to draw.
         circles = self._range_circles(scene, camera)
         if circles:
             overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
             self._paint_range_circles(camera, circles, overlay)
             self.screen.blit(overlay, (0, 0))
-        self._draw_tiles(scene, camera)
         self._draw_badges(scene, camera)
         if hover_tile is not None and scene.board.contains(hover_tile):
             z = scene.board.height(hover_tile) * C.ELEVATION_PX
@@ -614,24 +617,55 @@ class Renderer:
                 self._draw_cross(camera, x, y, top, (110, 220, 120))
         elif is_turret(b.kind):
             self._iso_box(camera, x, y, z, 24, 24, 12, color)
-            barrel = camera.world_to_screen(x, y, z + 22)
-            base = camera.world_to_screen(x, y, z + 12)
-            pygame.draw.line(self.screen, _shade(color, 0.55), base,
-                             barrel, 4)
-            if b.last_target_pos is not None:
-                tx, ty = b.last_target_pos
-                ang = math.atan2((tx - x) * C.ISO_SIN,
-                                 (tx - x) * C.ISO_COS)
-                tip = camera.world_to_screen(
-                    x + math.cos(ang) * 12 / C.ISO_COS,
-                    y + math.sin(ang) * 12 / C.ISO_COS, z + 22)
-                pygame.draw.line(self.screen, _shade(color, 0.55),
-                                 barrel, tip, 3)
+            self._draw_turret_barrel(camera, b, x, y, z, color)
         else:  # healing tower
             base = camera.world_to_screen(x, y, z)
             top = camera.world_to_screen(x, y, z + 34)
             pygame.draw.line(self.screen, _shade(color, 0.8), base, top, 5)
             self._draw_cross(camera, x, y, z + 34, (150, 245, 150))
+
+    def _turret_aim_angle(self, b, x: float, y: float):
+        """Aim angle of a turret barrel (follows the last target)."""
+        if b.last_target_pos is None:
+            return None
+        tx, ty = b.last_target_pos
+        return math.atan2((tx - x) * C.ISO_SIN, (tx - x) * C.ISO_COS)
+
+    def _draw_turret_barrel(self, camera: Camera, b, x: float, y: float,
+                            z: float, color) -> None:
+        """Barrel drawing that tells the three turret kinds apart."""
+        dark = _shade(color, 0.55)
+        tk = turret_kind_of(b.kind)
+        ang = self._turret_aim_angle(b, x, y)
+        if ang is None:
+            ang = -math.pi / 2.0
+        dx, dy = math.cos(ang), math.sin(ang)
+        if tk == TurretKind.RAPID:
+            base = camera.world_to_screen(x, y, z + 12)
+            hub = camera.world_to_screen(x, y, z + 22)
+            for side in (-1.0, 1.0):
+                px, py = -dy * side * 5.0, dx * side * 5.0
+                p0 = camera.world_to_screen(x + px, y + py, z + 22)
+                p1 = camera.world_to_screen(x + px + dx * 10.0,
+                                            y + py + dy * 10.0, z + 22)
+                pygame.draw.line(self.screen, dark, p0, p1, 3)
+            pygame.draw.line(self.screen, dark, base, hub, 4)
+        elif tk == TurretKind.ROCKET:
+            cx = x + dx * 6.0
+            cy = y + dy * 6.0
+            pts = camera.screen_circle_poly(cx, cy, 8.0, z + 22, 12)
+            pygame.draw.polygon(self.screen, dark, pts, 3)
+            tip = camera.world_to_screen(cx + dx * 8.0, cy + dy * 8.0,
+                                         z + 22)
+            hub = camera.world_to_screen(x, y, z + 22)
+            pygame.draw.line(self.screen, dark, hub, tip, 2)
+        else:  # normal turret: one long barrel
+            barrel = camera.world_to_screen(x, y, z + 22)
+            base = camera.world_to_screen(x, y, z + 12)
+            pygame.draw.line(self.screen, dark, base, barrel, 4)
+            tip = camera.world_to_screen(x + dx * 18.0, y + dy * 18.0,
+                                         z + 22)
+            pygame.draw.line(self.screen, dark, barrel, tip, 3)
 
     def _draw_cross(self, camera: Camera, x: float, y: float, z: float,
                     color) -> None:
