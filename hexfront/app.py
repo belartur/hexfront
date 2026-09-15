@@ -213,9 +213,10 @@ class Application:
         inside.  With an active selection, LMB on any *other* building
         sends a vehicle from the selected building to the clicked one --
         own buildings included, which enables unit transfers.  A failed
-        send (no route) keeps the selection.
+        send (no route) keeps the selection.  The clicked building is the
+        snapped hover target, so clicks always agree with the highlight.
         """
-        tile = self._pick_tile(pos)
+        tile = self._hover_tile(pos)
         building = (self.game.building_at_tile(tile)
                     if tile is not None else None)
         human = self.game.human_id
@@ -231,8 +232,11 @@ class Application:
 
     def _select_rmb(self, pos) -> None:
         """RMB click during play: always (re)selects the clicked own
-        building with units inside; anywhere else it cancels (spec)."""
-        tile = self._pick_tile(pos)
+        building with units inside; anywhere else it cancels (spec).
+
+        The clicked building is the snapped hover target, so clicks always
+        agree with the highlight."""
+        tile = self._hover_tile(pos)
         building = (self.game.building_at_tile(tile)
                     if tile is not None else None)
         human = self.game.human_id
@@ -292,6 +296,23 @@ class Application:
         keys = pygame.key.get_pressed()
         flat = keys[pygame.K_LALT] or keys[pygame.K_RALT]
         return self.game.board.pick_tile(self.camera, pos, flat=flat)
+
+    def _hover_tile(self, pos):
+        """Snapped hover target: nearest building tile within range.
+
+        Returns the tile of the closest building whose centre lies within
+        ``HOVER_SNAP_RADIUS`` of the cursor, or ``None`` when every
+        building is farther away (so empty fields never highlight).
+        Shares :meth:`Board.snap_to_building` with the exact geometry, so
+        hover, clicks and the route preview always agree.
+        """
+        if self.game is None or self.camera is None:
+            return None
+        keys = pygame.key.get_pressed()
+        flat = keys[pygame.K_LALT] or keys[pygame.K_RALT]
+        return self.game.board.snap_to_building(self.camera, pos,
+                                                self.game.buildings,
+                                                flat=flat)
 
     def _start_map(self, map_path: str) -> None:
         """Load a map file and show it (loading state, spec).
@@ -367,7 +388,7 @@ class Application:
         if self.state == STATE_MENU:
             self._draw_menu()
             return
-        hover = self._pick_tile(self.mouse_pos) \
+        hover = self._hover_tile(self.mouse_pos) \
             if self.state == STATE_PLAYING else None
         self._update_preview(hover)
         self.renderer.draw_world(self.game, self.camera, self.selection,

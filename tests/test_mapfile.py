@@ -12,6 +12,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame                                                    # noqa: E402
 from hexfront import mapfile                                  # noqa: E402
+from hexfront import constants as C                           # noqa: E402
 from hexfront.board import Board, Obstacle                    # noqa: E402
 from hexfront.camera import Camera                            # noqa: E402
 from hexfront.constants import VehicleKind                    # noqa: E402
@@ -412,9 +413,58 @@ def test_pick_tile_flat():
     assert board.pick_tile(camera, pos) == (2, 2)
 
 
+def test_snap_to_building():
+    """Hover snaps to the nearest building within 150 j, else nothing."""
+    from hexfront.entities import Building, BuildingKind
+
+    def screen_over(camera, board, tile):
+        cx, cy = board.center_world(tile)
+        return camera.world_to_screen(cx, cy,
+                                      board.height(tile) * C.ELEVATION_PX)
+
+    board = Board(30, 5)
+    near = Building(BuildingKind.BASE_TANK, 0, 5, 2, units=10.0)
+    far = Building(BuildingKind.TURRET_NORMAL, 1, 20, 2, units=10.0)
+    buildings = [near, far]
+    camera = Camera((800, 600))
+    camera.center_on_world(*board.center_world((5, 2)))
+    # Cursor exactly over the near building snaps to it.
+    pos = screen_over(camera, board, (5, 2))
+    assert board.snap_to_building(camera, pos, buildings) == (5, 2)
+    # Empty field between the buildings: nearest in range still wins.
+    mid = ((board.center_world((5, 2))[0]
+            + board.center_world((6, 2))[0]) / 2.0,
+           (board.center_world((5, 2))[1]
+            + board.center_world((6, 2))[1]) / 2.0)
+    pos = camera.world_to_screen(mid[0], mid[1],
+                                 board.height((5, 2)) * C.ELEVATION_PX)
+    assert board.snap_to_building(camera, pos, buildings) == (5, 2)
+    # Far away from every building centre: no snap at all.
+    lonely = Board(60, 5)
+    solo = Building(BuildingKind.BASE_TANK, 0, 2, 2, units=10.0)
+    camera.center_on_world(*lonely.center_world((40, 2)))
+    pos = camera.world_to_screen(*lonely.center_world((40, 2)),
+                                 lonely.height((40, 2)) * C.ELEVATION_PX)
+    assert lonely.snap_to_building(camera, pos, [solo]) is None
+    # Outside the radius from a single building: no snap either.
+    camera.center_on_world(*board.center_world((5, 2)))
+    outside = (board.center_world((5, 2))[0] + C.HOVER_SNAP_RADIUS + 10.0,
+               board.center_world((5, 2))[1])
+    pos = camera.world_to_screen(outside[0], outside[1],
+                                 board.height((5, 2)) * C.ELEVATION_PX)
+    assert board.snap_to_building(camera, pos, [near]) is None
+    # Exact-distance tie between two buildings is deterministic.
+    left = Building(BuildingKind.BASE_TANK, 0, 4, 2, units=10.0)
+    right = Building(BuildingKind.BASE_TANK, 0, 6, 2, units=10.0)
+    pos = screen_over(camera, board, (5, 2))
+    assert board.snap_to_building(camera, pos, [right, left]) == (4, 2)
+    assert board.snap_to_building(camera, pos, [left, right]) == (4, 2)
+
+
 TESTS = [test_round_trip, test_unit_count_and_owner_bits, test_load_game,
          test_list_maps_and_seed, test_trim_and_pad, test_editor_actions,
-         test_editor_errors, test_editor_ctrl_keys, test_pick_tile_flat]
+         test_editor_errors, test_editor_ctrl_keys, test_pick_tile_flat,
+         test_snap_to_building]
 
 if __name__ == "__main__":
     failures = 0

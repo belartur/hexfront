@@ -5,6 +5,7 @@ rules.md sections 4, 5, 7 (ramps) and 8 (bridges).
 """
 
 from collections import deque
+import math
 
 from . import constants as C
 from . import hexgrid
@@ -132,6 +133,32 @@ class Board:
                 break
             tile = refined
         return tile
+
+    def snap_to_building(self, camera, pos, buildings, flat: bool = False):
+        """Building tile nearest to the cursor within the snap radius.
+
+        Measures, in world units (j), the distance between the cursor and
+        each building's tile centre (unprojecting the cursor at that
+        tile's elevation, or at zero when ``flat``), and returns the tile
+        of the closest building within ``HOVER_SNAP_RADIUS``, or ``None``
+        when every building is farther away.  Exact-distance ties resolve
+        deterministically by tile coordinates.
+        """
+        best = None
+        best_dist = None
+        for b in buildings:
+            cx, cy = self.center_world(b.tile)
+            wz = 0.0 if flat else self.height(b.tile) * C.ELEVATION_PX
+            wx, wy = camera.screen_to_world(pos[0], pos[1], wz)
+            dist = math.hypot(wx - cx, wy - cy)
+            if dist > C.HOVER_SNAP_RADIUS + 1e-9:
+                continue
+            if (best is None or dist < best_dist - 1e-9
+                    or (abs(dist - best_dist) <= 1e-9
+                        and b.tile < best)):
+                best = b.tile
+                best_dist = dist
+        return best
 
     # ------------------------------------------------------------------
     # Map features

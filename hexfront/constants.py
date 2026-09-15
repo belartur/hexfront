@@ -163,6 +163,12 @@ EDGE_PAN_MARGIN = 12               # px of screen edge that pans the view
 DRAG_THRESHOLD = 5                 # px of movement before a drag starts
 LOADING_TIME = 1.0                 # s the "showing the map" screen lasts
 
+#: Cursor snap radius in j: hover, clicks and the route preview snap to
+#: the nearest building tile within this distance of its centre, else
+#: nothing is indicated (UI choice requested by the player, no rules.md
+#: section).  Measured in world units, so it is independent of zoom.
+HOVER_SNAP_RADIUS = 150.0
+
 # --------------------------------------------------------------------------
 # Floating combat text (specification: "Grafika i interfejs uzytkownika")
 # --------------------------------------------------------------------------
