@@ -30,6 +30,11 @@ ISO_COS = 0.8660254037844387
 #: Vertical squash factor of the isometric projection (2:1 isometric).
 ISO_SIN = 0.5
 
+#: Numerical coplanarity tolerance for the depth renderer (specification:
+#: "Grafika i interfejs użytkownika"); not an object-depth lift.
+DEPTH_EPSILON = 1e-7
+
+
 # --------------------------------------------------------------------------
 # Simulation
 # --------------------------------------------------------------------------

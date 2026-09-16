@@ -19,6 +19,7 @@ from hexfront.app import Application                     # noqa: E402
 from hexfront.board import Board                         # noqa: E402
 from hexfront.camera import Camera                       # noqa: E402
 from hexfront.constants import WATER_COLOR               # noqa: E402
+from hexfront.depth import DepthBuffer, DepthCamera
 from hexfront.render import Renderer                     # noqa: E402
 
 
@@ -100,8 +101,8 @@ def test_far_building_does_not_cover_near_high_terrain():
 
     Regression test: tiles used to paint in one pass (skirts + tops)
     and buildings/vehicles in later passes, so a building or vehicle
-    behind a nearer hill was painted *over* that hill.  The painter
-    now interleaves terrain and objects far -> near, so the nearer
+    behind a nearer hill was painted *over* that hill. Depth testing
+    now compares the actual surface fragments, so the nearer
     high tile covers the farther object's body, while a nearer
     object still covers terrain behind it (checked below both ways).
     """
@@ -125,7 +126,10 @@ def test_far_building_does_not_cover_near_high_terrain():
 
     def body_pixels(draw_fn, scene):
         screen.fill((0, 0, 0))
-        draw_fn(scene)
+        renderer._scene = DepthBuffer(screen)
+        depth_camera = DepthCamera(camera)
+        draw_fn(scene, depth_camera)
+        renderer._scene = None
         alone = pygame.surfarray.array3d(screen).copy()
         return (np.abs(alone.astype(int)).sum(axis=2) > 30)
 
@@ -143,7 +147,7 @@ def test_far_building_does_not_cover_near_high_terrain():
     board.tiles[near].height = 8
     b = Building(BuildingKind.BASE_TANK, 1, *far, units=10)
     scene = scene_of(board, [b], [])
-    body = body_pixels(lambda s: renderer._draw_building(s, camera, b,
+    body = body_pixels(lambda s, c: renderer._draw_building(s, c, b,
                                                          False), scene)
     assert int(body.sum()) > 1000
     visible = visible_body_pixels(frame(board, [b], []),
@@ -156,25 +160,25 @@ def test_far_building_does_not_cover_near_high_terrain():
         t.height = 1
     b2 = Building(BuildingKind.BASE_TANK, 1, *near, units=10)
     scene2 = scene_of(board2, [b2], [])
-    body2 = body_pixels(lambda s: renderer._draw_building(s, camera, b2,
+    body2 = body_pixels(lambda s, c: renderer._draw_building(s, c, b2,
                                                           False), scene2)
     visible2 = visible_body_pixels(frame(board2, [b2], []),
                                    frame(board2, [], []), body2)
     assert visible2 == int(body2.sum()), (visible2, int(body2.sum()))
-    # Vehicle climbing onto the hill tile: its lower part must be hidden
-    # by the hill painted after it.
+    # The vehicle is already ON the high tile, not behind its cliff.
     fx, fy = board.center_world(far)
     nx, ny = board.center_world(near)
     vx, vy = fx + (nx - fx) * 0.7, fy + (ny - fy) * 0.7
     v = Vehicle(VehicleKind.TANK, 1, 10.0, [], (vx, vy), src_tile=far)
     v.x, v.y = vx, vy
     scenev = scene_of(board, [], [v])
-    bodyv = body_pixels(lambda s: renderer._draw_vehicle(s, camera, v),
+    bodyv = body_pixels(lambda s, c: renderer._draw_vehicle(s, c, v),
                         scenev)
     assert int(bodyv.sum()) > 300
     visiblev = visible_body_pixels(frame(board, [], [v]),
                                    frame(board, [], []), bodyv)
-    assert visiblev < int(bodyv.sum()), (visiblev, int(bodyv.sum()))
+    assert board.world_to_tile(v.x, v.y) == near
+    assert visiblev == int(bodyv.sum()), (visiblev, int(bodyv.sum()))
     # Same vehicle on open flat ground stays fully visible.
     board3 = Board(10, 10)
     for t in board3.tiles.values():
@@ -183,7 +187,7 @@ def test_far_building_does_not_cover_near_high_terrain():
     vo = Vehicle(VehicleKind.TANK, 1, 10.0, [], (ox, oy), src_tile=(4, 4))
     vo.x, vo.y = ox, oy
     sceneo = scene_of(board3, [], [vo])
-    bodyo = body_pixels(lambda s: renderer._draw_vehicle(s, camera, vo),
+    bodyo = body_pixels(lambda s, c: renderer._draw_vehicle(s, c, vo),
                         sceneo)
     visibleo = visible_body_pixels(frame(board3, [], [vo]),
                                    frame(board3, [], []), bodyo)
@@ -394,7 +398,190 @@ def test_editor_draws_turret_and_heal_ranges():
     pygame.quit()
 
 
+def test_vehicle_at_far_edge_of_own_tile():
+    """A flat tile must never erase the vehicle standing on its far half."""
+    from hexfront.entities import Vehicle
+    from hexfront.constants import VehicleKind
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(10, 10)
+    camera = Camera(screen.get_size())
+    cx, cy = board.center_world((4, 4))
+    camera.center_on_world(cx, cy)
+    for zoom in (0.5, 1.0, 2.0):
+        camera.zoom = zoom
+        camera.x += 0.75
+        camera.y -= 0.25
+        for kind in VehicleKind:
+            for dx, dy in ((-12, -12), (0, -24), (-24, 0), (12, 12)):
+                v = Vehicle(kind, 0, 10.0, [], (cx + dx, cy + dy))
+                scene = SimpleNamespace(board=board, buildings=[], vehicles=[v])
+                assert board.world_to_tile(v.x, v.y) == (4, 4)
+                screen.fill((0, 0, 0))
+                renderer._scene = DepthBuffer(screen)
+                renderer._draw_vehicle(scene, DepthCamera(camera), v)
+                renderer._scene = None
+                alone = pygame.surfarray.array3d(screen)
+                body = alone.any(axis=2)
+                screen.fill((0, 0, 0))
+                renderer._draw_tiles(scene, camera)
+                composed = pygame.surfarray.array3d(screen)
+                assert np.array_equal(composed[body], alone[body]), \
+                    ("Vehicle overwritten by flat ground", kind, zoom, dx, dy)
+    pygame.quit()
+
+
+
+def test_depth_visibility_is_independent_of_submission_order():
+    """Intersecting planes exchange front/back within the same polygon."""
+    from hexfront.depth import ProjectedPoint
+    screen = pygame.display.set_mode((100, 100))
+    frames = []
+    flat = [ProjectedPoint(x, y, 0) for x, y in
+            ((10, 10), (90, 10), (90, 90), (10, 90))]
+    slope = [ProjectedPoint(x, y, x - 50) for x, y in
+             ((10, 10), (90, 10), (90, 90), (10, 90))]
+    primitives = [((255, 0, 0), flat), ((0, 255, 0), slope)]
+    for order in (primitives, primitives[::-1]):
+        screen.fill((0, 0, 0))
+        depth = DepthBuffer(screen)
+        for color, polygon in order:
+            depth.polygon(color, polygon)
+        frames.append(pygame.surfarray.array3d(screen))
+    assert np.array_equal(*frames)
+    assert tuple(frames[0][20, 50]) == (255, 0, 0)
+    assert tuple(frames[0][80, 50]) == (0, 255, 0)
+    pygame.quit()
+
+
+def test_near_high_tile_occludes_ramp():
+    """A ramp submitted last cannot paint over a nearer high cliff/top."""
+    from hexfront import hexgrid
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(10, 10)
+    p = (4, 4)
+    camera = Camera(screen.get_size())
+    scene = SimpleNamespace(board=board, buildings=[], vehicles=[])
+    for direction in range(6):
+        for t in board.tiles.values():
+            t.height = 1
+        high = hexgrid.neighbor(*p, direction)
+        low = hexgrid.neighbor(*p, (direction + 3) % 6)
+        board.tiles[high].height = 8
+        board.set_ramp(p, high, low)
+        for zoom in (0.5, 1.0, 2.0):
+            camera.zoom = zoom
+            camera.center_on_world(*board.center_world(p))
+            c = DepthCamera(camera)
+
+            def frame(order):
+                screen.fill((0, 0, 0))
+                renderer._scene = DepthBuffer(screen)
+                try:
+                    for item in order:
+                        if item == "ramp":
+                            renderer._draw_ramp(scene, c, p, board.tiles[p])
+                        else:
+                            renderer._draw_skirts(scene, c, high, board.tiles[high])
+                            renderer._draw_top(scene, c, high, board.tiles[high])
+                    return (pygame.surfarray.array3d(screen),
+                            renderer._scene.values.copy())
+                finally:
+                    renderer._scene = None
+
+            ramp, rd = frame(["ramp"])
+            hill, hd = frame(["hill"])
+            forward, _ = frame(["ramp", "hill"])
+            reverse, _ = frame(["hill", "ramp"])
+            overlap = np.isfinite(rd) & np.isfinite(hd)
+            front = overlap & (hd > rd + C.DEPTH_EPSILON)
+            behind = overlap & (rd > hd + C.DEPTH_EPSILON)
+            assert np.array_equal(forward[front], hill[front])
+            assert np.array_equal(reverse[front], hill[front])
+            assert np.array_equal(forward[behind], ramp[behind])
+            assert np.array_equal(reverse[behind], ramp[behind])
+            # For the most frontal axis, ensure the assertions are not vacuous.
+            if direction == 0:
+                assert int(front.sum()) > 10
+        board.remove_ramp(p)
+    pygame.quit()
+
+
+def test_terrain_cache_invalidates_after_edit():
+    """Cached colour and depth must match a fresh renderer after map edits."""
+    from hexfront import hexgrid
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(10, 10)
+    camera = Camera(screen.get_size())
+    camera.center_on_world(*board.center_world((4, 4)))
+    scene = SimpleNamespace(board=board, buildings=[], vehicles=[])
+    renderer._draw_tiles(scene, camera)
+    for zoom in (0.5, 1.0, 2.0):
+        camera.zoom = zoom
+        board.tiles[(5, 4)].height += 1
+        board.set_ramp((4, 4), (5, 4), hexgrid.neighbor(4, 4, 3))
+        renderer._draw_tiles(scene, camera)
+        cached = pygame.surfarray.array3d(screen)
+        Renderer(screen)._draw_tiles(scene, camera)
+        assert np.array_equal(cached, pygame.surfarray.array3d(screen))
+        renderer._draw_tiles(scene, camera)
+        assert np.array_equal(cached, pygame.surfarray.array3d(screen))
+    pygame.quit()
+
+
+def test_bridge_and_vehicle_pixel_occlusion():
+    """Deck fragments cover traffic below, never traffic on the deck."""
+    from hexfront.entities import Vehicle
+    from hexfront.constants import VehicleKind
+    screen = pygame.display.set_mode((640, 480))
+    renderer = Renderer(screen)
+    board = Board(10, 10)
+    for tile in board.tiles.values():
+        tile.height = 0
+    board.tiles[(4, 3)].height = board.tiles[(4, 6)].height = 3
+    bridge = board.add_bridge((4, 3), (4, 6), 1)
+    assert bridge is not None
+    scene = SimpleNamespace(board=board, buildings=[], vehicles=[])
+    camera = Camera(screen.get_size())
+    pos = board.center_world((4, 4))
+    camera.center_on_world(*pos)
+    tank = Vehicle(VehicleKind.TANK, 0, 10.0, [(4, 4), (4, 5)],
+                   pos, src_tile=(4, 3))
+    hover = Vehicle(VehicleKind.HOVERCRAFT, 1, 10.0, [(3, 4)],
+                    pos, src_tile=(5, 4))
+    for zoom in (0.5, 1.0, 2.0):
+        camera.zoom = zoom
+        c = DepthCamera(camera)
+        for vehicle in (tank, hover):
+            def frame(deck):
+                screen.fill((0, 0, 0))
+                renderer._scene = DepthBuffer(screen)
+                try:
+                    renderer._draw_vehicle(scene, c, vehicle)
+                    if deck:
+                        renderer._draw_bridge_fragment(scene, c, bridge, (4, 4))
+                    return pygame.surfarray.array3d(screen)
+                finally:
+                    renderer._scene = None
+            alone = frame(False)
+            composed = frame(True)
+            body = alone.any(axis=2)
+            changed = np.any(alone != composed, axis=2) & body
+            if vehicle is tank:
+                assert not changed.any(), (zoom, int(changed.sum()))
+            else:
+                assert changed.any(), "The deck must hide part of the hovercraft"
+    pygame.quit()
+
+
 if __name__ == "__main__":
+    test_bridge_and_vehicle_pixel_occlusion()
+    test_depth_visibility_is_independent_of_submission_order()
+    test_near_high_tile_occludes_ramp()
+    test_terrain_cache_invalidates_after_edit()
+    test_vehicle_at_far_edge_of_own_tile()
     test_view_clears_on_pan_and_zoom()
     test_view_culling_covers_screen()
     test_far_building_does_not_cover_near_high_terrain()

@@ -7,7 +7,7 @@ specification in [specification.md](specification.md).
 ## Running
 
 ```bash
-python3 main.py          # requires pygame (pip install pygame)
+python3 main.py          # requires pygame and numpy (pip install pygame numpy)
 python3 editor.py        # the board editor (separate application)
 ```
 
@@ -75,6 +75,7 @@ hexfront/
   levels.py      procedural map generator (also feeds make_maps.py)
   mapfile.py     binary map file format: save / load / list maps
   camera.py      isometric projection and view transforms
+  depth.py       per-pixel depth testing of scene polygons and lines
   render.py      code-drawn isometric renderer (no raster assets)
   app.py         menu, loading screen, input handling, HUD
 main.py          entry point
