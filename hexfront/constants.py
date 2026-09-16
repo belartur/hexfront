@@ -33,6 +33,14 @@ ISO_SIN = 0.5
 #: Numerical coplanarity tolerance for the depth renderer (specification:
 #: "Grafika i interfejs użytkownika"); not an object-depth lift.
 DEPTH_EPSILON = 1e-7
+#: Screen-space readability settings (specification: graphics).
+GRID_LINE_WIDTH = 2
+PROJECTILE_RADIUS = 3
+ROCKET_RADIUS = 5
+PROJECTILE_OUTLINE_WIDTH = 1
+PROJECTILE_OUTLINE_COLOR = (25, 25, 30)
+
+
 
 
 # --------------------------------------------------------------------------

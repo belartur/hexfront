@@ -89,3 +89,12 @@ tests/test_mapfile.py  map format & editor tests: python3 -m tests.test_mapfile
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in
 `hexfront/constants.py` (`UNIT_J_TO_PX`); zoom and window scaling affect
 rendering only.  The hexagon side is 36 j (flat-top layout).
+
+### Rendering benchmark
+
+Run `python3 -m tests.benchmark_render --frames 10` from the repository root
+for a deterministic headless scene with terraces and 32 moving vehicles.
+It reports cold-frame, median and maximum `draw_world` CPU times for fixed
+views, fractional panning and zoom changes. Add `--profile` for cProfile
+statistics (profiling overhead affects timings). These are measurements,
+not timing assertions or a guarantee of interactive FPS.

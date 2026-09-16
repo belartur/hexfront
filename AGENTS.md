@@ -46,11 +46,12 @@ Menu gry listuje dynamicznie wszystkie `maps/*.map` przez `mapfile.list_maps()` 
 - `hexfront/levels.py` — generator proceduralny: `LevelConfig`, `LEVELS`, `build_level()`. Używany przez `make_maps.py` i testy.
 - `hexfront/mapfile.py` — implementacja formatu `.map` opisanego w `specification.md`: `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
 - `hexfront/camera.py` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`). Zoom dotyczy tylko renderingu.
-- `hexfront/depth.py` — programowy bufor głębokości NumPy: `ProjectedPoint`, `DepthCamera`, `DepthBuffer`; rasteryzacja powierzchni i linii sceny.
+- `hexfront/depth.py` — programowy bufor głębokości NumPy: `ProjectedPoint`, `DepthCamera`, `DepthBuffer`; rasteryzacja powierzchni i linii sceny oraz zbiorczy test głębokości poziomych pól i siatki.
 - `hexfront/render.py` — rysowanie z kodu (bez assetów rastrowych): `Renderer.draw_world()`, cache obrazu/głębokości nieruchomego terenu + helpery terenu, zasięgów, dróg, obiektów, badge z liczbą jednostek, pływające `-x/+x`. Kolor gracza zawsze jako argument.
 - `hexfront/app.py` — okno, menu poziomów, input i HUD: `Application` (`run()`, obsługa LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza). Wybór poziomu kliknięciem; Esc wraca do menu.
 
 ### Testy `tests/`
+- `tests/benchmark_render.py` — powtarzalny benchmark `draw_world` z ruchomymi pojazdami: nieruchomy widok, pan i zoom; opcjonalny profil cProfile.
 - `tests/test_logic.py` — reguły headless (`python3 -m tests.test_logic`): ruch, produkcja, walki, działka, leczenie, ściany/miny/pułapki, eliminacja, AI, pełne symulacje poziomów.
 - `tests/test_mapfile.py` — format map i edytor (`python3 -m tests.test_mapfile`): `load_game`, `trim_map`/`pad_map`, akcje i błędy edytora, `pick_tile(flat=True)`.
 - `tests/test_render.py` — regresja renderingu (`python3 -m tests.test_render`, wymaga `numpy`): czyszczenie widoku przy pan/zoom, culling, widoczność pojazdów i ramp, zasłanianie mostów, bufor głębokości i unieważnianie cache.

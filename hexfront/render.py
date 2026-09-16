@@ -76,13 +76,14 @@ class Renderer:
         lower; every face participates in the shared depth buffer."""
         board = game.board
         q, r = tile
+        heights = [board.height(n) if board.contains(n) else 0
+                   for n in hexgrid.neighbors(q, r)]
+        if min(heights) >= t.height:
+            return
         corners = hexgrid.hex_corners(q, r, board.side)
         z = t.height * C.ELEVATION_PX
         pts = [camera.world_to_screen(x, y, z) for x, y in corners]
-        for k in range(6):
-            d = hexgrid.edge_dir_index(q, k)
-            n = hexgrid.neighbor(q, r, d)
-            nh = board.height(n) if board.contains(n) else 0
+        for k, nh in enumerate(heights):
             if nh < t.height:
                 nz = nh * C.ELEVATION_PX
                 b1 = camera.world_to_screen(*corners[k], nz)
@@ -172,10 +173,32 @@ class Renderer:
         try:
             if terrain_key != self._terrain_key:
                 self.screen.fill(C.WATER_COLOR)
+                faces_by_height = {}
                 for tile in visible:
                     t = board.tiles[tile]
                     self._draw_skirts(game, camera, tile, t)
-                    self._draw_top(game, camera, tile, t)
+                    cx, cy = board.center_world(tile)
+                    z = t.height * C.ELEVATION_PX
+                    sx, sy = camera.world_to_screen(cx, cy, z)
+                    # Conservative projection bounds of a world-space disc
+                    # containing the hex. Avoid projecting off-screen tops.
+                    rx = math.sqrt(2) * board.side * C.ISO_COS * camera.zoom
+                    ry = math.sqrt(2) * board.side * C.ISO_SIN * camera.zoom
+                    margin = C.GRID_LINE_WIDTH
+                    if (sx + rx < -margin or sy + ry < -margin
+                            or sx - rx > self.screen.get_width() + margin
+                            or sy - ry > self.screen.get_height() + margin):
+                        continue
+                    points = [camera.world_to_screen(x, y, z)
+                              for x, y in hexgrid.hex_corners(*tile, board.side)]
+                    faces_by_height.setdefault(t.height, []).append(points)
+                for height, faces in sorted(faces_by_height.items()):
+                    fill = (_shade(C.LAND_COLOR, 1.0 + 0.05 * height)
+                            if height else C.WATER_COLOR)
+                    edge = C.LAND_EDGE if height else C.WATER_EDGE
+                    self._scene.horizontal_faces(faces, fill, edge, C.GRID_LINE_WIDTH)
+                for tile in visible:
+                    t = board.tiles[tile]
                     if t.ramp is not None:
                         self._draw_ramp(game, camera, tile, t)
                 self._terrain_surface = self.screen.copy()
@@ -826,7 +849,9 @@ class Renderer:
                                   p.get("to_prev"), p.get("to_next")) + 14.0
             z = (1.0 - t) * from_z + t * to_z
             pos = camera.world_to_screen(x, y, z)
-            radius = 4 if p.get("rocket") else 2
+            radius = C.ROCKET_RADIUS if p.get("rocket") else C.PROJECTILE_RADIUS
+            pygame.draw.circle(self.screen, C.PROJECTILE_OUTLINE_COLOR, pos,
+                               radius + C.PROJECTILE_OUTLINE_WIDTH)
             pygame.draw.circle(self.screen, p["color"], pos, radius)
 
     # ------------------------------------------------------------------

@@ -576,7 +576,93 @@ def test_bridge_and_vehicle_pixel_occlusion():
     pygame.quit()
 
 
+def test_surface_details_keep_full_width_but_respect_occlusion():
+    """A roof must not cut its own mark; a nearer plane must still hide it."""
+    screen = pygame.display.set_mode((240, 200))
+    camera = Camera(screen.get_size())
+    for zoom in (0.5, 1.0, 2.0):
+        camera.zoom = zoom
+        camera.x, camera.y = 0.25, -0.75
+        c = DepthCamera(camera)
+        roof = [c.world_to_screen(x, y, 0) for x, y in
+                ((-40, -40), (40, -40), (40, 40), (-40, 40))]
+        a, b = c.world_to_screen(-12, 0, 0), c.world_to_screen(12, 0, 0)
+        mask = pygame.Surface(screen.get_size())
+        mask.fill((0, 0, 0))
+        pygame.draw.line(mask, (255, 255, 255), a, b, 3)
+        expected = pygame.surfarray.array3d(mask).any(axis=2)
+        screen.fill((0, 0, 0))
+        depth = DepthBuffer(screen)
+        depth.polygon((80, 80, 80), roof)
+        depth.line((255, 255, 255), a, b, 3)
+        assert (pygame.surfarray.array3d(screen)[expected] == 255).all()
+        # A plane closer along the viewing ray covers the same screen area.
+        from hexfront.depth import ProjectedPoint
+        front = [ProjectedPoint(*p.projected, p.depth + 20) for p in roof]
+        depth.polygon((80, 80, 80), front)
+        depth.line((255, 255, 255), a, b, 3)
+        assert (pygame.surfarray.array3d(screen)[expected] == 80).all()
+    pygame.quit()
+
+
+def test_batched_grid_and_view_changes():
+    """Grid strokes survive adjacent fills and fractional pan/zoom changes."""
+    from hexfront import hexgrid
+    from unittest.mock import patch
+    screen = pygame.display.set_mode((320, 240))
+    board = Board(20, 20)
+    scene = SimpleNamespace(board=board, buildings=[], vehicles=[])
+    renderer = Renderer(screen)
+    camera = Camera(screen.get_size())
+    camera.center_on_world(*board.center_world((8, 8)))
+    for zoom in (0.5, 1.0, 1.1, 2.0):
+        camera.zoom = zoom
+        for shift in (0, 1, 0.375, -2.75):
+            camera.x += shift
+            camera.y -= shift
+            with patch.object(DepthBuffer, 'line', side_effect=AssertionError(
+                    'Flat grid must not rasterize edges individually')):
+                renderer._draw_tiles(scene, camera)
+            cached = pygame.surfarray.array3d(screen)
+            Renderer(screen)._draw_tiles(scene, camera)
+            assert np.array_equal(cached, pygame.surfarray.array3d(screen))
+            mask = pygame.Surface(screen.get_size())
+            mask.fill((0, 0, 0))
+            for tile in board.tiles:
+                pts = [camera.world_to_screen(x, y, C.ELEVATION_PX)
+                       for x, y in hexgrid.hex_corners(*tile, board.side)]
+                pygame.draw.polygon(mask, (255, 255, 255), pts, C.GRID_LINE_WIDTH)
+            edges = pygame.surfarray.array3d(mask).any(axis=2)
+            assert edges.any()
+            assert (cached[edges] == C.LAND_EDGE).all()
+    pygame.quit()
+
+
+def test_projectile_contrast_outline():
+    """Shots remain identifiable even on a background of their own colour."""
+    screen = pygame.display.set_mode((240, 200))
+    board = Board(4, 4)
+    renderer = Renderer(screen)
+    camera = Camera(screen.get_size())
+    pos = board.center_world((1, 1))
+    camera.center_on_world(*pos)
+    color = (230, 210, 60)
+    shot = {"t": 0.5, "dur": 1.0, "from": pos, "to": pos,
+            "to_tile": (1, 1), "color": color}
+    scene = SimpleNamespace(board=board, projectiles=[shot])
+    for rocket in (False, True):
+        shot['rocket'] = rocket
+        screen.fill(color)
+        renderer._draw_projectiles(scene, camera)
+        pixels = pygame.surfarray.array3d(screen)
+        assert (pixels == C.PROJECTILE_OUTLINE_COLOR).all(axis=2).any()
+    pygame.quit()
+
+
 if __name__ == "__main__":
+    test_surface_details_keep_full_width_but_respect_occlusion()
+    test_batched_grid_and_view_changes()
+    test_projectile_contrast_outline()
     test_bridge_and_vehicle_pixel_occlusion()
     test_depth_visibility_is_independent_of_submission_order()
     test_near_high_tile_occludes_ramp()
