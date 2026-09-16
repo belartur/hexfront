@@ -947,7 +947,10 @@ def trim_map(board: Board, buildings: list):
     Every kept ramp endpoint and bridge end is kept on the board as
     well, so no object loses its neighbours.  Returns a new
     ``(board, buildings)`` pair with shifted coordinates; the smallest
-    possible result is a 1 x 1 board.
+    possible result is a 1 x 1 board.  The column shift is always *even*
+    (the odd-q grid of hexgrid.py is translation-invariant only then),
+    so one extra water column is kept on the left when the first
+    occupied column is odd.
     """
     occupied_cols, occupied_rows = set(), set()
     for (q, r), _t in board.tiles.items():
@@ -965,6 +968,12 @@ def trim_map(board: Board, buildings: list):
     if not occupied_cols:                        # empty board -> 1 x 1
         occupied_cols, occupied_rows = {0}, {0}
     q0, r0 = min(occupied_cols), min(occupied_rows)
+    # The saved file must shift columns by an *even* number only: an odd
+    # origin column would flip the odd-q column stagger (hexgrid.py)
+    # when the map is loaded back, distorting ramps and bridges.  Keep
+    # one extra water column on the left if q0 is odd.
+    if q0 & 1:
+        q0 -= 1
     cols = max(occupied_cols) - q0 + 1
     rows = max(occupied_rows) - r0 + 1
 
@@ -994,15 +1003,22 @@ def pad_map(board: Board, buildings: list, size: tuple = None):
     """Pad ``board`` up to ``size`` (default the standard new map size).
 
     Extra rows and columns are added evenly at the beginning and the end
-    (editor spec: "po równo na początku/konćcu").  Returns a new
-    ``(board, buildings)`` pair with shifted coordinates.
+    (editor spec: "po równo na początku/konćcu"); the column shift is
+    kept *even* (see below), so one column more may land at the end.
+    Returns a new ``(board, buildings)`` pair with shifted coordinates.
     """
     cols, rows = size or C.EDITOR_NEW_SIZE
     pad_q = max(0, cols - board.cols)
     pad_r = max(0, rows - board.rows)
     if pad_q == 0 and pad_r == 0:
         return board, buildings              # nothing to add
-    q0, r0 = pad_q // 2, pad_r // 2              # even split start/end
+    # The odd-q hex grid (hexgrid.py: the vertical stagger of a column
+    # depends on ``q & 1``) is translation-invariant only under *even*
+    # column shifts.  An odd q0 would flip the stagger of every column
+    # pair and distort the map (ramps and bridges would stop joining
+    # their tiles), so q0 is rounded down to an even value; any surplus
+    # column pads the end.  Row shifts translate exactly, any r0 works.
+    q0, r0 = (pad_q // 2) & ~1, pad_r // 2
     new_board = Board(cols, rows)
     for t in new_board.tiles.values():
         t.height = 0                            # padding is pure water

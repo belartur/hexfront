@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame                                                    # noqa: E402
+from hexfront import hexgrid                                  # noqa: E402
 from hexfront import mapfile                                  # noqa: E402
 from hexfront import constants as C                           # noqa: E402
 from hexfront.board import Board, Obstacle                    # noqa: E402
@@ -321,10 +322,56 @@ def test_trim_and_pad():
     board2.tiles[(4, 1)].height = 1
     board2.set_ramp((3, 1), (4, 1), (2, 1))
     b2, _ = trim_map(board2, [])
-    assert b2.cols == 4 and b2.rows == 1      # only column 0 and rows 0/2-3
-    assert b2.tiles[(0, 0)].obstacle.kind == Obstacle.WALL
-    assert set(b2.tiles[(2, 0)].ramp) == {(3, 0), (1, 0)}
-    assert b2.height((2, 0)) == 1             # min of the ends (sec. 7)
+    # the occupied region starts at the odd column 1, so one extra water
+    # column is kept on the left: the column shift stays even (odd-q
+    # stagger, see the pad_map/trim_map docstrings)
+    assert b2.cols == 5 and b2.rows == 1
+    assert b2.tiles[(1, 0)].obstacle.kind == Obstacle.WALL
+    assert set(b2.tiles[(3, 0)].ramp) == {(4, 0), (2, 0)}
+    assert b2.height((3, 0)) == 1             # min of the ends (sec. 7)
+
+
+def test_trim_pad_odd_shift():
+    """trim/pad shift columns by even numbers only (odd-q stagger).
+
+    An odd column shift flips the vertical stagger of every column pair
+    (hexgrid.py) and makes ramps join non-neighbouring tiles; regression
+    for maps whose occupied region starts at an odd column and pads to
+    an odd split.
+    """
+    board = Board(8, 8)
+    for t in board.tiles.values():
+        t.height = 0                           # all water first
+    for q in range(3, 6):
+        for r in range(3, 6):
+            board.tiles[(q, r)].height = 1
+    # ramp (sec. 7): (4, 4) is an even column; dir 1 up to (4, 5) with
+    # height 5, opposite dir 4 down to (4, 3) with height 3; the ramp
+    # tile itself takes the minimum of the ends
+    board.tiles[(4, 3)].height = 3
+    board.tiles[(4, 4)].height = 3
+    board.tiles[(4, 5)].height = 5
+    board.set_ramp((4, 4), (4, 5), (4, 3))    # sets the tile to min = 3
+    assert board.tiles[(4, 4)].ramp == ((4, 5), (4, 3))
+    buildings = [Building(BuildingKind.BASE_TANK, 0, 5, 4, units=10)]
+    trimmed, tb = trim_map(board, buildings)
+    # the occupied region starts at the odd column 3: one extra water
+    # column on the left keeps the column shift (3 -> 2) even
+    assert trimmed.cols == 4 and trimmed.rows == 3
+    assert [b.tile for b in tb] == [(3, 1)]           # (5, 4) - (2, 3)
+    assert trimmed.tiles[(2, 1)].ramp == ((2, 2), (2, 0))
+    padded, pb = pad_map(trimmed, tb)
+    q0 = (padded.cols - trimmed.cols) // 2
+    r0 = (padded.rows - trimmed.rows) // 2
+    assert q0 % 2 == 0                        # even column shift
+    for tile, ramp in padded.ramps.items():
+        assert all(end in hexgrid.neighbors(*tile) for end in ramp), tile
+    # heights travel with their tiles (same content, even translation;
+    # the padded board grows from the trimmed one, so the shift applies
+    # to the trimmed coordinates)
+    assert padded.height((1 + q0, 0 + r0)) == 1
+    assert padded.height((2 + q0, 2 + r0)) == 5
+    assert [b.tile for b in pb] == [(3 + q0, 1 + r0)]
 
 
 def test_editor_errors():
@@ -502,9 +549,10 @@ def test_snap_to_building():
 
 
 TESTS = [test_round_trip, test_unit_count_and_owner_bits, test_load_game,
-         test_list_maps_and_seed, test_trim_and_pad, test_editor_actions,
-         test_editor_errors, test_editor_ctrl_keys, test_editor_save_text_leak,
-         test_pick_tile_flat, test_snap_to_building]
+         test_list_maps_and_seed, test_trim_and_pad, test_trim_pad_odd_shift,
+         test_editor_actions, test_editor_errors, test_editor_ctrl_keys,
+         test_editor_save_text_leak, test_pick_tile_flat,
+         test_snap_to_building]
 
 if __name__ == "__main__":
     failures = 0
