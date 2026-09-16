@@ -1,15 +1,17 @@
 """Binary map file format (specification: "Format pliku planszy").
 
-Layout of a ``.map`` file, all integers big-endian:
+Layout of a ``.map`` file, all multi-byte integers little-endian:
 
 * 2 header bytes: number of columns ``k`` (1 B) and rows ``w`` (1 B);
-* ``k * w`` 4-bit heights, two tiles per byte (the *high* nibble holds the
-  earlier tile of each pair, tiles ordered row-major: ``r * k + q``).
-  When ``k * w`` is odd the final low nibble stores zero;
+* ``k * w`` 4-bit heights, two tiles per byte in little-endian nibble
+  order: the *low* nibble holds the earlier tile of each pair, tiles
+  ordered row-major: ``r * k + q``.  When ``k * w`` is odd the final
+  high nibble stores zero;
 * objects, one record each: 1 B column + 1 B row + 1 B type, followed by
-  2 extra bytes for buildings: a 16-bit word holding the owner code on
-  the high 6 bits (0 neutral, 1 blue, 2 red, 3 green, 4 yellow) and the
-  starting unit count 0-999 on the low 10 bits.  Type codes:
+  2 extra bytes for buildings: a little-endian 16-bit word holding the
+  owner code on the high 6 bits (0 neutral, 1 blue, 2 red, 3 green,
+  4 yellow) and the starting unit count 0-999 on the low 10 bits.
+  Type codes:
 
   - 0-19 building kinds (part of the range unused), see ``BUILDING_CODES``,
   - 20-22 bridge fragment, code - 20 = the geometric axis (0-2) of the
@@ -91,10 +93,11 @@ def save_map(path: str, board: Board, buildings: list) -> None:
         for q in range(board.cols):
             nibbles.append(max(0, min(15, board.tiles[(q, r)].height)))
     if len(nibbles) % 2:
-        nibbles.append(0)                           # padding low nibble
+        nibbles.append(0)                           # padding high nibble
     heights = bytearray()
     for i in range(0, len(nibbles), 2):
-        heights.append((nibbles[i] << 4) | nibbles[i + 1])
+        # little-endian nibble order: earlier tile on the low nibble
+        heights.append(nibbles[i] | (nibbles[i + 1] << 4))
 
     records = []
     for b in sorted(buildings, key=lambda b: b.tile):
@@ -107,26 +110,26 @@ def save_map(path: str, board: Board, buildings: list) -> None:
                              "does not fit the 6-bit owner field")
         units = max(0, min(MAX_SAVED_UNITS, int(round(b.units))))
         props = (owner << 10) | units               # 6-bit owner + 10-bit units
-        records.append(struct.pack(">BBBH", b.tile[0], b.tile[1],
+        records.append(struct.pack("<BBBH", b.tile[0], b.tile[1],
                                    code, props))
     for tile in sorted(board.tiles):
         t = board.tiles[tile]
         if t.ramp is not None:
             axis = _ramp_axis(tile, t.ramp)
             if axis is not None:
-                records.append(struct.pack(">BBB", tile[0], tile[1],
+                records.append(struct.pack("<BBB", tile[0], tile[1],
                                            RAMP_CODE_BASE + axis))
         elif t.bridge is not None:
-            records.append(struct.pack(">BBB", tile[0], tile[1],
+            records.append(struct.pack("<BBB", tile[0], tile[1],
                                        BRIDGE_CODE_BASE
                                        + t.bridge.direction % 3))
         elif t.obstacle is not None:
             code = CODE_OBSTACLES.get(t.obstacle.kind)
             if code is not None:
-                records.append(struct.pack(">BBB", tile[0], tile[1], code))
+                records.append(struct.pack("<BBB", tile[0], tile[1], code))
 
     with open(path, "wb") as f:
-        f.write(struct.pack(">BB", board.cols, board.rows))
+        f.write(struct.pack("<BB", board.cols, board.rows))
         f.write(bytes(heights))
         for rec in records:
             f.write(rec)
@@ -157,7 +160,7 @@ def load_board(path: str, validate: bool = True):
         data = f.read()
     if len(data) < 2:
         raise ValueError(f"{path}: file too short for the header")
-    cols, rows = struct.unpack_from(">BB", data, 0)
+    cols, rows = struct.unpack_from("<BB", data, 0)
     if cols == 0 or rows == 0:
         raise ValueError(f"{path}: empty board")
     board = Board(cols, rows)
@@ -165,8 +168,9 @@ def load_board(path: str, validate: bool = True):
     n = cols * rows
     nibbles = []
     for byte in data[2:2 + (n + 1) // 2]:
-        nibbles.append(byte >> 4)
+        # little-endian nibble order: earlier tile on the low nibble
         nibbles.append(byte & 0x0F)
+        nibbles.append(byte >> 4)
     if len(nibbles) < n:
         raise ValueError(f"{path}: truncated height data")
     for r in range(rows):
@@ -177,7 +181,7 @@ def load_board(path: str, validate: bool = True):
     frag_marks = {}
     off = 2 + (n + 1) // 2
     while off + 3 <= len(data):
-        q, r, code = struct.unpack_from(">BBB", data, off)
+        q, r, code = struct.unpack_from("<BBB", data, off)
         off += 3
         tile = (q, r)
         if not board.contains(tile):
@@ -185,7 +189,7 @@ def load_board(path: str, validate: bool = True):
         if code <= 19:
             if off + 2 > len(data):
                 raise ValueError(f"{path}: truncated building at {tile}")
-            props, = struct.unpack_from(">H", data, off)
+            props, = struct.unpack_from("<H", data, off)
             off += 2
             owner = (props >> 10) & 0x3F
             units = props & 0x3FF

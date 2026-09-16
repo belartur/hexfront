@@ -113,9 +113,9 @@ def test_unit_count_and_owner_bits():
         # Building record at offset 3 (2 header bytes + 1 height byte):
         # 2 coord bytes + 1 type + 2 property bytes.  Owner 3 -> code 4
         # = 0b000100, units 999 = 0b1111100111, so the 16-bit word is
-        # 0b000100_1111100111 = 0x13E7.
+        # 0b000100_1111100111 = 0x13E7, stored little-endian as E7 13.
         data = open(path, "rb").read()
-        assert data[6:8] == b"\x13\xe7"
+        assert data[6:8] == b"\xe7\x13"
         loaded_board, loaded = mapfile.load_board(path)
     by_tile = {b.tile: b for b in loaded}
     assert by_tile[(0, 0)].units == 999 and by_tile[(0, 0)].owner == 3
