@@ -399,6 +399,46 @@ def test_editor_ctrl_keys():
     pygame.quit()
 
 
+def test_editor_save_text_leak():
+    """The save key's own TEXTINPUT must not end up in the map name."""
+    from editor import Editor, EditorScene
+
+    ed = Editor()
+    ed.scene = EditorScene(Board(4, 4), [])
+    # ``s`` opens the save overlay ...
+    ed._key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_s))
+    assert ed.overlay == "save" and ed.input_text == ""
+    # ... and the same key press also delivers a TEXTINPUT with "s"
+    pygame.event.post(pygame.event.Event(pygame.TEXTINPUT, text="s"))
+    ed._handle_events()
+    assert ed.input_text == ""
+    # real typing still works afterwards
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a))
+    pygame.event.post(pygame.event.Event(pygame.TEXTINPUT, text="a"))
+    ed._handle_events()
+    assert ed.input_text == "a"
+    # the same leak existed via the exit prompt's ``S`` (save and exit);
+    # the overlay resets the field to the current name (here: none)
+    ed.overlay = "exit"
+    ed._key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_s))
+    assert ed.overlay == "save" and ed.input_text == ""
+    pygame.event.post(pygame.event.Event(pygame.TEXTINPUT, text="s"))
+    ed._handle_events()
+    assert ed.input_text == ""
+    # a key that produces no text (ctrl+s opens save with the current
+    # name) must not make the swallow eat the first real character: the
+    # next KEYDOWN clears the pending swallow before its TEXTINPUT
+    ed.overlay = None
+    pygame.key.set_mods(pygame.KMOD_CTRL)
+    ed._key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_s))
+    pygame.key.set_mods(0)
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_n))
+    pygame.event.post(pygame.event.Event(pygame.TEXTINPUT, text="n"))
+    ed._handle_events()
+    assert ed.input_text == "n"
+    pygame.quit()
+
+
 def test_pick_tile_flat():
     """Board.pick_tile(flat=True) picks as if all heights were zero."""
     board = Board(3, 3)
@@ -463,8 +503,8 @@ def test_snap_to_building():
 
 TESTS = [test_round_trip, test_unit_count_and_owner_bits, test_load_game,
          test_list_maps_and_seed, test_trim_and_pad, test_editor_actions,
-         test_editor_errors, test_editor_ctrl_keys, test_pick_tile_flat,
-         test_snap_to_building]
+         test_editor_errors, test_editor_ctrl_keys, test_editor_save_text_leak,
+         test_pick_tile_flat, test_snap_to_building]
 
 if __name__ == "__main__":
     failures = 0

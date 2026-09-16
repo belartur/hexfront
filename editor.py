@@ -117,6 +117,7 @@ class Editor:
         self.overlay_index = 0       # highlighted row of the overlay list
         self.overlay_items = []      # names listed by load/save overlays
         self.input_text = ""         # name typed in the save overlay
+        self._suppress_text_input = False  # swallow the save key TEXTINPUT
         self._exit_after_save = False
         self._digit_tile = None      # tile the pending digits apply to
         self._digit_text = ""
@@ -549,9 +550,23 @@ class Editor:
                     self._dragging = True
                     self.camera.pan(ev.rel[0], ev.rel[1])
             elif ev.type == pygame.TEXTINPUT and self.overlay == "save":
-                self.input_text += ev.text
+                if self._suppress_text_input:
+                    # The key that opened the save overlay (``s`` or the
+                    # exit prompt's ``S``) also delivers a TEXTINPUT event;
+                    # swallow exactly that one so it does not end up in
+                    # the typed map name.
+                    self._suppress_text_input = False
+                else:
+                    self.input_text += ev.text
             elif ev.type == pygame.KEYDOWN:
+                had_pending = self._suppress_text_input
                 self._key(ev)
+                if had_pending:
+                    # No TEXTINPUT followed the key that opened the save
+                    # overlay (ctrl+s types nothing) or another key came
+                    # first, so the pending swallow must not eat real
+                    # typing.
+                    self._suppress_text_input = False
 
     def _key(self, ev: pygame.event.Event) -> None:
         """Dispatch a key press depending on the overlay state."""
@@ -665,6 +680,9 @@ class Editor:
         self.overlay_index = 0 if self.map_name else -1
         self.input_text = self.map_name or ""
         self.overlay = "save"
+        # The KEYDOWN that opened this overlay is followed by a TEXTINPUT
+        # event carrying the key's own character; swallow it.
+        self._suppress_text_input = True
 
     def _move_overlay_selection(self, down: bool) -> None:
         """Move the highlighted row of the overlay list (wraps around)."""
