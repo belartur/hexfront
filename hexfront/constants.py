@@ -41,6 +41,14 @@ PROJECTILE_OUTLINE_WIDTH = 1
 PROJECTILE_OUTLINE_COLOR = (25, 25, 30)
 
 
+#: Vehicle shadows on visible receiving surfaces (specification: graphics).
+SHADOW_RADIUS = 14.0 * UNIT_J_TO_PX
+SHADOW_SEGMENTS = 14
+SHADOW_COLOR = (0, 0, 0, 70)
+#: Visual deck thickness; use the same surface for deck and shadows.
+BRIDGE_DECK_LIFT = 5.0 * UNIT_J_TO_PX
+
+
 
 
 # --------------------------------------------------------------------------

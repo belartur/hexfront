@@ -56,6 +56,15 @@ class DepthBuffer:
         self.screen = screen
         self.values = np.full(screen.get_size(), -np.inf)
         self.mask = pygame.Surface(screen.get_size(), depth=8)
+        self._decal = False
+
+    def decal(self, color: tuple, points: list) -> None:
+        """Blend a planar shadow only onto equal-depth visible receivers."""
+        self._decal = True
+        try:
+            self.polygon(color, points)
+        finally:
+            self._decal = False
 
     def _region(self, points: list, width: int) -> pygame.Rect:
         """Clip raster work to the primitive, including thick-line coverage."""
@@ -73,10 +82,24 @@ class DepthBuffer:
             coverage = pygame.surfarray.array2d(self.mask.subsurface(rect)) != 0
         old = self.values[x:x + w, y:y + h]
         visible = coverage & (depths >= old - C.DEPTH_EPSILON)
+        if self._decal:
+            # A translucent decal may shade only its receiving surface.
+            # It must neither float above lower ground nor darken a cliff
+            # closer to the viewer, and never becomes an occluder itself.
+            visible &= np.abs(depths - old) <= C.DEPTH_EPSILON
         if visible.any():
-            pixels = pygame.surfarray.pixels2d(self.screen)
-            pixels[x:x + w, y:y + h][visible] = self.screen.map_rgb(color[:3])
-            old[visible] = np.broadcast_to(depths, old.shape)[visible]
+            if self._decal:
+                pixels = pygame.surfarray.pixels3d(self.screen)
+                region = pixels[x:x + w, y:y + h]
+                alpha = color[3]
+                region[visible] = ((region[visible].astype(np.uint16) * (255 - alpha)
+                                    + np.array(color[:3], dtype=np.uint16) * alpha)
+                                   // 255).astype(np.uint8)
+            else:
+                pixels = pygame.surfarray.pixels2d(self.screen)
+                np.copyto(pixels[x:x + w, y:y + h],
+                          self.screen.map_rgb(color[:3]), where=visible)
+                np.copyto(old, depths, where=visible)
             del pixels
 
     def horizontal_faces(self, faces: list, fill: tuple, edge: tuple,

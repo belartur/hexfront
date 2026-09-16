@@ -98,3 +98,5 @@ It reports cold-frame, median and maximum `draw_world` CPU times for fixed
 views, fractional panning and zoom changes. Add `--profile` for cProfile
 statistics (profiling overhead affects timings). These are measurements,
 not timing assertions or a guarantee of interactive FPS.
+Use `--mode fixed|pan|zoom` and `--zoom 0.5|1.0|2.0` to isolate a case,
+for example `python3 -m tests.benchmark_render --frames 10 --mode pan --zoom 0.5 --profile`.

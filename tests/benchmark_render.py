@@ -25,7 +25,8 @@ from hexfront.entities import Building, BuildingKind, Vehicle
 from hexfront.render import Renderer
 
 
-def benchmark(frames: int, profile: bool) -> None:
+def benchmark(frames: int, profile: bool, modes: tuple = ("fixed", "pan", "zoom"),
+              zooms: tuple = (0.5, 1.0, 2.0)) -> None:
     """Measure fixed-view, fractional-pan and changing-zoom frames."""
     pygame.init()
     screen = pygame.display.set_mode((1180, 720))
@@ -43,8 +44,8 @@ def benchmark(frames: int, profile: bool) -> None:
     scene = SimpleNamespace(board=board, buildings=buildings, vehicles=vehicles,
                             projectiles=[])
     profiler = cProfile.Profile()
-    for mode in ("fixed", "pan", "zoom"):
-        for zoom in (0.5, 1.0, 2.0):
+    for mode in modes:
+        for zoom in zooms:
             renderer = Renderer(screen)
             camera = Camera(screen.get_size())
             camera.center_on_world(*board.center_world((128, 128)))
@@ -80,7 +81,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frames", type=int, default=10)
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--mode", choices=("fixed", "pan", "zoom"))
+    parser.add_argument("--zoom", type=float, choices=(0.5, 1.0, 2.0))
     args = parser.parse_args()
     if args.frames < 1:
         parser.error("--frames must be positive")
-    benchmark(args.frames, args.profile)
+    benchmark(args.frames, args.profile,
+              (args.mode,) if args.mode else ("fixed", "pan", "zoom"),
+              (args.zoom,) if args.zoom else (0.5, 1.0, 2.0))

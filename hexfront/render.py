@@ -58,7 +58,6 @@ class Renderer:
         self.screen.fill(C.WATER_COLOR)
         self._rotor_phase += 0.2
         overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-        self._draw_shadows(game, camera, overlay)
         self._draw_ranges(game, camera, overlay)
         self._draw_tiles(game, camera)
         self.screen.blit(overlay, (0, 0))
@@ -76,6 +75,15 @@ class Renderer:
         lower; every face participates in the shared depth buffer."""
         board = game.board
         q, r = tile
+        cx, cy = board.center_world(tile)
+        sx, sy = camera.world_to_screen(cx, cy, t.height * C.ELEVATION_PX)
+        rx = math.sqrt(2) * board.side * C.ISO_COS * camera.zoom
+        ry = math.sqrt(2) * board.side * C.ISO_SIN * camera.zoom
+        bottom = sy + t.height * C.ELEVATION_PX * camera.zoom
+        clip = self.screen.get_clip()
+        if (sx + rx + 1 < clip.left or sx - rx - 1 > clip.right
+                or bottom + ry + 1 < clip.top or sy - ry - 1 > clip.bottom):
+            return
         heights = [board.height(n) if board.contains(n) else 0
                    for n in hexgrid.neighbors(q, r)]
         if min(heights) >= t.height:
@@ -217,6 +225,7 @@ class Renderer:
                     self._draw_building(game, camera, building_at[tile], False)
                 if t.bridge is not None and t.bridge.a is not None:
                     self._draw_bridge_fragment(game, camera, t.bridge, tile)
+            self._draw_shadows(game, camera)
             for vehicle in game.vehicles:
                 self._draw_vehicle(game, camera, vehicle)
         finally:
@@ -290,13 +299,35 @@ class Renderer:
     # ------------------------------------------------------------------
     # Shadows of flying and ground vehicles
     # ------------------------------------------------------------------
-    def _draw_shadows(self, game, camera: Camera, overlay) -> None:
+    def _draw_shadows(self, game, camera: Camera) -> None:
+        """Project ground decals before vehicles, testing the receiving depth.
+
+        Route-aware ground vehicles shade the deck only when driving along
+        it; helicopters shade the deck below them regardless of their route.
+        Ramp vertices follow the slope rather than a flat plane at its centre.
+        """
+        board = game.board
         for v in game.vehicles:
-            tile = game.board.world_to_tile(v.x, v.y)
+            tile = board.world_to_tile(v.x, v.y)
             prev, nxt = self._route_endpoints(v)
-            z = self._ground_z(game, tile, (v.x, v.y), prev, nxt)
-            pts = camera.screen_circle_poly(v.x, v.y, 14.0, z, 14)
-            pygame.draw.polygon(overlay, (0, 0, 0, 70), pts)
+            deck = self._deck_z(board, tile, prev, nxt)
+            t = board.tile(tile) if tile is not None else None
+            if v.kind == VehicleKind.HELICOPTER and t is not None and t.bridge:
+                deck = t.bridge.w * C.ELEVATION_PX
+
+            def project(x: float, y: float) -> tuple:
+                """Project a shadow vertex onto its receiving surface."""
+                if deck is not None:
+                    z = deck + C.BRIDGE_DECK_LIFT
+                else:
+                    z = self._ground_z(game, tile, (x, y))
+                return camera.world_to_screen(x, y, z)
+
+            ring = [project(v.x + C.SHADOW_RADIUS * math.cos(angle),
+                            v.y + C.SHADOW_RADIUS * math.sin(angle))
+                    for angle in (2 * math.pi * i / C.SHADOW_SEGMENTS
+                                  for i in range(C.SHADOW_SEGMENTS))]
+            self._scene.decal(C.SHADOW_COLOR, ring)
 
     # ------------------------------------------------------------------
     # Ramp, bridge, obstacle and building drawing primitives
@@ -428,7 +459,7 @@ class Renderer:
         px, py = -uy, ux
         s = board.side
         L, W = 0.52 * length, 0.34 * s
-        deck_z = bridge.w * C.ELEVATION_PX + 5
+        deck_z = bridge.w * C.ELEVATION_PX + C.BRIDGE_DECK_LIFT
         ground_z = board.height(frag) * C.ELEVATION_PX
         corners = [(cx + ux * L + px * W, cy + uy * L + py * W),
                    (cx + ux * L - px * W, cy + uy * L - py * W),

@@ -659,7 +659,124 @@ def test_projectile_contrast_outline():
     pygame.quit()
 
 
+def test_vehicle_shadows_do_not_darken_hulls():
+    """Every vehicle's shadow changes the ground, never its own body."""
+    from unittest.mock import patch
+    from hexfront.entities import Vehicle
+    screen = pygame.display.set_mode((480, 360))
+    board = Board(10, 10)
+    pos = board.center_world((4, 4))
+    camera = Camera(screen.get_size())
+    camera.center_on_world(*pos)
+    for kind in C.VehicleKind:
+        for zoom in (0.5, 1.0, 2.0):
+            camera.zoom = zoom
+            renderer = Renderer(screen)
+            v = Vehicle(kind, 0, 10, [], pos)
+            scene = SimpleNamespace(board=board, buildings=[], vehicles=[v],
+                                    projectiles=[])
+            screen.fill((0, 0, 0))
+            renderer._scene = DepthBuffer(screen)
+            renderer._draw_vehicle(scene, DepthCamera(camera), v)
+            renderer._scene = None
+            body = pygame.surfarray.array3d(screen).any(axis=2)
+            with patch.object(renderer, '_draw_badges'), \
+                    patch.object(renderer, '_draw_ranges'):
+                with patch.object(renderer, '_draw_shadows'):
+                    renderer._rotor_phase = -0.2
+                    renderer.draw_world(scene, camera)
+                    bare = pygame.surfarray.array3d(screen)
+                renderer._rotor_phase = -0.2
+                renderer.draw_world(scene, camera)
+                shaded = pygame.surfarray.array3d(screen)
+                assert np.array_equal(bare[body], shaded[body]), (kind, zoom)
+                assert np.any(bare != shaded), (kind, zoom, 'missing ground shadow')
+                renderer._rotor_phase = -0.2
+                renderer.draw_world(scene, camera)
+                assert np.array_equal(shaded, pygame.surfarray.array3d(screen)), \
+                    'Shadows must not accumulate in the terrain cache'
+    pygame.quit()
+
+
+def test_shadows_follow_receivers_and_preserve_depth():
+    """Water, inclined ramps and bridge decks receive depth-neutral shadows."""
+    from hexfront.entities import Vehicle
+    screen = pygame.display.set_mode((640, 480))
+    pos_tile = (4, 4)
+    for surface in ('water', 'ramp', 'deck', 'under_bridge'):
+        board = Board(10, 10)
+        for tile in board.tiles.values():
+            tile.height = 0
+        if surface == 'ramp':
+            board.tiles[(4, 3)].height = 2
+            board.set_ramp(pos_tile, (4, 3), (4, 5))
+        if surface in ('deck', 'under_bridge'):
+            board.tiles[(4, 3)].height = board.tiles[(4, 6)].height = 3
+            bridge = board.add_bridge((4, 3), (4, 6), 1)
+            assert bridge is not None
+        pos = board.center_world(pos_tile)
+        camera = Camera(screen.get_size())
+        camera.center_on_world(*pos)
+        for zoom in (0.5, 1.0, 2.0):
+            camera.zoom = zoom
+            for kind in C.VehicleKind:
+                renderer = Renderer(screen)
+                vehicle = Vehicle(kind, 0, 10, [(4, 5)], pos,
+                                  src_tile=pos_tile)
+                if surface != 'deck':
+                    vehicle.route = []
+                    vehicle.src_tile = None
+                scene = SimpleNamespace(board=board, vehicles=[vehicle])
+                c = DepthCamera(camera)
+                screen.fill(C.WATER_COLOR)
+                renderer._scene = DepthBuffer(screen)
+                renderer._draw_top(scene, c, pos_tile, board.tiles[pos_tile])
+                if surface == 'ramp':
+                    renderer._draw_ramp(scene, c, pos_tile, board.tiles[pos_tile])
+                if surface in ('deck', 'under_bridge'):
+                    renderer._draw_bridge_fragment(scene, c, bridge, pos_tile)
+                before = pygame.surfarray.array3d(screen)
+                depths = renderer._scene.values.copy()
+                renderer._draw_shadows(scene, c)
+                after = pygame.surfarray.array3d(screen)
+                changed = np.any(before != after, axis=2)
+                assert np.array_equal(depths, renderer._scene.values)
+                if surface != 'under_bridge' or kind == C.VehicleKind.HELICOPTER:
+                    assert changed.any(), (surface, kind, zoom)
+                if surface == 'under_bridge' and kind != C.VehicleKind.HELICOPTER:
+                    ys = np.arange(screen.get_height())[None, :] + 0.5
+                    water_depth = ys / zoom + camera.y - screen.get_height() / (2 * zoom)
+                    assert not (changed & (depths > water_depth + C.DEPTH_EPSILON)).any()
+                renderer._scene = None
+    pygame.quit()
+
+
+def test_decal_rejects_occluders_and_missing_receivers():
+    """A shadow shades equal depth only, not higher/lower faces or empty space."""
+    from hexfront.depth import ProjectedPoint
+    screen = pygame.display.set_mode((100, 100))
+    points = [(10, 10), (90, 10), (90, 90), (10, 90)]
+    shadow = [ProjectedPoint(x, y, 0) for x, y in points]
+    for receiver in (None, -10, 0, 10):
+        screen.fill((120, 120, 120))
+        depth = DepthBuffer(screen)
+        if receiver is not None:
+            depth.polygon((120, 120, 120),
+                          [ProjectedPoint(x, y, receiver) for x, y in points])
+        before = pygame.surfarray.array3d(screen)
+        old_depth = depth.values.copy()
+        depth.decal(C.SHADOW_COLOR, shadow)
+        changed = np.any(before != pygame.surfarray.array3d(screen))
+        assert changed == (receiver == 0)
+        assert np.array_equal(old_depth, depth.values)
+    pygame.quit()
+
+
+
 if __name__ == "__main__":
+    test_shadows_follow_receivers_and_preserve_depth()
+    test_decal_rejects_occluders_and_missing_receivers()
+    test_vehicle_shadows_do_not_darken_hulls()
     test_surface_details_keep_full_width_but_respect_occlusion()
     test_batched_grid_and_view_changes()
     test_projectile_contrast_outline()
