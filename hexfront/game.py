@@ -28,7 +28,7 @@ class Game:
         self.buildings = buildings
         self.building_at = {b.tile: b for b in buildings}
         self.vehicles = []
-        self.projectiles = []     # purely visual shots: dicts from/to/t/dur
+        self.projectiles = []     # turret shots in flight, resolved on impact
         self.time = 0.0
         self.over = False
         self.winner = None        # "human" or "ai"
@@ -130,20 +130,21 @@ class Game:
                 continue
             b.fire_timer = 0.0
             b.last_target_pos = target.pos
-            dmg = math.ceil(b.units / stats["damage_div"])
-            self._damage_vehicle(target, dmg)
-            if stats["splash"] > 0:  # rocket turret hits nearby enemies too
-                for v in self.vehicles:
-                    if (not v.dead and v is not target and
-                            v.owner != b.owner and
-                            _dist(v.pos, target.pos) <= stats["splash"]):
-                        self._damage_vehicle(v, dmg)
+            # Damage is frozen at launch (rules.md sec. 10 - based on the
+            # units the turret holds when firing) but only applied when the
+            # projectile hits, after its fixed flight time (sec. 10).
             self.projectiles.append({
                 "from": b.pos, "to": target.pos, "t": 0.0,
-                "dur": max(0.12, _dist(b.pos, target.pos) / 900.0),
+                "dur": C.TURRET_FLIGHT_TIME[tk],
                 "color": (C.NEUTRAL_COLOR if b.owner is None
                           else C.PLAYER_COLORS[b.owner % 4]),
                 "rocket": tk == C.TurretKind.ROCKET,
+                # Resolution data: the homing target reference, the frozen
+                # damage and the firing turret's owner (None = neutral,
+                # which hits everybody, rules.md sec. 12).
+                "target": target,
+                "dmg": math.ceil(b.units / stats["damage_div"]),
+                "owner": b.owner,
                 # Snapshot of the target's route context so the renderer
                 # can draw the tracer at deck height when the target is
                 # on a bridge (and at terrain height when under it).
@@ -394,11 +395,53 @@ class Game:
                 ent.texts.append([gain, 0.0])
 
     def _update_projectiles(self, dt: float) -> None:
-        """Age the purely visual turret shots."""
+        """Fly turret shots and resolve their damage on impact (sec. 10).
+
+        A projectile homes onto its target: while the target lives, ``to``
+        follows its current position (and the route snapshot used for the
+        drawing height is refreshed).  When the fixed flight time
+        (``TURRET_FLIGHT_TIME``) elapses, the damage frozen at launch is
+        applied - plus the splash of a rocket shot.  A projectile whose
+        target died mid-flight dissipates harmlessly.
+        """
+        still_airborne = []
         for p in self.projectiles:
             p["t"] += dt
-        self.projectiles = [p for p in self.projectiles
-                            if p["t"] < p["dur"]]
+            target = p["target"]
+            if not target.dead:
+                p["to"] = target.pos
+                p["to_tile"] = self.board.world_to_tile(*target.pos)
+                p["to_prev"] = (target.route[target.route_index - 1]
+                                if target.route
+                                and 0 < target.route_index <= len(target.route)
+                                else getattr(target, "src_tile", None))
+                p["to_next"] = (target.route[target.route_index]
+                                if target.route
+                                and 0 <= target.route_index < len(target.route)
+                                else None)
+            if p["t"] >= p["dur"]:
+                self._resolve_projectile_impact(p)
+            else:
+                still_airborne.append(p)
+        self.projectiles = still_airborne
+
+    def _resolve_projectile_impact(self, p: dict) -> None:
+        """Apply the damage of a projectile that reached its target."""
+        target = p["target"]
+        if target.dead:
+            return
+        self._damage_vehicle(target, p["dmg"])
+        if not p["rocket"]:
+            return
+        # Rocket shot: the same frozen damage to every enemy vehicle near
+        # the impact point (rules.md sec. 10.2).  Neutral rockets hit
+        # everybody (sec. 12).
+        for v in self.vehicles:
+            if (not v.dead and v is not target and
+                    v.owner != p["owner"] and
+                    _dist(v.pos, p["to"]) <= C.TURRET_STATS[
+                        C.TurretKind.ROCKET]["splash"]):
+                self._damage_vehicle(v, p["dmg"])
 
     # ------------------------------------------------------------------
     # Win / elimination (rules.md sec. 2)

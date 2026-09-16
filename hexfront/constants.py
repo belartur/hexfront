@@ -122,6 +122,16 @@ TURRET_STATS = {
                         "damage_div": 1.0, "splash": 80.0},  # sec. 10.2
 }
 
+#: Flight time of one turret projectile, in seconds, per turret kind
+#: (rules.md sec. 10 - the projectile homes onto its target and damage is
+#: resolved on impact, after this fixed flight time, regardless of the
+#: distance to the target).  Gameplay-tuning values - tweak freely.
+TURRET_FLIGHT_TIME = {
+    TurretKind.NORMAL: 0.4,   # sec. 10.1 - clearly visible shot
+    TurretKind.RAPID: 0.2,    # sec. 10.3 - snappy, well under the 1 s cooldown
+    TurretKind.ROCKET: 0.8,   # sec. 10.2 - heavy, slow rocket
+}
+
 # --------------------------------------------------------------------------
 # Healing tower (rules.md section 11)
 # --------------------------------------------------------------------------

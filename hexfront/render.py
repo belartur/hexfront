@@ -859,7 +859,7 @@ class Renderer:
             pygame.draw.arc(self.screen, (255, 255, 255), rect, start, end, 2)
 
     # ------------------------------------------------------------------
-    # Turret projectiles (purely visual - damage is instant, sec. 10)
+    # Turret projectiles (homing shots - damage resolves on impact, sec. 10)
     # ------------------------------------------------------------------
     def _draw_projectiles(self, game, camera: Camera) -> None:
         for p in game.projectiles:
@@ -867,13 +867,8 @@ class Renderer:
             x, y = _lerp(p["from"], p["to"], t)
             from_tile = game.board.world_to_tile(*p["from"])
             from_z = self._ground_z(game, from_tile, p["from"]) + 14.0
-            if "to_tile" in p:
-                to_z = self._ground_z(game, p.get("to_tile"), p["to"],
-                                      p.get("to_prev"),
-                                      p.get("to_next")) + 14.0
-            else:  # pragma: no cover - projectiles built before the change
-                to_tile = game.board.world_to_tile(*p["to"])
-                to_z = self._ground_z(game, to_tile, p["to"]) + 14.0
+            to_z = self._ground_z(game, p["to_tile"], p["to"],
+                                  p.get("to_prev"), p.get("to_next")) + 14.0
             z = (1.0 - t) * from_z + t * to_z
             pos = camera.world_to_screen(x, y, z)
             radius = 4 if p.get("rocket") else 2

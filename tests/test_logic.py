@@ -179,22 +179,65 @@ def test_turrets():
     v = Vehicle(VehicleKind.TANK, 0, 50.0, [],
                 (t.pos[0] + 100.0, t.pos[1]))
     game.vehicles = [v]
-    run(game, 5.5)
-    assert abs(v.units - 40.0) < 1e-6, v.units   # 10 dmg after 5 s
+    run(game, 5.2)
+    assert v.units == 50.0            # shot at t = 5 s, impact at t = 5.4 s
+    assert len(game.projectiles) == 1
+    run(game, 0.5)
+    assert abs(v.units - 40.0) < 1e-6, v.units   # 10 dmg resolved on impact
+    assert not game.projectiles
     # out of range (250 j): no damage
     v2 = Vehicle(VehicleKind.TANK, 0, 50.0, [],
                  (t.pos[0] + 400.0, t.pos[1]))
     game.vehicles = [v2]
     run(game, 5.0)
     assert v2.units == 50.0
-    # rapid turret: ceil(x/4) every second
+    # rapid turret: ceil(x/4) every second, applied after the flight time
     t2 = Building(BuildingKind.TURRET_RAPID, 1, 8, 5, units=12.0)
     game.buildings.append(t2)
     game.building_at[t2.tile] = t2
     v3 = Vehicle(VehicleKind.TANK, 0, 40.0, [], (t2.pos[0] + 100, t2.pos[1]))
     game.vehicles = [v3]
-    run(game, 3.0)
+    run(game, 3.5)
     assert abs(v3.units - (40.0 - 3 * 3)) < 1e-6, v3.units  # ceil(12/4)=3
+
+
+def test_turret_projectile_impact():
+    """Damage lands on impact only: frozen at launch, homing flight,
+    dead targets are missed, rockets splash at the impact point
+    (rules.md sec. 10, 10.2)."""
+    b = Board(20, 20)
+    game = make_game(b)
+    t = Building(BuildingKind.TURRET_ROCKET, None, 5, 5, units=10.0)
+    game.buildings = [t]
+    game.building_at = {t.tile: t}
+    hit = Vehicle(VehicleKind.TANK, 0, 50.0, [], (t.pos[0] + 100.0, t.pos[1]))
+    near = Vehicle(VehicleKind.TANK, 0, 30.0, [], (t.pos[0] + 160.0, t.pos[1]))
+    far = Vehicle(VehicleKind.TANK, 0, 30.0, [],
+                  (t.pos[0] + 100.0, t.pos[1] + 300.0))
+    game.vehicles = [hit, near, far]
+    ft = C.TURRET_FLIGHT_TIME[C.TurretKind.ROCKET]
+    run(game, 5.1)                    # shot at t = 5 s, still airborne
+    assert hit.units == 50.0 and near.units == 30.0
+    assert len(game.projectiles) == 1
+    hit.x += 50.0                     # tries to dodge mid-flight
+    run(game, ft + 0.1)               # ... but the shot homes in
+    assert abs(hit.units - 40.0) < 1e-6, hit.units
+    assert abs(near.units - 20.0) < 1e-6, near.units   # 80 j splash around hit
+    assert far.units == 30.0          # outside the splash radius
+    assert not game.projectiles
+    # a target killed mid-flight is not hit (sec. 10)
+    b2 = Board(20, 20)
+    game2 = make_game(b2)
+    t2 = Building(BuildingKind.TURRET_NORMAL, None, 5, 5, units=10.0)
+    game2.buildings = [t2]
+    game2.building_at = {t2.tile: t2}
+    v = Vehicle(VehicleKind.TANK, 0, 50.0, [], (t2.pos[0] + 100.0, t2.pos[1]))
+    game2.vehicles = [v]
+    run(game2, 5.1)                   # shot fired, still airborne
+    v.units, v.dead = 5.0, True       # killed before the projectile lands
+    run(game2, 0.6)
+    assert v.units == 5.0             # no posthumous damage
+    assert not game2.projectiles
 
 
 def test_heal_tower_and_buffer():

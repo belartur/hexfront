@@ -165,7 +165,7 @@ Każde działko:
 
 Pojazd znajduje się w zasięgu działka, jeśli jego aktualna pozycja leży w okręgu o promieniu równym zasięgowi działka, wyznaczonym wokół środka pola działka (odległości mierzymy jak w sekcji 9).
 
-W przypadku wielu wrogów działko strzela do najbliższego. Trafienie pociskiem jest rozliczane w momencie wystrzelenia pocisku, który ma charakter czysto wizualny. 
+W przypadku wielu wrogów działko strzela do najbliższego. Pocisk samonaprowadza się na cel: obrażenia są rozliczane w momencie **trafienia**, po stałym czasie lotu zależnym od rodzaju działka. Jeśli pojazd-cel zostanie zniszczony w trakcie lotu pocisku, pocisk wygasa bez skutku. 
 
 przez $x$ oznaczmy ilość jednostek w działku:
 
