@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Rust implementation (rust/; Cargo.lock is tracked on purpose so builds
+# reproduce exactly the dependency set)
+/rust/target/
+*.rs.bk

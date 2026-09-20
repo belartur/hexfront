@@ -1,11 +1,14 @@
 # Hexfront
 
-A real-time strategy game on a hexagonal board, implemented in Python with
-**pygame**.  The game rules live in [rules.md](rules.md), the implementation
-specification in [specification.md](specification.md).  The Python
-implementation (game, board editor, tests) lives in the `python/` directory;
-the rules, the specifications and the `maps/` directory stay in the
-repository root, so further language implementations can be added next to
+A real-time strategy game on a hexagonal board.  The game rules live in
+[rules.md](rules.md); [specification.md](specification.md) is the
+specification shared by all implementations.  Two implementations are
+specified: **Python** (pygame + numpy) in
+[specification_python.md](specification_python.md), whose game, board editor
+and tests live in the `python/` directory, and **Rust** (macroquad) in
+[specification_rust.md](specification_rust.md), planned in the `rust/`
+directory.  The rules, the specifications and the `maps/` directory stay in
+the repository root, so further language implementations can be added next to
 `python/` without touching them.
 
 ## Running
@@ -90,6 +93,8 @@ python/                     the Python implementation (this repository root
   tests/test_logic.py   headless rule tests:      cd python && python3 -m tests.test_logic
   tests/test_render.py  rendering regression test: cd python && python3 -m tests.test_render
   tests/test_mapfile.py  map format & editor tests: cd python && python3 -m tests.test_mapfile
+rust/                       the Rust implementation (planned, macroquad;
+                            see specification_rust.md)
 ```
 
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in

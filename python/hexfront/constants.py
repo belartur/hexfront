@@ -254,7 +254,7 @@ PATH_PREVIEW_COLOR = (255, 240, 120)
 UI_TEXT_COLOR = (235, 235, 235)
 UI_BACKGROUND = (24, 26, 34)
 
-#: Level-menu grid layout (specification.md "Menu poziomow"; UI only,
+#: Level-menu grid layout (specification.md "Sterowanie", "Menu poziomow"; UI only,
 #: no gameplay rule section).  The menu shows one clickable cell per
 #: map in a compact grid so dozens of levels fit on screen; extra rows
 #: are reached with the mouse wheel / Up/Down keys.
@@ -269,10 +269,10 @@ MENU_GRID_BOTTOM_MARGIN = 70
 MENU_SCROLL_STEP = 48
 
 # --------------------------------------------------------------------------
-# Map files and the board editor (specification.md "Plansze i edytor plansz")
+# Map files and the board editor (specification.md "Plansze")
 # --------------------------------------------------------------------------
 #: Directory holding one binary map file per level (specification.md
-#: "Plansze i edytor plansz").  It lives in the repository root (see ``REPO_ROOT``),
+#: "Plansze").  It lives in the repository root (see ``REPO_ROOT``),
 #: so the game, the editor and the tests find the maps no matter which
 #: working directory they are started from.
 MAPS_DIR = os.path.join(REPO_ROOT, "maps")

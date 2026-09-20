@@ -1,20 +1,30 @@
 # Hexfront — specyfikacja implementacji gry
 
 ## Wstęp
-Hexfront to gra komputerowa napisana w Pythonie, przy użyciu bibliotek PyGame. Niniejsza specyfikacja opisuje tę implementację; jej kod i testy leżą w katalogu `python/`.
+Hexfront to gra komputerowa o zasadach opisanych w [rules.md](rules.md). Ten dokument opisuje część wspólną wszystkich implementacji: wymagania, które każda implementacja realizuje tak samo (wygląd, sterowanie, parametry, obsługa plansz).
 
-Reguły gry znajdują się w pliku [rules.md](rules.md).
+Specyfikacje poszczególnych implementacji:
+* [specification_python.md](specification_python.md) — implementacja w Pythonie (PyGame i NumPy), kod w katalogu `python/`;
+* [specification_rust.md](specification_rust.md) — implementacja w Rust (stabilny toolchain rustc/cargo i biblioteka macroquad), kod w katalogu `rust/`.
+
+Dokumenty wspólne dla wszystkich implementacji:
+* [rules.md](rules.md) — zasady gry (jedyne źródło liczb i reguł gry),
+* [specification_of_map_format.md](specification_of_map_format.md) — binarny format pliku planszy,
+* [specification_of_map_editor.md](specification_of_map_editor.md) — edytor plansz (na razie tylko w implementacji Pythonowej),
+* ten dokument — część wspólna specyfikacji implementacji.
+
+Liczb i reguł nie kopiuje się między dokumentami: wartości liczbowe gry opisuje wyłącznie [rules.md](rules.md) w jednostkach odległości (j), format pliku planszy wyłącznie [specification_of_map_format.md](specification_of_map_format.md), a szczegóły danego języka wyłącznie specyfikacja tego języka.
 
 ## Struktura repozytorium
-Pliki niezależne od języka implementacji leżą w katalogu głównym repozytorium: reguły ([rules.md](rules.md)), ta specyfikacja, [specification_of_map_editor.md](specification_of_map_editor.md), [specification_of_map_format.md](specification_of_map_format.md) oraz katalog `maps` z planszami (format opisany w tym ostatnim pliku). Implementacja w Pythonie ma własny katalog `python/`: punkty wejścia `main.py`, `editor.py`, `make_maps.py`, pakiet `hexfront/` (logika i UI) oraz testy headless w `tests/`. Kolejne implementacje (np. w innych językach) dostają własne katalogi obok `python/` i nie zmieniają dokumentów ani katalogu `maps`.
+Pliki niezależne od języka implementacji leżą w katalogu głównym repozytorium: reguły ([rules.md](rules.md)), specyfikacje ([specification.md](specification.md), [specification_python.md](specification_python.md), [specification_rust.md](specification_rust.md), [specification_of_map_format.md](specification_of_map_format.md), [specification_of_map_editor.md](specification_of_map_editor.md)) oraz katalog `maps` z planszami (format opisany w tym ostatnim pliku). Kod każdej implementacji języka ma osobny katalog — `python/` i `rust/`.
 
-Ścieżka katalogu `maps` wyznaczana jest w kodzie względem katalogu głównego repozytorium (stałe `REPO_ROOT` i `MAPS_DIR` w `python/hexfront/constants.py`), dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu roboczego.
+Ścieżka katalogu `maps` wyznaczana jest w kodzie względem katalogu głównego repozytorium, a nie względem katalogu roboczego, dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu. Kolejne implementacje dostają własne katalogi obok `python/` i `rust/` i nie zmieniają dokumentów ani katalogu `maps`.
 
 ## Kod
 Kod jest przejrzysty i dobrze udokumentowany, w języku angielskim.
 Wszelkie funkcje, metody, klasy, pola, itp. mają dokumentację.
 Logika gry jest sensownie oddzielona i niezależna od interfejsu użytkownika (tę regułę można nagiąć w uzasadnionych przypadkach).
-Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokumentowane, także można je łatwo zmienić i eksperymentować z innymi wartościami. Stałe dotyczące odległości, zasięgów i prędkości wyrażone są w jednostkach odległości (j) z rules.md; przelicznik j → piksele zdefiniowany jest w jednym miejscu.
+Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokumentowane, także można je łatwo zmienić i eksperymentować z innymi wartościami. Stałe dotyczące odległości, zasięgów i prędkości wyrażone są w jednostkach odległości (j) z rules.md; przelicznik j → piksele zdefiniowany jest w jednym miejscu (nazwę stałej podaje specyfikacja języka).
 
 ## Grafika i interfejs użytkownika
 Grafika jest izometryczna. Plansza rysuje się z kodu. Okno gry można skalować.
@@ -30,20 +40,16 @@ Gdy pojazd lub budynek traci x jednostek, to wyświetla się biała liczba -x le
 
 Zasięgi działek są renderowane jako białe, a wież leczących jako jasnozielone. Zasięgi mają spory procent przezroczystości. Każdy zasięg otoczony jest kreską w kolorze swojego wypełnienia, wyraźnie mniej przezroczystą niż wypełnienie. Wypełnienia wszystkich zasięgów rysowane są w pierwszym przejściu, a kreski w drugim — dzięki temu kreska przykrywa wypełnienia innych zasięgów i pozostaje czytelna tam, gdzie zasięgi się nakładają. Zasięgi leczenia przez bufory także renderują się jako jasnozielone i przesuwają się one wraz z ruchem tego pojazdu. Zasięgi wykrywania wrogich pojazdów nie są zaznaczane.
 
-Nieprzezroczysta geometria planszy korzysta ze wspólnego bufora głębokości: powierzchnie pól, skarpy, rampy, mosty, budynki, utrudnienia i pojazdy zasłaniają się na poziomie pikseli, nie według środka całego obiektu. Dla punktu świata przyjmujemy współrzędną głębokości D = (x + y)·ISO_SIN + z, gdzie z jest rzeczywistą wysokością rysowanego punktu w pikselach świata. Na jednym promieniu widzenia większe D oznacza punkt bliższy obserwatorowi. D jest interpolowane liniowo na rzutowanych płaskich powierzchniach; widoczny pozostaje najbliższy fragment. Wnętrza ogólnych wielokątów próbkujemy w środkach pikseli. Poziome wierzchy pól grupujemy według wysokości: PyGame rasteruje wspólną maskę wypełnień, a następnie wspólną maskę siatki. Dla obu masek głębokość pochodzi z równania tej samej płaszczyzny w środku piksela, również na brzegach zaokrąglonego obrysu. Siatka ma szerokość 2 px ekranu przy każdym zoomie i nie jest pomijana przy oddaleniu. Obrysy wielokątów używają równania ich powierzchni na całej szerokości. Linie poziomych znaków używają płaszczyzny, na której leżą; pozostałe linie mają głębokość interpolowaną wzdłuż odcinka, także próbkowaną w środku piksela. Szerokość linii pozostaje ekranowa. Dzięki temu własna powierzchnia nie wycina znaków, ale bliższy teren nadal je zasłania. Remisy współpłaszczyznowych fragmentów rozstrzyga stała kolejność: podłoże przed detalami i obrysami, przy jedynie numerycznej tolerancji porównań. Nie stosujemy sztucznego podnoszenia kluczy obiektów ani końcowego przebiegu ramp ponad całą sceną.
+Nieprzezroczysta geometria planszy korzysta ze wspólnego bufora głębokości: powierzchnie pól, skarpy, rampy, mosty, budynki, utrudnienia i pojazdy zasłaniają się na poziomie pikseli, nie według środka całego obiektu. Dla punktu świata przyjmujemy współrzędną głębokości D = (x + y)·k + z, gdzie k jest stałym współczynnikiem rzutu izometrycznego (sinus kąta nachylenia), a z jest rzeczywistą wysokością rysowanego punktu w pikselach świata. Na jednym promieniu widzenia większe D oznacza punkt bliższy obserwatorowi. D jest interpolowane liniowo na rzutowanych płaskich powierzchniach; widoczny pozostaje najbliższy fragment. Wnętrza ogólnych wielokątów próbkujemy w środkach pikseli. Poziome wierzchy pól grupujemy według wysokości i razem z ich siatką przechodzą one zbiorczy test głębokości: dla całej grupy głębokość pochodzi z równania tej samej płaszczyzny w środku piksela, również na brzegach zaokrąglonego obrysu. Siatka ma szerokość 2 px ekranu przy każdym zoomie i nie jest pomijana przy oddaleniu. Obrysy wielokątów używają równania ich powierzchni na całej szerokości. Linie poziomych znaków używają płaszczyzny, na której leżą; pozostałe linie mają głębokość interpolowaną wzdłuż odcinka, także próbkowaną w środku piksela. Szerokość linii pozostaje ekranowa. Dzięki temu własna powierzchnia nie wycina znaków, ale bliższy teren nadal je zasłania. Remisy współpłaszczyznowych fragmentów rozstrzyga stała kolejność: podłoże przed detalami i obrysami. Nie stosujemy sztucznego podnoszenia kluczy obiektów ani końcowego przebiegu ramp ponad całą scenę.
 
 Pojazd nad własnym płaskim podłożem pozostaje widoczny także przy dalszej krawędzi pola; bliższa skarpa może zasłaniać pojazd znajdujący się za nią. Wysokość pojazdu uwzględnia grunt, nachylenie rampy lub pokład mostu zgodnie z trasą przejazdu. Pokład zasłania przejeżdżające pod nim pojazdy, ale nie pojazdy na nim. Rampa może być częściowo zasłonięta przez bliższe powierzchnie, a sama zasłania powierzchnie leżące za nią.
 
 Cienie pojazdów są półprzezroczystymi przyciemnieniami podłoża (czarny kolor, alfa 70/255, promień 14 j, obrys z 14 wierzchołków). Są oddzielone od nakładki zasięgów i nakładane przed pojazdami, poza cache terenu. Przyciemniają wyłącznie widoczne piksele o głębokości powierzchni przyjmującej cień, bez zapisywania głębokości; nie przyciemniają korpusów, budynków ani bliższych skarp. Na rampie podążają za nachyleniem pasa. Pojazd jadący po moście rzuca cień na pokład, a jadący pod nim — na grunt lub wodę; helikopter nad fragmentem mostu rzuca cień na pokład niezależnie od trasy. Wizualna powierzchnia pokładu leży 5 j powyżej nominalnej wysokości mostu; cień używa tej samej powierzchni. Fragmenty cienia poza powierzchnią przyjmującą są przycinane testem głębokości, nie przenoszone na niższe powierzchnie.
 
-
-Gra i edytor współdzielą renderer. Obliczenia pikselowe wykorzystują NumPy (zależność uruchomieniowa obok PyGame). Zachowany jest culling widoku; obliczenia prymitywów ograniczamy do ich prostokątów ekranowych. Obraz i głębokość nieruchomego terenu są buforowane, a zmiana kamery, rozmiaru okna, planszy, wysokości lub ramp unieważnia cache. Ruchome obiekty i nakładki nie trafiają do cache. Przy pełnym przerysowaniu wierzchy pól i ich siatka przechodzą zbiorczy test głębokości dla każdej wysokości, bez osobnych tablic NumPy na każdą krawędź. Pomijamy geometrię nieobecnych skarp i wierzchów poza ekranem. Zmiany widoku, także podpikselowe, są renderowane bez zaokrąglania kamery lub skalowania starej klatki. Pełne przerysowanie po zmianie widoku jest droższe od klatki z nieruchomą kamerą; ta implementacja programowa nie gwarantuje docelowego FPS podczas panoramowania dużych widoków. Zasięgi i oznaczenia interfejsu zachowują osobne przejścia nakładkowe; cienie uczestniczą w teście głębokości opisanym powyżej, a liczniki jednostek rysowane są na końcu. Skarpy całkowicie poza ekranem odrzucamy przed projekcją wierzchołków, z uwzględnieniem pełnej wysokości ściany. Zapis widocznych kolorów i głębokości odbywa się bezpośrednio pod maską NumPy, bez tworzenia tablic wybranych wartości.
-
 Podjazd nie ma strzałek i nie zajmuje całego hexu — rysowany jest jako węższy pas w kolorze ziemi, biegnący przez środek pola wzdłuż osi podjazdu od krawędzi pola a do krawędzi pola b (na bokach pola p pozostaje zwykły teren). Górna powierzchnia pasa jest rzutem prostokąta w świecie (równoległobokiem na ekranie): jej krótsze krawędzie leżą na środkach krawędzi hexu od strony pól a i b, na wysokościach odpowiednich sąsiadów (krawędź wyznaczona środkiem sąsiada leżącym na jej osi), długie krawędzie są równoległe do osi a→b, więc nachylenie pasa jest proporcjonalne do różnicy wysokości łączonych pól (przy równej wysokości podjazd jest płaski). Korpus podjazdu jest pełny — przestrzeń pod pochyloną powierzchnią do poziomu podstawy wypełnia ciemniejsza ziemia, nie widać pod nim pustki. Liczba jednostek (kółko z liczbą) nad budynkami i pojazdami rysowana jest w osobnym, ostatnim przejściu — ponad wszystkim innym, nigdy zasłonięta przez teren ani obiekty.
 
 Po uruchomieniu gry wyświetla się menu, z poziomami: każdy poziom ma swoją wyświetlaną nazwę (równą nazwie pliku z planszą w katalogu maps).
 Po wybraniu poziomu ładuje się on i gra się zaczyna.
-
 
 ## Sterowanie
 
@@ -64,16 +70,20 @@ Brak dźwięku (w przyszłości to się może zmienić).
 
 Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są zdefiniowane w [rules.md](rules.md) w jednostkach odległości (j). Ta sekcja określa wyłącznie odwzorowanie jednostek na ekran:
 
-* przelicznik: **1 j = 1 px** przy skali widoku 1:1 — jedna stała w kodzie; zoom i skalowanie okna dotyczą tylko renderingu,
+* przelicznik: **1 j = 1 px** przy skali widoku 1:1 — jedna stała w każdej implementacji (nazwę podaje specyfikacja języka); zoom i skalowanie okna dotyczą tylko renderingu,
 * bok sześciokąta: **36 j** (układ flat-top) — jedyna wartość geometryczna spoza zasad, potrzebna do przeliczenia współrzędnych heksów na pozycje w świecie gry; pozostałe wymiary pola wynikają z niej (√3).
 
 FPS = 1/60
 
-## Plansze i edytor plansz
-Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_of_map_editor.md](specification_of_map_editor.md).
-Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku.
+## Plansze
+Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Każda implementacja listuje katalog `maps` dynamicznie, a nazwa pliku jest wyświetlaną nazwą poziomu w menu — lista poziomów nie jest hardkodowana.
+
+Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_of_map_editor.md](specification_of_map_editor.md); na razie istnieje wyłącznie w implementacji Pythonowej ([specification_python.md](specification_python.md)).
 
 ## Format pliku planszy
 Format pliku planszy jest wspólny dla wszystkich implementacji i opisany jest w [specification_of_map_format.md](specification_of_map_format.md).
 
-W implementacji Python format ten obsługuje `python/hexfront/mapfile.py`: tabele `BUILDING_CODES` i `OBSTACLE_CODES` oraz stałe `BRIDGE_CODE_BASE`, `RAMP_CODE_BASE`, `OWNER_CODE_*` i `MAX_SAVED_UNITS`. Rozszerzenie pliku i katalog plansz wyznaczają stałe `MAP_EXTENSION` i `MAPS_DIR` z `python/hexfront/constants.py`, a zgodność kodu z formatem pilnuje test `python/tests/test_mapfile.py` (uruchamiany jako `cd python && python3 -m tests.test_mapfile`).
+## Zgodność implementacji
+Wszystkie implementacje realizują te same zasady ([rules.md](rules.md)) i ten sam format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą ich wspólny kontrakt. Implementacja Pythonowa ([specification_python.md](specification_python.md)) jest referencyjna: zamierzone odstępstwo innej implementacji od tego dokumentu wymaga zmiany tego dokumentu, a nie tylko specyfikacji tej implementacji.
+
+

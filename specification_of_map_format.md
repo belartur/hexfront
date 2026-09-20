@@ -1,7 +1,7 @@
 # Hexfront — format pliku planszy
 
 ## Wstęp
-Ten plik opisuje binarny format pliku planszy (poziomu). Format jest wspólny dla wszystkich implementacji gry: zasady gry znajdują się w [rules.md](rules.md), specyfikacje poszczególnych implementacji (dla Pythona [specification.md](specification.md)), a zachowanie edytora plansz w [specification_of_map_editor.md](specification_of_map_editor.md).
+Ten plik opisuje binarny format pliku planszy (poziomu). Format jest wspólny dla wszystkich implementacji gry: zasady gry znajdują się w [rules.md](rules.md), część wspólna specyfikacji implementacji w [specification.md](specification.md), specyfikacje poszczególnych implementacji w [specification_python.md](specification_python.md) (Python) i [specification_rust.md](specification_rust.md) (Rust, implementacja planowana), a zachowanie edytora plansz w [specification_of_map_editor.md](specification_of_map_editor.md).
 
 Jedna plansza zapisywana jest w jednym pliku o rozszerzeniu `.map`; wyświetlaną nazwą poziomu jest nazwa pliku bez rozszerzenia. Plik nie zawiera bajtów identyfikujących (magic) ani sumy kontrolnej — pierwsze dwa bajty to już wymiary planszy. Wszystkie liczby wielobajtowe zapisane są little-endian (młodszy bajt jako pierwszy w pliku, młodsza wartość na młodszych bitach).
 
@@ -81,5 +81,7 @@ Czytnik:
 
 ## Zobacz też
 * [rules.md](rules.md) — zasady gry (mapa, budynki, podjazdy, mosty),
-* [specification.md](specification.md) — specyfikacja implementacji w Pythonie,
+* [specification.md](specification.md) — wspólna część specyfikacji implementacji,
+* [specification_python.md](specification_python.md) — implementacja w Pythonie,
+* [specification_rust.md](specification_rust.md) — implementacja w Rust (szkielet planu),
 * [specification_of_map_editor.md](specification_of_map_editor.md) — edytor plansz (m.in. usuwanie i dopełnianie pustych skrajnych wierszy i kolumn).

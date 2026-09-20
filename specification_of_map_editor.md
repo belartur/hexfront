@@ -1,9 +1,9 @@
 # Hexfront — specyfikacja implementacji gry
 
 ## Wstęp
-Ten plik uzupełnia specyfikację [specification.md](specification.md), o szczegóły edytora map do gry o zasadach opisanych w [rules.md](rules.md).
+Ten plik uzupełnia specyfikację implementacji Pythonowej ([specification_python.md](specification_python.md)) o szczegóły edytora map do gry o zasadach opisanych w [rules.md](rules.md). Edytor istnieje na razie wyłącznie w tej implementacji, dlatego nie opisuje go wspólna część specyfikacji ([specification.md](specification.md)).
 
-Edytor dzieli kod rysujący planszę z grą. Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku (format pliku opisany jest w [specification_of_map_format.md](specification_of_map_format.md)). Kod edytora (implementacja Python) znajduje się w `python/editor.py`, a katalog maps jest wyznaczany od katalogu głównego repozytorium (patrz [specification.md](specification.md), sekcja „Struktura repozytorium").
+Edytor dzieli kod rysujący planszę z grą. Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku (format pliku opisany jest w [specification_of_map_format.md](specification_of_map_format.md)). Kod edytora (implementacja Python) znajduje się w `python/editor.py`, a katalog maps jest wyznaczany od katalogu głównego repozytorium (patrz [specification.md](specification.md), sekcja „Struktura repozytorium” oraz [specification_python.md](specification_python.md), sekcja „Układ kodu”).
 
 ## Sterowanie i interfejs użytkownika
 Edycja polega na wskazaniu pola za pomocą myszy (jest ono wskazywane dokładnie tak jak w samej grze) i następnie wciśnięciu jednego z klawiszy, który zmienia właściwości pola albo obiektu na nim stojącego.
