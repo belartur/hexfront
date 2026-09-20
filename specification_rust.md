@@ -1,7 +1,7 @@
 # Hexfront — specyfikacja implementacji w Rust (szkielet planu)
 
 ## Wstęp
-Ta specyfikacja opisuje implementację gry w Rust. Implementacja jest dopiero planowana — ten dokument jest szkieletem, który uzupełniamy wraz z powstawaniem kodu. Implementacja wzorowana jest na implementacji Pythonowej ([specification_python.md](specification_python.md)): ta sama architektura modułów, ten sam format plansz i ten sam kontrakt wspólny opisany w [specification.md](specification.md). Zasady gry pozostają jedynym źródłem prawdy w [rules.md](rules.md).
+Ta specyfikacja opisuje implementację gry w Rust. Implementacja jest dopiero planowana — ten dokument jest szkieletem, który uzupełniamy wraz z powstawaniem kodu. Plik [specification.md](specification.md) opisuje część implementacji niezależną od języka. Zasady gry pozostają jedynym źródłem prawdy w [rules.md](rules.md).
 
 Edytor plansz jest na razie poza zakresem tej implementacji — istnieje tylko w wersji Pythonowej ([specification_of_map_editor.md](specification_of_map_editor.md)).
 
@@ -17,8 +17,6 @@ rust/Cargo.toml      manifest crate'a (Cargo.lock wersjonowany; target/ w .gitig
 rust/src/main.rs     punkt wejścia gry (cargo run --release)
 rust/src/            moduły odpowiadające pakietowi python/hexfront/
 ```
-
-Moduły docelowo 1:1 z układem kodu implementacji Pythonowej ([specification_python.md](specification_python.md), sekcja „Układ kodu”): `constants`, `hexgrid`, `board`, `entities`, `game`, `ai`, `levels`, `mapfile`, `camera`, `depth`, `render`, `app`. Podział na pliki i nazwy publicznych typów ustalamy przy implementacji; obowiązuje zasada z [specification.md](specification.md) (sekcja „Kod”): logika gry niezależna od interfejsu użytkownika, wszystkie liczby w jednym module stałych.
 
 ## Uruchamianie i testy
 ```bash

@@ -84,6 +84,5 @@ Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_o
 Format pliku planszy jest wspólny dla wszystkich implementacji i opisany jest w [specification_of_map_format.md](specification_of_map_format.md).
 
 ## Zgodność implementacji
-Wszystkie implementacje realizują te same zasady ([rules.md](rules.md)) i ten sam format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą ich wspólny kontrakt. Implementacja Pythonowa ([specification_python.md](specification_python.md)) jest referencyjna: zamierzone odstępstwo innej implementacji od tego dokumentu wymaga zmiany tego dokumentu, a nie tylko specyfikacji tej implementacji.
-
+Wszystkie implementacje realizują te same zasady ([rules.md](rules.md)) i ten sam format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą ich wspólny kontrakt.
 
