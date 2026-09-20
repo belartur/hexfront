@@ -2,13 +2,17 @@
 
 A real-time strategy game on a hexagonal board, implemented in Python with
 **pygame**.  The game rules live in [rules.md](rules.md), the implementation
-specification in [specification.md](specification.md).
+specification in [specification.md](specification.md).  The Python
+implementation (game, board editor, tests) lives in the `python/` directory;
+the rules, the specifications and the `maps/` directory stay in the
+repository root, so further language implementations can be added next to
+`python/` without touching them.
 
 ## Running
 
 ```bash
-python3 main.py          # requires pygame and numpy (pip install pygame numpy)
-python3 editor.py        # the board editor (separate application)
+python3 python/main.py          # requires pygame and numpy (pip install pygame numpy)
+python3 python/editor.py        # the board editor (separate application)
 ```
 
 ## Gameplay
@@ -40,7 +44,7 @@ Levels live as binary map files in the `maps/` directory; the menu lists
 every `maps/*.map` file and shows the file name as the level name.  The
 file format (dimensions, 4-bit heights, buildings/ramps/bridges/obstacles)
 is specified in `specification.md` ("Format pliku planszy") and implemented
-in `hexfront/mapfile.py`.
+in `python/hexfront/mapfile.py`.
 
 The board editor is a separate application sharing the game's board
 renderer and tile picking.  Editing is key-driven: point a tile with the
@@ -55,48 +59,50 @@ in red; the editor asks about unsaved changes on exit; see
 `specification_of_map_editor.md`):
 
 ```bash
-python3 editor.py                # new 256x256 board with a 20x13 island
-python3 editor.py maps/Zatoka.map
+python3 python/editor.py                # new 256x256 board with a 20x13 island
+python3 python/editor.py maps/Zatoka.map
 ```
 
-`python3 make_maps.py` regenerates the bundled sample maps from the
-procedural generator in `hexfront/levels.py`.
+`python3 python/make_maps.py` regenerates the bundled sample maps from the
+procedural generator in `python/hexfront/levels.py`.
 
 ## Code layout
 
 ```
-hexfront/
-  constants.py   every tunable value (documented; rules.md units "j")
-  hexgrid.py     flat-top hex geometry (odd-q offset coordinates)
-  board.py       tiles, obstacles, ramps, bridges, path-finding
-  entities.py    players, buildings, vehicles
-  game.py        real-time simulation (production, combat, turrets, ...)
-  ai.py          AI decision loop (rules.md sec. 13)
-  levels.py      procedural map generator (also feeds make_maps.py)
-  mapfile.py     binary map file format: save / load / list maps
-  camera.py      isometric projection and view transforms
-  depth.py       per-pixel depth testing of scene polygons and lines
-  render.py      code-drawn isometric renderer (no raster assets)
-  app.py         menu, loading screen, input handling, HUD
-main.py          entry point
-editor.py        board editor entry point
-make_maps.py     regenerates the sample maps in maps/
-tests/test_logic.py   headless rule tests:      python3 -m tests.test_logic
-tests/test_render.py  rendering regression test: python3 -m tests.test_render
-tests/test_mapfile.py  map format & editor tests: python3 -m tests.test_mapfile
+python/                     the Python implementation (this repository root
+                            holds rules.md, specification*.md and maps/)
+  main.py          entry point
+  editor.py        board editor entry point
+  make_maps.py     regenerates the sample maps in maps/
+  hexfront/
+    constants.py   every tunable value (documented; rules.md units "j")
+    hexgrid.py     flat-top hex geometry (odd-q offset coordinates)
+    board.py       tiles, obstacles, ramps, bridges, path-finding
+    entities.py    players, buildings, vehicles
+    game.py        real-time simulation (production, combat, turrets, ...)
+    ai.py          AI decision loop (rules.md sec. 13)
+    levels.py      procedural map generator (also feeds make_maps.py)
+    mapfile.py     binary map file format: save / load / list maps
+    camera.py      isometric projection and view transforms
+    depth.py       per-pixel depth testing of scene polygons and lines
+    render.py      code-drawn isometric renderer (no raster assets)
+    app.py         menu, loading screen, input handling, HUD
+  tests/test_logic.py   headless rule tests:      cd python && python3 -m tests.test_logic
+  tests/test_render.py  rendering regression test: cd python && python3 -m tests.test_render
+  tests/test_mapfile.py  map format & editor tests: cd python && python3 -m tests.test_mapfile
 ```
 
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in
-`hexfront/constants.py` (`UNIT_J_TO_PX`); zoom and window scaling affect
+`python/hexfront/constants.py` (`UNIT_J_TO_PX`); zoom and window scaling affect
 rendering only.  The hexagon side is 36 j (flat-top layout).
 
 ### Rendering benchmark
 
-Run `python3 -m tests.benchmark_render --frames 10` from the repository root
-for a deterministic headless scene with terraces and 32 moving vehicles.
+Run `cd python && python3 -m tests.benchmark_render --frames 10` for a
+deterministic headless scene with terraces and 32 moving vehicles.
 It reports cold-frame, median and maximum `draw_world` CPU times for fixed
 views, fractional panning and zoom changes. Add `--profile` for cProfile
 statistics (profiling overhead affects timings). These are measurements,
 not timing assertions or a guarantee of interactive FPS.
 Use `--mode fixed|pan|zoom` and `--zoom 0.5|1.0|2.0` to isolate a case,
-for example `python3 -m tests.benchmark_render --frames 10 --mode pan --zoom 0.5 --profile`.
+for example `cd python && python3 -m tests.benchmark_render --frames 10 --mode pan --zoom 0.5 --profile`.

@@ -1,6 +1,6 @@
 """Headless logic tests for Hexfront.
 
-Run with:  python3 -m tests.test_logic
+Run from the ``python/`` directory:  cd python && python3 -m tests.test_logic
 Uses controlled, hand-built boards so every rule is verified exactly.
 """
 

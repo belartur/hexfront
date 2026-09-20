@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Board editor of *Hexfront* (a separate application; specification:
-``specification_of_map_editor.md``).  Run with ``python3 editor.py [map]``.
+``specification_of_map_editor.md``).  Run with
+``python3 python/editor.py [map]``.
 
 Editing model: point a tile with the mouse (picked by exactly the same
 code as in the game) and press a key that modifies the tile or the object

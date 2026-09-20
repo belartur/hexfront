@@ -1,6 +1,6 @@
 """Rendering regression tests (headless, dummy video driver).
 
-Run with:  python3 -m tests.test_render
+Run from the ``python/`` directory:  cd python && python3 -m tests.test_render
 """
 
 import os

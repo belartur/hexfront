@@ -1,6 +1,6 @@
 """Map file format and editor tests (headless, dummy video driver).
 
-Run with:  python3 -m tests.test_mapfile
+Run from the ``python/`` directory:  cd python && python3 -m tests.test_mapfile
 """
 
 import os
@@ -248,9 +248,12 @@ def test_editor_actions():
     # trimmed (this board is all land, so nothing is cut) and the loaded
     # board is padded up to the standard new map size (editor spec)
     assert ed.dirty
-    cwd = os.getcwd()
+    # ``_save`` / ``_load`` use the maps directory of the repository
+    # (``constants.MAPS_DIR``); redirect it to a throwaway directory so the
+    # test never writes into the repository
+    old_maps_dir = C.MAPS_DIR
+    C.MAPS_DIR = os.path.join(tempfile.mkdtemp(), "maps")
     try:
-        os.chdir(tempfile.mkdtemp())
         ed._save("editor_test")
         assert not ed.dirty and ed.map_name == "editor_test"
         expected_buildings = pad_map(*trim_map(board,
@@ -282,7 +285,7 @@ def test_editor_actions():
         assert ed2.scene.board.height((0, 0)) == 0   # mostly water
         assert ed2.scene.board.height((mid[0] + lw // 2 + 1, mid[1])) == 0
     finally:
-        os.chdir(cwd)
+        C.MAPS_DIR = old_maps_dir
     pygame.quit()
 
 
@@ -427,13 +430,14 @@ def test_editor_ctrl_keys():
         t.height = 1
     ed._action_building((1, 1))
     ed.map_name = "editor_ctrl"
-    cwd = os.getcwd()
+    # keep the repository clean: save into a throwaway maps directory
+    old_maps_dir = C.MAPS_DIR
+    C.MAPS_DIR = os.path.join(tempfile.mkdtemp(), "maps")
     try:
-        os.chdir(tempfile.mkdtemp())
         pygame.key.set_mods(pygame.KMOD_CTRL)
         ed._key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_s))
         assert not ed.dirty
-        assert os.path.isfile(os.path.join("maps", "editor_ctrl.map"))
+        assert os.path.isfile(os.path.join(C.MAPS_DIR, "editor_ctrl.map"))
         ed._action_building((2, 2))
         assert ed.dirty
         ed._key(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_n))
@@ -441,7 +445,7 @@ def test_editor_ctrl_keys():
         assert not ed.dirty and ed.map_name is None
         assert (ed.scene.board.cols, ed.scene.board.rows) == EDITOR_NEW_SIZE
     finally:
-        os.chdir(cwd)
+        C.MAPS_DIR = old_maps_dir
         pygame.key.set_mods(0)
     pygame.quit()
 

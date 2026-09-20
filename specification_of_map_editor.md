@@ -3,7 +3,7 @@
 ## Wstęp
 Ten plik uzupełnia specyfikację [specification.md](specification.md), o szczegóły edytora map do gry o zasadach opisanych w [rules.md](rules.md).
 
-Edytor dzieli kod rysujący planszę z grą. Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku.
+Edytor dzieli kod rysujący planszę z grą. Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Kod edytora (implementacja Python) znajduje się w `python/editor.py`, a katalog maps jest wyznaczany od katalogu głównego repozytorium (patrz [specification.md](specification.md), sekcja „Struktura repozytorium").
 
 ## Sterowanie i interfejs użytkownika
 Edycja polega na wskazaniu pola za pomocą myszy (jest ono wskazywane dokładnie tak jak w samej grze) i następnie wciśnięciu jednego z klawiszy, który zmienia właściwości pola albo obiektu na nim stojącego.

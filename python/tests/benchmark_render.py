@@ -1,6 +1,6 @@
 """Deterministic renderer benchmark, not a timing-sensitive unit test.
 
-Run from the repository root: python3 -m tests.benchmark_render
+Run from the ``python/`` directory: cd python && python3 -m tests.benchmark_render
 Reports full draw_world CPU time, including moving units and overlays.
 Use --profile to print the most expensive calls; --frames controls samples.
 """

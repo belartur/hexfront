@@ -9,7 +9,17 @@ Each constant carries a short documentation comment pointing at the rule
 it implements, so values can be tweaked easily when experimenting.
 """
 
+import os
 from enum import Enum
+
+# --------------------------------------------------------------------------
+# Repository layout
+# --------------------------------------------------------------------------
+#: Root of the repository: the rules (``rules.md``), the specifications and
+#: the ``maps`` directory stay there, while this Python implementation lives
+#: in ``python/`` (one directory per language implementation).
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
 
 # --------------------------------------------------------------------------
 # Units and world scale
@@ -261,8 +271,11 @@ MENU_SCROLL_STEP = 48
 # --------------------------------------------------------------------------
 # Map files and the board editor (specification: "Planszy i edytor plansz")
 # --------------------------------------------------------------------------
-#: Directory holding one binary map file per level (specification).
-MAPS_DIR = "maps"
+#: Directory holding one binary map file per level (specification: "Planszy
+#: i edytor plansz").  It lives in the repository root (see ``REPO_ROOT``),
+#: so the game, the editor and the tests find the maps no matter which
+#: working directory they are started from.
+MAPS_DIR = os.path.join(REPO_ROOT, "maps")
 
 #: File name extension of the binary map files.
 MAP_EXTENSION = ".map"
