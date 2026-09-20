@@ -69,7 +69,7 @@ def test_round_trip():
         mapfile.save_map(path, board, buildings)
         # 2 header bytes + ceil(48/2) height bytes + 4 building records
         # (2+1+2 B each) + 1 ramp + 2 bridge fragments + 5 obstacles
-        # (2+1 B each)  (specification: "Format pliku planszy")
+        # (2+1 B each)  (specification_of_map_format.md)
         assert os.path.getsize(path) == 2 + 24 + 4 * 5 + 8 * 3
 
         loaded_board, loaded_buildings = mapfile.load_board(path)

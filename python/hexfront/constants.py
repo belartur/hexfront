@@ -269,10 +269,10 @@ MENU_GRID_BOTTOM_MARGIN = 70
 MENU_SCROLL_STEP = 48
 
 # --------------------------------------------------------------------------
-# Map files and the board editor (specification: "Planszy i edytor plansz")
+# Map files and the board editor (specification.md "Plansze i edytor plansz")
 # --------------------------------------------------------------------------
-#: Directory holding one binary map file per level (specification: "Planszy
-#: i edytor plansz").  It lives in the repository root (see ``REPO_ROOT``),
+#: Directory holding one binary map file per level (specification.md
+#: "Plansze i edytor plansz").  It lives in the repository root (see ``REPO_ROOT``),
 #: so the game, the editor and the tests find the maps no matter which
 #: working directory they are started from.
 MAPS_DIR = os.path.join(REPO_ROOT, "maps")
@@ -281,7 +281,7 @@ MAPS_DIR = os.path.join(REPO_ROOT, "maps")
 MAP_EXTENSION = ".map"
 
 #: AI difficulty used for maps loaded from files.  The binary map format
-#: (specification: "Format pliku planszy") does not carry gameplay
+#: (specification_of_map_format.md) does not carry gameplay
 #: parameters, so every file-loaded level plays against this preset;
 #: change it here to experiment (rules.md sec. 13.8).
 MAP_DEFAULT_AI_DIFFICULTY = "normal"

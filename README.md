@@ -43,8 +43,8 @@ python3 python/editor.py        # the board editor (separate application)
 Levels live as binary map files in the `maps/` directory; the menu lists
 every `maps/*.map` file and shows the file name as the level name.  The
 file format (dimensions, 4-bit heights, buildings/ramps/bridges/obstacles)
-is specified in `specification.md` ("Format pliku planszy") and implemented
-in `python/hexfront/mapfile.py`.
+is specified in `specification_of_map_format.md` and implemented in
+`python/hexfront/mapfile.py`.
 
 The board editor is a separate application sharing the game's board
 renderer and tile picking.  Editing is key-driven: point a tile with the

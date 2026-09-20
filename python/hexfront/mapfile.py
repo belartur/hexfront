@@ -1,4 +1,4 @@
-"""Binary map file format (specification: "Format pliku planszy").
+"""Binary map file format (specification_of_map_format.md).
 
 Layout of a ``.map`` file, all multi-byte integers little-endian:
 
@@ -35,7 +35,7 @@ from .entities import Building, BuildingKind, Player
 from .game import Game
 
 # ----------------------------------------------------------------------
-# Code tables (specification: "Format pliku planszy")
+# Code tables (specification_of_map_format.md)
 # ----------------------------------------------------------------------
 #: Building kind behind each building type code 0-19 (rest unused).
 BUILDING_CODES = {
