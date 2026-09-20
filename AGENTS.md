@@ -1,6 +1,6 @@
 # AGENTS.md — instrukcje dla AI rozwijającego grę Hexfront
 
-Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasad gry ani specyfikacji — wskazuje dokumenty źródłowe jako jedyne źródło prawdy.
+Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasad gry ani specyfikacji — wskazuje dokumenty źródłowe jako jedyne źródło prawdy. Dotyczy repozytorium z wieloma implementacjami: zasady wspólne (sekcja 4) obowiązują każdą z nich, a workflow zależy od języka (sekcje 5–6). Implementacje są wobec siebie niezależne — wspólny jest kontrakt z `specification.md`, zasady z `rules.md` i format planszy z `specification_of_map_format.md`; implementacja Pythonowa nie jest wzorcem dla pozostałych.
 
 ## 1. Dokumenty źródłowe (czytaj przed każdą zmianą)
 
@@ -10,13 +10,13 @@ Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasa
 | `specification.md` | Część wspólna specyfikacji implementacji: struktura repozytorium, kod, kontrakt wizualny, sterowanie, parametry (1 j = 1 px, bok hexu, FPS), plansze. | Przed zmianą wyglądu, sterowania lub parametrów wspólnych dla wszystkich implementacji. |
 | `specification_python.md` | Specyfikacja implementacji Python (PyGame + NumPy): układ kodu, uruchamianie i testy, mechanika renderera (NumPy, cache), edytor, format mapy. | Przed zmianą `python/**` (poza czystą logiką gry, którą opisuje `rules.md`). |
 | `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — szkielet planu, kod jeszcze nie istnieje. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
-| `specification_of_map_format.md` | Binarny format pliku planszy: układ bajtów, tabele typów budynków i utrudnień, kodowanie mostów i podjazdów. Wspólny dla wszystkich implementacji (bez odwołań do kodu). | Przed zmianą formatu `.map` oraz `python/hexfront/mapfile.py`. |
-| `specification_of_map_editor.md` | Uzupełnienie specyfikacji o edytor map (klawisze, walidacja, trim/pad). | Przed zmianą `python/editor.py` i `python/hexfront/mapfile.py`. |
+| `specification_of_map_format.md` | Binarny format pliku planszy: układ bajtów, tabele typów budynków i utrudnień, kodowanie mostów i podjazdów. Wspólny dla wszystkich implementacji (bez odwołań do kodu). | Przed zmianą formatu `.map` oraz implementacji formatu w dowolnej implementacji (Python: `python/hexfront/mapfile.py`). |
+| `specification_of_map_editor.md` | Uzupełnienie specyfikacji o edytor map (klawisze, walidacja, trim/pad). | Przed zmianą edytora (obecnie tylko implementacja Python: `python/editor.py`) lub implementacji formatu `.map`. |
 | `README.md` | Skrócony opis uruchomienia i sterowania dla gracza. | Przy zmianie UX / dodawaniu poziomu. |
 
-Zasada: nie przepisuj liczb ani reguł z `rules.md` / `specification*.md` do kodu ani do tego pliku. W kodzie używaj stałych z `python/hexfront/constants.py`; w dokumentacji dawaj odnośniki do sekcji źródłowych.
+Zasada: nie przepisuj liczb ani reguł z `rules.md` / `specification*.md` do kodu ani do tego pliku. W każdej implementacji trzymaj wartości liczbowe w jej module stałych (nazwę modułu i pliku podaje specyfikacja tego języka); w dokumentacji dawaj odnośniki do sekcji źródłowych, a nie kopie wartości.
 
-Język: dokumenty (`rules.md`, `specification*.md`, ten plik) są po polsku. Kod, komentarze i docstringi są po angielsku — nowe funkcje/metody/klasy/pola też pisz po angielsku z dokumentacją. Commity gita opisuj po angielsku.
+Język: dokumenty (`rules.md`, `specification*.md`, ten plik) są po polsku. Kod, komentarze i dokumentacja API (docstringi / doc-commenty) są po angielsku — nowe funkcje/metody/klasy/pola też pisz po angielsku z dokumentacją. Commity gita opisuj po angielsku.
 
 ## 2. Układ repozytorium
 
@@ -32,9 +32,9 @@ maps/*.map                   pliki binarne plansz (nazwa pliku = nazwa poziomu w
 rust/                        implementacja w Rust (planowana; szczegóły w specification_rust.md)
 ```
 
-Menu gry listuje dynamicznie wszystkie `maps/*.map` przez `mapfile.list_maps()` — nie hardkoduj listy poziomów. Ścieżka do katalogu `maps/` liczona jest od katalogu głównego repozytorium (`REPO_ROOT` i `MAPS_DIR` w `python/hexfront/constants.py`), więc grę, edytor i testy można uruchamiać z dowolnego katalogu roboczego. Implementacja w kolejnym języku dostaje własny katalog obok `python/` i nie zmienia `maps/` ani dokumentów źródłowych.
+Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wyświetlaną nazwą poziomu w menu, lista poziomów nie jest hardkodowana. Ścieżkę katalogu `maps` każda implementacja wyznacza względem katalogu głównego repozytorium, a nie względem katalogu roboczego, dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu (w implementacji Python robi to `REPO_ROOT` i `MAPS_DIR` w `python/hexfront/constants.py`). Implementacja w kolejnym języku dostaje własny katalog obok `python/` i `rust/` i nie zmienia `maps/` ani dokumentów źródłowych.
 
-## 3. Moduły implementacji (krótki opis — szczegóły w docstringach)
+## 3. Moduły implementacji (krótki opis — szczegóły w dokumentacji modułów)
 
 ### Katalog `python/` (punkty wejścia)
 - `python/main.py` — tylko `Application().run()`. Nic tu nie dopisuj.
@@ -63,23 +63,36 @@ Menu gry listuje dynamicznie wszystkie `maps/*.map` przez `mapfile.list_maps()` 
 - `python/tests/test_render.py` — regresja renderingu (`cd python && python3 -m tests.test_render`, wymaga `numpy`): czyszczenie widoku przy pan/zoom, culling, widoczność pojazdów i ramp, zasłanianie mostów, bufor głębokości i unieważnianie cache.
 
 ### Katalog `rust/` (implementacja w Rust — planowana)
-- Kodu jeszcze nie ma. Plan układu, zakres i otwarte punkty opisuje `specification_rust.md` (stabilny Rust + macroquad, moduły 1:1 z `python/hexfront/`, edytor poza zakresem, `Cargo.lock` wersjonowany, `target/` ignorowany).
+- Kodu jeszcze nie ma. Plan układu, zakres i otwarte punkty opisuje `specification_rust.md` (stabilny Rust + macroquad, planowany układ kodu, uruchamianie i testy, otwarte punkty; edytor poza zakresem, `Cargo.lock` wersjonowany, `target/` ignorowany).
 - Po dodaniu crate'a dopisz tutaj opis modułów `rust/src/` i zaktualizuj sekcję 2 (drzewo repozytorium).
 
-## 4. Zasady pracy AI
+## 4. Zasady wspólne dla wszystkich implementacji
 
-1. Przed kodem przeczytaj właściwy dokument z sekcji 1 i docstringi edytowanego modułu. Nie zgaduj wartości — sprawdź `constants.py` i wskazaną sekcję `rules.md`.
-2. Trzymaj separację: logika w `game.py` / `board.py` / `ai.py`, rysowanie w `render.py`, input w `app.py` / `editor.py`. Wyjątki od reguły tylko z uzasadnieniem w komentarzu.
-3. Nowe liczby tylko do `constants.py` z komentarzem dokumentującym (która sekcja zasad). Nigdy nie hardkoduj zasięgów/prędkości/obrażeń w logice ani w rendererze.
-4. Opis formatu `.map` jest w `specification_of_map_format.md` (dokument wspólny dla wszystkich implementacji, bez odwołań do kodu); implementację zmieniasz wyłącznie w `python/hexfront/mapfile.py` (i testach w `python/tests/test_mapfile.py`). Tabele kodów w `mapfile.py` są implementacją tabel z tej specyfikacji — zmieniając format, zaktualizuj oba miejsca. Wszystkie ścieżki plików licz od `REPO_ROOT` / `MAPS_DIR` z `constants.py`, nie od katalogu roboczego.
-5. Edytor i gra współdzielą `Renderer` i `Board.pick_tile()` — nie rozjeżdżaj ich (pick z Alt jako `flat=True`).
-6. Zachowaj konwencje: angielskie identyfikatory i docstringi, czytelne funkcje, pełne sygnatury bez placeholderów.
-7. Uruchamianie (z dowolnego katalogu, ścieżki do map są liczone od roota repozytorium): `python3 python/main.py`, `python3 python/editor.py`, `python3 python/make_maps.py` (gra, edytor i testy renderujące wymagają `pygame` oraz `numpy`). Testy uruchamia się z katalogu `python/`: `cd python && python3 -m tests.test_logic`.
-8. Po każdej zmianie logiki/formatu uruchom odpowiadające testy headless (`cd python && python3 -m tests.test_logic`, `cd python && python3 -m tests.test_mapfile`, przy zmianach graficznych także `cd python && python3 -m tests.test_render`) i dopisz test przy nowej regule.
-9. Respektuj `.gitignore` — to on jest źródłem prawdy, co commitować; nie dodawaj na siłę plików ignorowanych. Pliki `maps/*.map` są wersjonowane; jeśli brakuje ich po świeżym klonie, odtwórz je poleceniem `python3 python/make_maps.py`.
-10. Pilnuj zgodności kodu ze specyfikacją: jeśli zadanie zmienia zachowanie, parametr lub format opisany w `specification.md` (część wspólna) / `specification_python.md` / `specification_rust.md` / `specification_of_map_format.md` / `specification_of_map_editor.md` / `rules.md`, zaktualizuj w tym samym commicie i kod, i odpowiedni dokument, żeby pozostały zgodne. Zmiana kontraktu wspólnego (wygląd, sterowanie, parametry) wymaga edycji `specification.md`, a nie tylko specyfikacji języka; format mapy zmieniaj tylko wraz z `specification_of_map_format.md` (w tym pliku nie umieszczaj odwołań do kodu żadnej implementacji).
+1. Przed kodem przeczytaj właściwy dokument z sekcji 1 i dokumentację edytowanego modułu. Nie zgaduj wartości — sprawdź moduł stałych edytowanej implementacji i wskazaną sekcję `rules.md`.
+2. Nowe liczby trafiają wyłącznie do modułu stałych danej implementacji (nazwę pliku podaje specyfikacja tego języka), każda z komentarzem dokumentującym (która sekcja zasad). Nigdy nie hardkoduj zasięgów/prędkości/obrażeń w logice ani w rendererze.
+3. Trzymaj separację warstw: logika gry niezależna od interfejsu użytkownika, rysowanie i obsługa wejścia osobno. Wyjątki od reguły tylko z uzasadnieniem w komentarzu.
+4. Opis formatu `.map` jest w `specification_of_map_format.md` (dokument wspólny, bez odwołań do kodu). Zmieniając format, zaktualizuj w tym samym commicie i dokument, i tabele kodów w każdej implementacji, która ten format obsługuje.
+5. Wszystkie ścieżki plików (w tym katalog `maps`) licz od katalogu głównego repozytorium, nie od katalogu roboczego.
+6. Zachowaj konwencje: angielskie identyfikatory i dokumentacja, czytelne funkcje, pełne sygnatury bez placeholderów.
+7. Respektuj `.gitignore` — to on jest źródłem prawdy, co commitować; nie dodawaj na siłę plików ignorowanych. Pliki `maps/*.map` są wersjonowane.
+8. Po każdej zmianie logiki/formatu uruchom testy edytowanej implementacji (polecenia w sekcji 5 lub 6) i dopisz test przy nowej regule.
+9. Pilnuj zgodności kodu ze specyfikacją: jeśli zadanie zmienia zachowanie, parametr lub format opisany w `specification.md` (część wspólna) / specyfikacji danego języka / `specification_of_map_format.md` / `specification_of_map_editor.md` / `rules.md`, zaktualizuj w tym samym commicie i kod, i odpowiedni dokument, żeby pozostały zgodne. Zmiana kontraktu wspólnego (wygląd, sterowanie, parametry) wymaga edycji `specification.md`, a nie tylko specyfikacji języka; format mapy zmieniaj tylko wraz z `specification_of_map_format.md` (w tym pliku nie umieszczaj odwołań do kodu żadnej implementacji).
 
-## 5. Obowiązek aktualizacji tego pliku
+## 5. Implementacja Python (obecna)
 
-Jeśli dodasz lub usuniesz plik `.py` / katalog, albo istotnie zmienisz odpowiedzialność istniejącego modułu (nowa klasa, nowy podsystem, zmiana formatu map, nowy dokument `.md` ze źródłem prawdy), zaktualizuj w tym samym commicie sekcje 1–3 powyżej: dopisz/usuń wpis (tabela dokumentów źródłowych, układ repozytorium, opis modułu) z pełną ścieżką i jednozdaniowym opisem roli. Nie dopisuj tu liczb ani reguł gry — tylko strukturę kodu i odnośniki.
+1. Separacja modułów pakietu `python/hexfront/`: logika w `game.py` / `board.py` / `ai.py`, rysowanie w `render.py`, obsługa wejścia w `app.py` / `editor.py`.
+2. Moduł stałych: `python/hexfront/constants.py`; ścieżki plików plansz: `REPO_ROOT`, `MAPS_DIR`, `MAP_EXTENSION`.
+3. Implementację formatu `.map` zmieniasz wyłącznie w `python/hexfront/mapfile.py` (i testach w `python/tests/test_mapfile.py`); tabele kodów w `mapfile.py` są implementacją tabel z `specification_of_map_format.md` — zmieniając format, zaktualizuj oba miejsca.
+4. Edytor i gra współdzielą `Renderer` i `Board.pick_tile()` — nie rozjeżdżaj ich (pick z Alt jako `flat=True`).
+5. Uruchamianie (z dowolnego katalogu): `python3 python/main.py`, `python3 python/editor.py [mapa]`, `python3 python/make_maps.py` (wymagają `pygame` oraz `numpy`). Jeśli po świeżym klonie brakuje `maps/*.map`, odtwórz je poleceniem `python3 python/make_maps.py`.
+6. Testy uruchamia się z katalogu `python/`: `cd python && python3 -m tests.test_logic`, `cd python && python3 -m tests.test_mapfile`, przy zmianach graficznych także `cd python && python3 -m tests.test_render`, benchmark renderera `cd python && python3 -m tests.benchmark_render`.
+
+## 6. Implementacja Rust (planowana)
+
+- Kodu jeszcze nie ma; zakres, planowany układ kodu i otwarte punkty opisuje `specification_rust.md`. Do czasu powstania crate'a sekcja nie zawiera poleceń ani modułów do opisania.
+- Dodając crate: uzupełnij sekcję 2 (drzewo repozytorium) i sekcję 3 (moduły `rust/src/`), a tutaj dopisz polecenia uruchamiania i testów oraz nazwy modułu stałych i modułu formatu `.map`. Sekcję 5 traktuj jako wzór struktury, ale ustal własny podział modułów — nie kopiuj układu implementacji Python.
+
+## 7. Obowiązek aktualizacji tego pliku
+
+Jeśli dodasz lub usuniesz plik kodu / katalog, albo istotnie zmienisz odpowiedzialność istniejącego modułu (nowa klasa, nowy podsystem, zmiana formatu map, nowy dokument `.md` ze źródłem prawdy), zaktualizuj w tym samym commicie sekcje 1–3 oraz sekcję workflow właściwej implementacji (5 lub 6): dopisz/usuń wpis (tabela dokumentów źródłowych, układ repozytorium, opis modułu, polecenia) z pełną ścieżką i jednozdaniowym opisem roli. Nie dopisuj tu liczb ani reguł gry — tylko strukturę kodu i odnośniki.
 

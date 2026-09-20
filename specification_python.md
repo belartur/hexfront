@@ -3,7 +3,7 @@
 ## Wstęp
 Ta specyfikacja opisuje implementację gry w Pythonie: PyGame obsługuje okno, wejście i rysowanie, a NumPy obliczenia pikselowe renderera. Kod i testy tej implementacji leżą w katalogu `python/`.
 
-Część wspólną wszystkich implementacji (kontrakt wizualny, sterowanie, parametry, obsługa plansz) opisuje [specification.md](specification.md), zasady gry [rules.md](rules.md), binarny format planszy [specification_of_map_format.md](specification_of_map_format.md), a edytor plansz [specification_of_map_editor.md](specification_of_map_editor.md) — edytor na razie istnieje tylko w tej implementacji.
+Część wspólną wszystkich implementacji (kontrakt wizualny, sterowanie, parametry, obsługa plansz) opisuje [specification.md](specification.md), zasady gry [rules.md](rules.md), binarny format planszy [specification_of_map_format.md](specification_of_map_format.md), a edytor plansz [specification_of_map_editor.md](specification_of_map_editor.md) — edytor na razie istnieje tylko w tej implementacji. Rozwiązania z tej specyfikacji obowiązują tylko tę implementację i nie są wzorcem dla pozostałych.
 
 ## Układ kodu
 ```text

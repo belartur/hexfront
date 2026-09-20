@@ -1,7 +1,7 @@
 # Hexfront — specyfikacja implementacji gry
 
 ## Wstęp
-Hexfront to gra komputerowa o zasadach opisanych w [rules.md](rules.md). Ten dokument opisuje część wspólną wszystkich implementacji: wymagania, które każda implementacja realizuje tak samo (wygląd, sterowanie, parametry, obsługa plansz).
+Hexfront to gra komputerowa o zasadach opisanych w [rules.md](rules.md). Ten dokument opisuje część wspólną wszystkich implementacji: wymagania wspólne dla każdej z nich (wygląd, sterowanie, parametry, obsługa plansz).
 
 Specyfikacje poszczególnych implementacji:
 * [specification_python.md](specification_python.md) — implementacja w Pythonie (PyGame i NumPy), kod w katalogu `python/`;
@@ -84,5 +84,5 @@ Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_o
 Format pliku planszy jest wspólny dla wszystkich implementacji i opisany jest w [specification_of_map_format.md](specification_of_map_format.md).
 
 ## Zgodność implementacji
-Wszystkie implementacje realizują te same zasady ([rules.md](rules.md)) i ten sam format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą ich wspólny kontrakt.
+Wszystkie implementacje realizują te same zasady ([rules.md](rules.md)) i ten sam format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą ich wspólny kontrakt — obowiązuje on każdą implementację niezależnie od języka. Poza nim implementacje są wobec siebie niezależne: mogą różnić się podziałem modułów, nazwami, wydajnością i rozwiązaniami technicznymi, a żadna z nich nie jest wzorcem dla pozostałych.
 
