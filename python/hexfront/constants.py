@@ -64,7 +64,7 @@ BRIDGE_DECK_LIFT = 5.0 * UNIT_J_TO_PX
 # --------------------------------------------------------------------------
 # Simulation
 # --------------------------------------------------------------------------
-#: Fixed simulation frame rate (specification: FPS = 1/60).
+#: Fixed simulation frame rate (specification_python.md).
 FPS = 60
 
 #: Length of one simulation step in seconds.

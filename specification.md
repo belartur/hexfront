@@ -25,6 +25,8 @@ Kod jest przejrzysty i dobrze udokumentowany, w języku angielskim.
 Wszelkie funkcje, metody, klasy, pola, itp. mają dokumentację.
 Logika gry jest sensownie oddzielona i niezależna od interfejsu użytkownika (tę regułę można nagiąć w uzasadnionych przypadkach).
 Wszelkie stałe są zdefiniowane (najlepiej w osobnym pliku/plikach) i udokumentowane, także można je łatwo zmienić i eksperymentować z innymi wartościami. Stałe dotyczące odległości, zasięgów i prędkości wyrażone są w jednostkach odległości (j) z rules.md; przelicznik j → piksele zdefiniowany jest w jednym miejscu (nazwę stałej podaje specyfikacja języka).
+Kod jest pisany z dbałością o wydajność; ten dokument nie stawia jednak twardych wymagań czasowych — techniki wydajnościowe (culling, cache itp.) są decyzjami implementacji, opisanymi w jej specyfikacji.
+Decyzje zapisane w specyfikacji danej implementacji (nazwy modułów, nazwy stałych, rozwiązania techniczne) można zmieniać w trakcie implementacji, jeśli ma się ku temu konkretny powód — zawsze wraz z aktualizacją tej specyfikacji w tym samym commicie.
 
 ## Grafika i interfejs użytkownika
 Grafika jest izometryczna. Plansza rysuje się z kodu. Okno gry można skalować.
@@ -73,7 +75,7 @@ Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są z
 * przelicznik: **1 j = 1 px** przy skali widoku 1:1 — jedna stała w każdej implementacji (nazwę podaje specyfikacja języka); zoom i skalowanie okna dotyczą tylko renderingu,
 * bok sześciokąta: **36 j** (układ flat-top) — jedyna wartość geometryczna spoza zasad, potrzebna do przeliczenia współrzędnych heksów na pozycje w świecie gry; pozostałe wymiary pola wynikają z niej (√3).
 
-FPS = 1/60
+Prędkość klatki (FPS) nie jest częścią kontraktu — jest decyzją każdej implementacji, opisaną w specyfikacji tego języka.
 
 ## Plansze
 Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Każda implementacja listuje katalog `maps` dynamicznie, a nazwa pliku jest wyświetlaną nazwą poziomu w menu — lista poziomów nie jest hardkodowana.

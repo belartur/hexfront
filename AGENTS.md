@@ -7,9 +7,9 @@ Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasa
 | Dokument | Co zawiera | Kiedy czytać |
 |---|---|---|
 | `rules.md` | Zasady gry (plansza, budynki, pojazdy, walka, działka, wieże, AI). Jednostki odległości (j). | Zawsze przed zmianą logiki gry. Nie kopiuj stąd liczb do innych plików — odwołuj się linkiem. |
-| `specification.md` | Część wspólna specyfikacji implementacji: struktura repozytorium, kod, kontrakt wizualny, sterowanie, parametry (1 j = 1 px, bok hexu, FPS), plansze. | Przed zmianą wyglądu, sterowania lub parametrów wspólnych dla wszystkich implementacji. |
-| `specification_python.md` | Specyfikacja implementacji Python (PyGame + NumPy): układ kodu, uruchamianie i testy, mechanika renderera (NumPy, cache), edytor, format mapy. | Przed zmianą `python/**` (poza czystą logiką gry, którą opisuje `rules.md`). |
-| `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — szkielet planu, kod jeszcze nie istnieje. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
+| `specification.md` | Część wspólna specyfikacji implementacji: struktura repozytorium, kod, kontrakt wizualny, sterowanie, parametry (1 j = 1 px, bok hexu), plansze. | Przed zmianą wyglądu, sterowania lub parametrów wspólnych dla wszystkich implementacji. |
+| `specification_python.md` | Specyfikacja implementacji Python (PyGame + NumPy): układ kodu, uruchamianie i testy, mechanika renderera (NumPy, cache), edytor, format mapy, parametry (FPS). | Przed zmianą `python/**` (poza czystą logiką gry, którą opisuje `rules.md`). |
+| `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — plan z ustalonym układem modułów, kod jeszcze nie istnieje. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
 | `specification_of_map_format.md` | Binarny format pliku planszy: układ bajtów, tabele typów budynków i utrudnień, kodowanie mostów i podjazdów. Wspólny dla wszystkich implementacji (bez odwołań do kodu). | Przed zmianą formatu `.map` oraz implementacji formatu w dowolnej implementacji (Python: `python/hexfront/mapfile.py`). |
 | `specification_of_map_editor.md` | Uzupełnienie specyfikacji o edytor map (klawisze, walidacja, trim/pad). | Przed zmianą edytora (obecnie tylko implementacja Python: `python/editor.py`) lub implementacji formatu `.map`. |
 | `README.md` | Skrócony opis uruchomienia i sterowania dla gracza. | Przy zmianie UX / dodawaniu poziomu. |

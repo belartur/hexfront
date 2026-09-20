@@ -15,7 +15,7 @@ python/tests/        testy headless (dummy video driver)
 ```
 
 Moduły pakietu `python/hexfront/`:
-* `constants.py` — wszystkie stałe możliwe do zmiany, każda z komentarzem wskazującym regułę z [rules.md](rules.md): `UNIT_J_TO_PX` jako jedyne miejsce przelicznika j → px, stałe symulacji (`FPS`, `SIM_DT`), stałe rzutu izometrycznego, `REPO_ROOT`, `MAPS_DIR`, `MAP_EXTENSION`;
+* `constants.py` — wszystkie stałe możliwe do zmiany, każda z komentarzem wskazującym regułę z [rules.md](rules.md): `UNIT_J_TO_PX` jako jedyne miejsce przelicznika j → px, stałe symulacji (`FPS` = 60 i `SIM_DT` = 1/`FPS` — prędkość klatki jest decyzją tej implementacji), stałe rzutu izometrycznego, `REPO_ROOT`, `MAPS_DIR`, `MAP_EXTENSION`;
 * `hexgrid.py` — geometria sześciokątów flat-top (odd-q) bez logiki gry: sąsiedzi, przeliczenia heks ↔ świat, odległości, rogi, numeracja krawędzi;
 * `board.py` — plansza: pola, utrudnienia (ściany, miny, pułapki), podjazdy, mosty, wyszukiwanie drogi, wskazywanie pola kursorem (tryb „płaski” z klawiszem Alt);
 * `entities.py` — dane gry: rodzaje budynków, gracze, budynki, pojazdy i ich pojemności;
