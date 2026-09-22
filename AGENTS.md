@@ -9,7 +9,7 @@ Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasa
 | `rules.md` | Zasady gry (plansza, budynki, pojazdy, walka, działka, wieże, AI). Jednostki odległości (j). | Zawsze przed zmianą logiki gry. Nie kopiuj stąd liczb do innych plików — odwołuj się linkiem. |
 | `specification.md` | Część wspólna specyfikacji implementacji: struktura repozytorium, kod, kontrakt wizualny, sterowanie, parametry (1 j = 1 px, bok hexu), plansze. | Przed zmianą wyglądu, sterowania lub parametrów wspólnych dla wszystkich implementacji. |
 | `specification_python.md` | Specyfikacja implementacji Python (PyGame + NumPy): układ kodu, uruchamianie i testy, mechanika renderera (NumPy, cache), edytor, format mapy, parametry (FPS). | Przed zmianą `python/**` (poza czystą logiką gry, którą opisuje `rules.md`). |
-| `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — plan z ustalonym układem modułów, kod jeszcze nie istnieje. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
+| `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — układ modułów, uruchamianie i testy, renderowanie, determinizm. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
 | `specification_of_map_format.md` | Binarny format pliku planszy: układ bajtów, tabele typów budynków i utrudnień, kodowanie mostów i podjazdów. Wspólny dla wszystkich implementacji (bez odwołań do kodu). | Przed zmianą formatu `.map` oraz implementacji formatu w dowolnej implementacji (Python: `python/hexfront/mapfile.py`). |
 | `specification_of_map_editor.md` | Uzupełnienie specyfikacji o edytor map (klawisze, walidacja, trim/pad). | Przed zmianą edytora (obecnie tylko implementacja Python: `python/editor.py`) lub implementacji formatu `.map`. |
 | `README.md` | Skrócony opis uruchomienia i sterowania dla gracza. | Przy zmianie UX / dodawaniu poziomu. |
@@ -29,7 +29,9 @@ python/make_maps.py          regeneruje przykładowe mapy z generatora do maps/
 python/hexfront/             pakiet gry (logika + UI)
 python/tests/                testy headless (dummy video driver)
 maps/*.map                   pliki binarne plansz (nazwa pliku = nazwa poziomu w menu)
-rust/                        implementacja w Rust (planowana; szczegóły w specification_rust.md)
+rust/Cargo.toml              manifest crate'a hexfront (Cargo.lock wersjonowany; target/ ignorowany)
+rust/src/main.rs             punkt wejścia gry (cd rust && cargo run --release)
+rust/src/                    moduły gry (logika + UI, szczegóły w sekcji „Katalog rust/src/` poniżej)
 ```
 
 Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wyświetlaną nazwą poziomu w menu, lista poziomów nie jest hardkodowana. Ścieżkę katalogu `maps` każda implementacja wyznacza względem katalogu głównego repozytorium, a nie względem katalogu roboczego, dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu (w implementacji Python robi to `REPO_ROOT` i `MAPS_DIR` w `python/hexfront/constants.py`). Implementacja w kolejnym języku dostaje własny katalog obok `python/` i `rust/` i nie zmienia `maps/` ani dokumentów źródłowych.
@@ -62,9 +64,25 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 - `python/tests/test_mapfile.py` — format map (`specification_of_map_format.md`) i edytor (`cd python && python3 -m tests.test_mapfile`): `load_game`, `trim_map`/`pad_map`, akcje i błędy edytora, `pick_tile(flat=True)`.
 - `python/tests/test_render.py` — regresja renderingu (`cd python && python3 -m tests.test_render`, wymaga `numpy`): czyszczenie widoku przy pan/zoom, culling, widoczność pojazdów i ramp, zasłanianie mostów, bufor głębokości i unieważnianie cache.
 
-### Katalog `rust/` (implementacja w Rust — planowana)
-- Kodu jeszcze nie ma. Plan układu, zakres i otwarte punkty opisuje `specification_rust.md` (stabilny Rust + macroquad, planowany układ kodu, uruchamianie i testy, otwarte punkty; edytor poza zakresem, `Cargo.lock` wersjonowany, `target/` ignorowany).
-- Po dodaniu crate'a dopisz tutaj opis modułów `rust/src/` i zaktualizuj sekcję 2 (drzewo repozytorium).
+### Katalog `rust/src/` (implementacja w Rust)
+- `rust/Cargo.toml` — manifest binarnego crate'a `hexfront` (tylko `macroquad =0.4.16`; `Cargo.lock` wersjonowany, `target/` w `.gitignore`).
+- `rust/src/main.rs` — tylko konfiguracja okna i `Application::run()`. Nic tu nie dopisuj.
+- `rust/src/constants.rs` — moduł stałych: `UNIT_J_TO_PX` dokładnie raz, `FPS`/`SIM_DT`, współczynniki rzutu, `maps_dir()`/`MAP_EXTENSION`, presety `AiDifficulty` / `AI_DIFFICULTIES`; każda stała z komentarzem wskazującym sekcję `rules.md`.
+- `rust/src/hexgrid.rs` — czysta geometria flat-top hex (odd-q) bez logiki gry.
+- `rust/src/board.rs` — plansza: `HexTile`, `Obstacle`/`ObstacleKind`, `Bridge`, `Board` (`passable()`, `find_path()` BFS, `reachable()`, `pick_tile()` / `snap_to_building()` z trybem płaskim na Alt, `set_ramp()` / `remove_ramp()`, `add_bridge()`).
+- `rust/src/entities.rs` — dane: `BuildingKind`, `Player`, `Building`, `Vehicle`; helpery `is_base()`, `is_turret()`, `vehicle_kind_of()`, `turret_kind_of()`, `capacity_of()`. Logika w `game.rs`.
+- `rust/src/game.rs` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od macroquad.
+- `rust/src/ai.rs` — `AiController` (pętla decyzyjna z sekcji 13 `rules.md`). Determinystyczny dla danego seeda.
+- `rust/src/rng.rs` — własny deterministyczny PRNG (splitmix64 + Box-Muller) na szum AI, bez dodatkowych crate'ów.
+- `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
+- `rust/src/camera.rs` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`).
+- `rust/src/depth.rs` — programowy bufor głębokości CPU: `ProjectedPoint`, `DepthCamera`, `DepthBuffer`.
+- `rust/src/render.rs` — rysowanie z kodu (bez assetów rastrowych): `Renderer::draw_world()` z cache nieruchomego terenu; `pick_tile()` / `snap_to_building()` delegują do `Board`.
+- `rust/src/app.rs` — okno, menu poziomów, input i HUD: `Application` (`run()`, LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza).
+
+### Katalog `rust/` (implementacja w Rust)
+- Kod istnieje i jest kompletny (gra + testy); edytor plansz pozostaje poza zakresem (tylko Python). Zakres, układ modułów i otwarte punkty opisuje `specification_rust.md`.
+- Testy logiki działają bez okna (`#[cfg(test)]` wewnątrz modułów logiki): `cd rust && cargo test`.
 
 ## 4. Zasady wspólne dla wszystkich implementacji
 
@@ -87,10 +105,14 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 5. Uruchamianie (z dowolnego katalogu): `python3 python/main.py`, `python3 python/editor.py [mapa]`, `python3 python/make_maps.py` (wymagają `pygame` oraz `numpy`). Jeśli po świeżym klonie brakuje `maps/*.map`, odtwórz je poleceniem `python3 python/make_maps.py`.
 6. Testy uruchamia się z katalogu `python/`: `cd python && python3 -m tests.test_logic`, `cd python && python3 -m tests.test_mapfile`, przy zmianach graficznych także `cd python && python3 -m tests.test_render`, benchmark renderera `cd python && python3 -m tests.benchmark_render`.
 
-## 6. Implementacja Rust (planowana)
+## 6. Implementacja Rust
 
-- Kodu jeszcze nie ma; zakres, planowany układ kodu i otwarte punkty opisuje `specification_rust.md`. Do czasu powstania crate'a sekcja nie zawiera poleceń ani modułów do opisania.
-- Dodając crate: uzupełnij sekcję 2 (drzewo repozytorium) i sekcję 3 (moduły `rust/src/`), a tutaj dopisz polecenia uruchamiania i testów oraz nazwy modułu stałych i modułu formatu `.map`. Sekcję 5 traktuj jako wzór struktury, ale ustal własny podział modułów — nie kopiuj układu implementacji Python.
+1. Separacja modułów crate'a `hexfront`: logika w `board.rs` / `game.rs` / `ai.rs` / `rng.rs` (bez zależności od macroquad, więc testy działają bez okna), rysowanie w `render.rs` / `depth.rs`, obsługa wejścia w `app.rs`.
+2. Moduł stałych: `rust/src/constants.rs`; ścieżki plików plansz: `repo_root()`, `maps_dir()`, `MAP_EXTENSION`.
+3. Implementację formatu `.map` zmieniasz wyłącznie w `rust/src/mapfile.rs`; tabele kodów w `mapfile.rs` są implementacją tabel z `specification_of_map_format.md` — zmieniając format, zaktualizuj oba miejsca oraz drugą implementację.
+4. Gra i picking współdzielą geometrię `Board::pick_tile()` / `Board::snap_to_building()` (pick z Alt jako `flat=true`); `Renderer::pick_tile()` / `Renderer::snap_to_building()` tylko delegują do `Board`.
+5. Uruchamianie (z dowolnego katalogu): `cd rust && cargo run --release` (gra; wymaga toolchaina Rust + pobrania `macroquad =0.4.16` z crates.io).
+6. Testy: `cd rust && cargo test` (reguły gry headless + format map na prawdziwych `maps/*.map`); formatowanie `cargo fmt --check`, lint `cargo clippy --all-targets`.
 
 ## 7. Obowiązek aktualizacji tego pliku
 

@@ -1,7 +1,7 @@
 # Hexfront — specyfikacja implementacji w Rust
 
 ## Wstęp
-Ta specyfikacja opisuje implementację gry w Rust. Implementacja jest dopiero planowana — kod jeszcze nie istnieje, ale układ modułów i kluczowe decyzje są już ustalone. Plik [specification.md](specification.md) opisuje część implementacji niezależną od języka. Zasady gry pozostają jedynym źródłem prawdy w [rules.md](rules.md). Nie zakładamy zgodności wewnętrznej z implementacją Pythonową ([specification_python.md](specification_python.md)) — wiążą nas wspólny kontrakt z [specification.md](specification.md) i format planszy z [specification_of_map_format.md](specification_of_map_format.md), a podział modułów, nazwy i rozwiązania techniczne mogą być inne.
+Ta specyfikacja opisuje implementację gry w Rust. Implementacja istnieje i jest kompletna (gra + testy w `rust/`); edytor plansz pozostaje poza jej zakresem. Plik [specification.md](specification.md) opisuje część implementacji niezależną od języka. Zasady gry pozostają jedynym źródłem prawdy w [rules.md](rules.md). Nie zakładamy zgodności wewnętrznej z implementacją Pythonową ([specification_python.md](specification_python.md)) — wiążą nas wspólny kontrakt z [specification.md](specification.md) i format planszy z [specification_of_map_format.md](specification_of_map_format.md), a podział modułów, nazwy i rozwiązania techniczne mogą być inne.
 
 Edytor plansz jest poza zakresem tej implementacji — istnieje tylko w wersji Pythonowej ([specification_of_map_editor.md](specification_of_map_editor.md)). Poza zakresem jest też generator poziomów: pliki `maps/*.map` są wersjonowane, a regeneruje je narzędzie Pythona (`python/make_maps.py`); implementacja Rust jedynie je czyta.
 

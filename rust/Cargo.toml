@@ -1,0 +1,11 @@
+[package]
+name = "hexfront"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Pinned graphics/window/input library (see specification_rust.md, section
+# "Language and libraries"). No other crates: the AI noise uses our own
+# deterministic generator in `rng.rs`.
+macroquad = "=0.4.16"
+
