@@ -18,25 +18,84 @@ use crate::hexgrid::Tile;
 pub struct Renderer {
     /// Phase of the helicopter rotor animation.
     pub rotor_phase: f64,
+    /// Converted static terrain buffers, uploaded once per level.
+    terrain: Option<GpuTerrain>,
+}
+
+/// Static terrain already converted into macroquad meshes.
+struct GpuTerrain {
+    /// One draw batch per terrain chunk plus its world bounding box.
+    chunks: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
+    /// Grid strokes of every chunk plus its world bounding box.
+    grids: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
 }
 
 impl Renderer {
     /// Create a renderer.
     pub fn new() -> Self {
-        Self { rotor_phase: 0.0 }
+        Self {
+            rotor_phase: 0.0,
+            terrain: None,
+        }
+    }
+    /// Convert a freshly built terrain mesh into GPU buffers.
+    ///
+    /// Called by [`crate::app`] right after rebuilding the static terrain,
+    /// so the per-frame path never touches per-vertex conversion.
+    pub fn set_terrain(&mut self, terrain: &crate::mesh::TerrainMesh) {
+        let mut chunks = Vec::with_capacity(terrain.chunks.len());
+        let mut grids = Vec::with_capacity(terrain.chunks.len());
+        for chunk in terrain.chunks.iter() {
+            let mut verts: Vec<macroquad::models::Vertex> =
+                Vec::with_capacity(chunk.soup.vertices.len());
+            for v in chunk.soup.vertices.iter() {
+                verts.push(mq_vertex(v));
+            }
+            let indices: Vec<u16> = (0..verts.len() as u16).collect();
+            chunks.push((
+                macroquad::models::Mesh {
+                    vertices: verts,
+                    indices,
+                    texture: None,
+                },
+                chunk.bbox,
+            ));
+            let mut gverts: Vec<macroquad::models::Vertex> =
+                Vec::with_capacity(chunk.grid_lines.len() * 2);
+            let mut gidx: Vec<u16> = Vec::with_capacity(chunk.grid_lines.len() * 2);
+            for (a, b) in chunk.grid_lines.iter() {
+                let base = gverts.len() as u16;
+                gverts.push(mq_vertex(a));
+                gverts.push(mq_vertex(b));
+                gidx.push(base);
+                gidx.push(base + 1);
+            }
+            grids.push((
+                macroquad::models::Mesh {
+                    vertices: gverts,
+                    indices: gidx,
+                    texture: None,
+                },
+                chunk.bbox,
+            ));
+        }
+        self.terrain = Some(GpuTerrain { chunks, grids });
     }
     /// Render one frame of the running game.
     ///
     /// Pass order: opaque terrain chunks -> terrain grid lines -> opaque
     /// dynamic objects -> translucent range discs -> 3D strokes -> 2D
     /// overlays. Unit badges and floating texts are drawn by [`crate::app`]
-    /// on top, never occluded.
+    /// on top, never occluded. Terrain chunks outside the viewport are
+    /// culled before they are submitted (their world boxes are tested
+    /// against the visible world box), which keeps huge boards bounded by
+    /// the view size.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_gpu(
         &mut self,
         iso: &crate::iso::IsoCamera,
         camera: &Camera,
-        terrain: &crate::mesh::TerrainMesh,
+        view_bounds: (f64, f64, f64, f64),
         dynamic: &crate::mesh::DynamicMesh,
         game: &Game,
         selection: Option<Tile>,
@@ -47,28 +106,28 @@ impl Renderer {
         let bg = constants::WATER_COLOR;
         mq::clear_background(mq::Color::from_rgba(bg[0], bg[1], bg[2], 255));
         // Orthographic GPU camera reproducing `Camera::world_to_screen`.
-        let view = mq::glam::Mat4::from_cols_array_2d(&cols_2d(&iso.view));
-        let proj = mq::glam::Mat4::from_cols_array_2d(&cols_2d(&iso.proj));
+        // `IsoCamera` stores the matrices in the layout glam expects from
+        // `from_cols_array_2d` (each array row is one column/axis), so the
+        // arrays are passed through unchanged.
+        let view = mq::glam::Mat4::from_cols_array_2d(&iso.view);
+        let proj = mq::glam::Mat4::from_cols_array_2d(&iso.proj);
         let cam3d = GpuIsoCamera {
             matrix: proj * view,
         };
         mq::set_camera(&cam3d);
-        for chunk in terrain.chunks.iter() {
-            draw_soup(&chunk.vertices, &chunk.indices);
-        }
-        // Terrain grid strokes.
-        {
-            let mut verts: Vec<macroquad::models::Vertex> =
-                Vec::with_capacity(terrain.grid_lines.len() * 2);
-            let mut idx: Vec<u16> = Vec::with_capacity(terrain.grid_lines.len() * 2);
-            for (a, b) in terrain.grid_lines.iter() {
-                let base = verts.len() as u16;
-                verts.push(mq_vertex(a));
-                verts.push(mq_vertex(b));
-                idx.push(base);
-                idx.push(base + 1);
+        if let Some(terrain) = self.terrain.as_ref() {
+            for (mesh, bbox) in terrain.chunks.iter() {
+                if !bbox_hits(bbox, &view_bounds) {
+                    continue;
+                }
+                mq::draw_mesh(mesh);
             }
-            chunked_lines(&verts, &idx);
+            for (mesh, bbox) in terrain.grids.iter() {
+                if !bbox_hits(bbox, &view_bounds) {
+                    continue;
+                }
+                draw_line_mesh(mesh);
+            }
         }
         draw_soup(&dynamic.opaque.vertices, &dynamic.opaque.indices);
         // Translucent range discs: no depth write, depth test on.
@@ -90,6 +149,11 @@ impl Renderer {
         // Selection outline + hovered route preview as 2D overlays.
         mq::set_default_camera();
         draw_selection_2d(camera, game, selection, hover_tile, preview);
+    }
+    /// True when the renderer holds buffers for `terrain` already.
+    #[allow(dead_code)]
+    pub fn has_terrain(&self) -> bool {
+        self.terrain.is_some()
     }
     /// Nearest building tile within HOVER_SNAP_RADIUS of the cursor.
     ///
@@ -131,15 +195,26 @@ impl macroquad::camera::Camera for GpuIsoCamera {
     }
 }
 
-/// Transpose a row-major 4x4 matrix into column-major 2D array form.
-fn cols_2d(m: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
-    let mut out = [[0.0f32; 4]; 4];
-    for r in 0..4 {
-        for c in 0..4 {
-            out[c][r] = m[r][c];
+/// True when the chunk box `bbox` intersects the visible world box `view`.
+fn bbox_hits(bbox: &(f64, f64, f64, f64), view: &(f64, f64, f64, f64)) -> bool {
+    bbox.0 <= view.2 && bbox.2 >= view.0 && bbox.1 <= view.3 && bbox.3 >= view.1
+}
+
+/// Draw one prepared line mesh (grid strokes) with the current camera.
+fn draw_line_mesh(mesh: &macroquad::models::Mesh) {
+    use macroquad::prelude as mq;
+    for pair in mesh.vertices.chunks(2) {
+        if pair.len() < 2 {
+            break;
         }
+        let color = mq::Color::from_rgba(
+            pair[0].color[0],
+            pair[0].color[1],
+            pair[0].color[2],
+            255,
+        );
+        mq::draw_line_3d(pair[0].position, pair[1].position, color);
     }
-    out
 }
 
 /// Convert one mesh vertex into a macroquad vertex.

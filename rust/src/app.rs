@@ -48,12 +48,18 @@ pub struct Application {
     down_pos: Option<(f32, f32)>,
     last_mouse: (f32, f32),
     dragging: bool,
+    /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`).
+    capture: Option<String>,
+    /// TEMPORARY debug hook frame countdown.
+    capture_frames: u32,
+    /// TEMPORARY frame-time samples (`HEXFRONT_TIMING`).
+    slow_frames: Vec<f32>,
 }
 
 impl Application {
     /// Create the application (window is owned by macroquad).
     pub fn new() -> Self {
-        Self {
+        let mut app = Self {
             game: None,
             camera: Camera::new((screen_width(), screen_height())),
             renderer: Renderer::new(),
@@ -74,7 +80,24 @@ impl Application {
             down_pos: None,
             last_mouse: mouse_position(),
             dragging: false,
+            capture: None,
+            capture_frames: 0,
+            slow_frames: Vec::new(),
+        };
+        // TEMPORARY debug hook: render a level headlessly and dump a PNG.
+        if let Ok(path) = std::env::var("HEXFRONT_MAP") {
+            if let Ok(png) = std::env::var("HEXFRONT_CAPTURE") {
+                app.capture = Some(png);
+                app.capture_frames = 20;
+            }
+            app.start_map(std::path::Path::new(&path));
+            app.state = State::Playing;
+            app.paused = false;
         }
+        if std::env::var("HEXFRONT_TIMING").is_ok() {
+            app.sim_acc = 0.0;
+        }
+        app
     }
     /// Main loop; exits when the window is closed.
     pub async fn run(mut self) {
@@ -82,7 +105,33 @@ impl Application {
             let dt = get_frame_time().min(0.1);
             self.handle_input(dt);
             self.update(dt);
+            if std::env::var("HEXFRONT_TIMING").is_ok() && self.state == State::Playing {
+                self.slow_frames.push(dt);
+                if self.slow_frames.len() >= 120 {
+                    let mut sorted = self.slow_frames.clone();
+                    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let med = sorted[sorted.len() / 2] * 1000.0;
+                    println!(
+                        "TIMING frames={} median={:.1} ms max={:.1} ms",
+                        sorted.len(),
+                        med,
+                        sorted[sorted.len() - 1] * 1000.0
+                    );
+                    self.slow_frames.clear();
+                }
+            }
             self.draw();
+            if self.capture.is_some() {
+                if self.capture_frames > 0 {
+                    self.capture_frames -= 1;
+                } else {
+                    let path = self.capture.clone().unwrap();
+                    let img = get_screen_data();
+                    img.export_png(&path);
+                    println!("CAPTURED {}", path);
+                    std::process::exit(0);
+                }
+            }
             next_frame().await;
         }
     }
@@ -398,18 +447,20 @@ impl Application {
             let key = Some((game.board.cols, game.board.rows));
             if self.terrain_board_key != key {
                 self.terrain = mesh::build_terrain(&game.board);
+                self.renderer.set_terrain(&self.terrain);
                 self.terrain_board_key = key;
             }
             let (lo, hi) = mesh::depth_span(&game.board);
-            let d_max = hi.max(lo + 1.0) + 500.0;
-            let iso = IsoCamera::from_camera(&self.camera, d_max);
+            let iso = IsoCamera::from_camera(&self.camera, lo, hi);
+            let view_bounds =
+                mesh::visible_world_bounds(&self.camera, mesh::max_height(&game.board), game.board.side);
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
             self.renderer.rotor_phase += 0.2;
             let sel = self.selection;
             self.renderer.draw_gpu(
                 &iso,
                 &self.camera,
-                &self.terrain,
+                view_bounds,
                 &self.dynamic,
                 game,
                 sel,
@@ -427,6 +478,14 @@ impl Application {
         let r = (12.0 * self.camera.zoom as f32).max(8.0);
         (sx + r * 1.5, sy + r * 1.1)
     }
+    /// True when a screen position is inside the viewport (HUD culling).
+    fn on_screen(sx: f32, sy: f32) -> bool {
+        let margin = 48.0;
+        sx >= -margin
+            && sy >= -margin
+            && sx <= screen_width() + margin
+            && sy <= screen_height() + margin
+    }
     fn draw_badges(&self) {
         let game = match self.game.as_ref() {
             Some(g) => g,
@@ -435,8 +494,11 @@ impl Application {
         for b in game.buildings.iter() {
             let (wx, wy) = b.pos(game.board.side);
             let z = b.units;
-            let gz = game.board.height(b.tile) as f64 * constants::ELEVATION_PX;
+            let gz = mesh::tile_top_z(&game.board, b.tile);
             let (cx, cy) = self.badge_anchor(wx, wy, gz);
+            if !Self::on_screen(cx, cy) {
+                continue;
+            }
             let r = (12.0 * self.camera.zoom as f32).max(8.0);
             draw_circle(cx, cy, r, Color::new(0.11, 0.11, 0.13, 1.0));
             draw_circle_lines(cx, cy, r, 2.0, Color::new(0.96, 0.96, 0.96, 1.0));
@@ -472,12 +534,11 @@ impl Application {
             if v.dead {
                 continue;
             }
-            let gz = game
-                .board
-                .height(game.board.world_to_tile(v.x, v.y).unwrap_or((0, 0)))
-                as f64
-                * constants::ELEVATION_PX;
+            let gz = mesh::vehicle_ground_z(game, v.x, v.y);
             let (cx, cy) = self.badge_anchor(v.x, v.y, gz);
+            if !Self::on_screen(cx, cy) {
+                continue;
+            }
             let r = (12.0 * self.camera.zoom as f32).max(8.0);
             draw_circle(cx, cy, r, Color::new(0.11, 0.11, 0.13, 1.0));
             draw_circle_lines(cx, cy, r, 2.0, Color::new(0.96, 0.96, 0.96, 1.0));
@@ -499,9 +560,15 @@ impl Application {
             None => return,
         };
         for b in game.buildings.iter() {
+            if b.texts.is_empty() {
+                continue;
+            }
             let (wx, wy) = b.pos(game.board.side);
-            let gz = game.board.height(b.tile) as f64 * constants::ELEVATION_PX;
+            let gz = mesh::tile_top_z(&game.board, b.tile);
             let (cx, cy) = self.badge_anchor(wx, wy, gz);
+            if !Self::on_screen(cx, cy) {
+                continue;
+            }
             for t in b.texts.iter() {
                 let frac = (t.age / constants::FLOAT_TEXT_LIFETIME).clamp(0.0, 1.0);
                 let y = cy as f64 - constants::FLOAT_TEXT_SPEED as f64 * t.age;

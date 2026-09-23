@@ -40,13 +40,28 @@ pub struct TriangleSoup {
 /// so one chunk is one draw call.
 pub const CHUNK_VERTICES: usize = 16_000;
 
+/// Tiles per chunk edge: the terrain is split into spatial chunks so view
+/// culling can skip whole regions (16 x 16 tiles stays well below
+/// [`CHUNK_VERTICES`] per chunk).
+pub const CHUNK_TILES: i32 = 16;
+
+/// One spatially bounded terrain chunk; the renderer culls it by `bbox`.
+#[derive(Clone, Debug, Default)]
+pub struct TerrainChunk {
+    /// Opaque triangles (tops, skirts, ramps, decks).
+    pub soup: TriangleSoup,
+    /// Thin grid strokes over this chunk's hex tops.
+    pub grid_lines: Vec<(GpuVertex, GpuVertex)>,
+    /// World-space bounds `(x_min, y_min, x_max, y_max)` of the chunk,
+    /// padded by one hex so cliffs and strokes stay covered.
+    pub bbox: (f64, f64, f64, f64),
+}
+
 /// Static terrain geometry, rebuilt only when the board changes.
 #[derive(Clone, Debug, Default)]
 pub struct TerrainMesh {
-    /// Opaque triangles (tops, skirts, ramps, decks), chunked for u16.
-    pub chunks: Vec<TriangleSoup>,
-    /// Thin grid strokes over hex tops, drawn as line segments.
-    pub grid_lines: Vec<(GpuVertex, GpuVertex)>,
+    /// Spatial chunks in deterministic order.
+    pub chunks: Vec<TerrainChunk>,
 }
 
 /// World-space depth span of a board (for the GPU camera setup).
@@ -62,6 +77,46 @@ pub fn depth_span(board: &Board) -> (f64, f64) {
     }
     if lo > hi { (0.0, 1.0) } else { (lo, hi) }
 }
+
+/// Highest rendered elevation of a board in px (view-culling padding).
+pub fn max_height(board: &Board) -> f64 {
+    let h = board.tiles.values().map(|t| t.height).max().unwrap_or(0);
+    h as f64 * constants::ELEVATION_PX
+}
+
+/// World box `(x_min, y_min, x_max, y_max)` visible in `camera`.
+///
+/// The four screen corners are unprojected at zero elevation and at
+/// `max_z`, so terrain of any height (and the cliffs hanging below it)
+/// stays inside the box; the result is padded by two hexes for strokes.
+pub fn visible_world_bounds(
+    camera: &crate::camera::Camera,
+    max_z: f64,
+    side: f64,
+) -> (f64, f64, f64, f64) {
+    let (w, h) = camera.screen_size;
+    let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
+    let (mut x1, mut y1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for wz in [0.0, max_z] {
+        for (sx, sy) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
+            let (wx, wy) = camera.screen_to_world(sx, sy, wz);
+            x0 = x0.min(wx);
+            y0 = y0.min(wy);
+            x1 = x1.max(wx);
+            y1 = y1.max(wy);
+        }
+    }
+    let pad = 2.0 * side;
+    (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+}
+
+fn grow_bbox(bbox: &mut (f64, f64, f64, f64), x: f64, y: f64) {
+    bbox.0 = bbox.0.min(x);
+    bbox.1 = bbox.1.min(y);
+    bbox.2 = bbox.2.max(x);
+    bbox.3 = bbox.3.max(y);
+}
+
 
 fn push_tri(soup: &mut TriangleSoup, a: GpuVertex, b: GpuVertex, c: GpuVertex) {
     let base = soup.vertices.len() as u16;
@@ -108,31 +163,55 @@ pub fn tile_top_z(board: &Board, tile: Tile) -> f64 {
 
 /// Build the static terrain mesh of `board` (tops, skirts, ramps, decks).
 pub fn build_terrain(board: &Board) -> TerrainMesh {
-    let mut mesh = TerrainMesh::default();
-    let mut cur = TriangleSoup::default();
-    let mut tops: Vec<Tile> = board.tiles.keys().copied().collect();
-    tops.sort();
-    for tile in tops {
-        // Keep every chunk addressable with u16 indices.
-        if cur.vertices.len() + 64 > CHUNK_VERTICES {
-            mesh.chunks.push(std::mem::take(&mut cur));
-        }
-        push_top(board, &mut cur, &mut mesh.grid_lines, tile);
-        push_skirts(board, &mut cur, tile);
-        if board.ramps.contains_key(&tile) {
-            push_ramp(board, &mut cur, tile);
-        }
+    use std::collections::BTreeMap;
+    let mut groups: BTreeMap<(i32, i32), Vec<Tile>> = BTreeMap::new();
+    for tile in board.tiles.keys() {
+        groups
+            .entry((tile.0 / CHUNK_TILES, tile.1 / CHUNK_TILES))
+            .or_default()
+            .push(*tile);
     }
+    let mut mesh = TerrainMesh::default();
+    let pad = board.side;
+    for tiles in groups.values_mut() {
+        tiles.sort();
+        let mut chunk = TerrainChunk::default();
+        for tile in tiles.iter() {
+            push_top(board, &mut chunk.soup, &mut chunk.grid_lines, *tile);
+            push_skirts(board, &mut chunk.soup, *tile);
+            if board.ramps.contains_key(tile) {
+                push_ramp(board, &mut chunk.soup, *tile);
+            }
+            let (cx, cy) = board.center_world(*tile);
+            grow_bbox(&mut chunk.bbox, cx - pad, cy - pad);
+            grow_bbox(&mut chunk.bbox, cx + pad, cy + pad);
+        }
+        debug_assert!(
+            chunk.soup.vertices.len() <= CHUNK_VERTICES,
+            "terrain chunk exceeds the u16 draw batch ({} vertices)",
+            chunk.soup.vertices.len()
+        );
+        mesh.chunks.push(chunk);
+    }
+    // Bridge decks sit on their own tiles, so every fragment lands in the
+    // chunk of that tile (a bridge may span more than one chunk).
     let mut bridges: Vec<usize> = (0..board.bridges.len()).collect();
     bridges.sort_by_key(|i| board.bridges[*i].a);
     for i in bridges {
-        if cur.vertices.len() + 512 > CHUNK_VERTICES {
-            mesh.chunks.push(std::mem::take(&mut cur));
+        let w = board.bridges[i].w;
+        for f in board.bridges[i].fragments.clone() {
+            let key = (f.0 / CHUNK_TILES, f.1 / CHUNK_TILES);
+            let Some(idx) = groups.keys().position(|k| *k == key) else {
+                continue;
+            };
+            let z = w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT;
+            let corners = hexgrid::hex_corners(f.0, f.1, board.side);
+            let c = corners.map(|(x, y)| vert(x, y, z, [150, 120, 90]));
+            let soup = &mut mesh.chunks[idx].soup;
+            for k in 1..5 {
+                push_tri(soup, c[0], c[k], c[k + 1]);
+            }
         }
-        push_bridge(board, &mut cur, i);
-    }
-    if !cur.vertices.is_empty() {
-        mesh.chunks.push(cur);
     }
     mesh
 }
@@ -224,21 +303,6 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
     let q2 = vert(pb.0 - nx * half, pb.1 - ny * half, hb, col);
     let q3 = vert(pb.0 + nx * half, pb.1 + ny * half, hb, col);
     push_quad(soup, q0, q1, q2, q3);
-}
-
-fn push_bridge(board: &Board, soup: &mut TriangleSoup, idx: usize) {
-    let br = match board.bridges.get(idx) {
-        Some(b) => b,
-        None => return,
-    };
-    let z = br.w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT;
-    for f in br.fragments.iter() {
-        let corners = hexgrid::hex_corners(f.0, f.1, board.side);
-        let c = corners.map(|(x, y)| vert(x, y, z, [150, 120, 90]));
-        for k in 1..5 {
-            push_tri(soup, c[0], c[k], c[k + 1]);
-        }
-    }
 }
 
 /// Dynamic per-frame geometry: buildings, obstacles, vehicles, effects.
@@ -644,21 +708,80 @@ mod tests {
         let board = Board::new(4, 3);
         let a = build_terrain(&board);
         let b = build_terrain(&board);
-        let count = |m: &TerrainMesh| m.chunks.iter().map(|c| c.vertices.len()).sum::<usize>();
-        let indices = |m: &TerrainMesh| m.chunks.iter().map(|c| c.indices.len()).sum::<usize>();
+        let count = |m: &TerrainMesh| {
+            m.chunks
+                .iter()
+                .map(|c| c.soup.vertices.len())
+                .sum::<usize>()
+        };
+        let indices = |m: &TerrainMesh| {
+            m.chunks
+                .iter()
+                .map(|c| c.soup.indices.len())
+                .sum::<usize>()
+        };
         assert_eq!(count(&a), count(&b));
         assert_eq!(indices(&a), indices(&b));
-        // 12 tiles at height 1 surrounded by water: 12 tops (4 tris each)
-        // plus outer skirts (3 edges x 2 tris each on border tiles).
+        // One spatial chunk; 12 tiles at height 1 surrounded by water:
+        // 12 tops (4 tris each) plus outer skirts (3 edges x 2 tris each).
         assert_eq!(a.chunks.len(), 1);
         assert_eq!(count(&a), 300);
-        assert_eq!(a.grid_lines.len(), 12 * 6);
+        let grid: usize = a.chunks.iter().map(|c| c.grid_lines.len()).sum();
+        assert_eq!(grid, 12 * 6);
         for chunk in a.chunks.iter() {
-            assert!(chunk.vertices.len() <= CHUNK_VERTICES);
-            for (i, idx) in chunk.indices.iter().enumerate() {
+            assert!(chunk.soup.vertices.len() <= CHUNK_VERTICES);
+            for (i, idx) in chunk.soup.indices.iter().enumerate() {
                 assert_eq!(*idx as usize, i);
             }
         }
+    }
+
+    #[test]
+    fn chunks_are_spatial_and_cover_all_vertices() {
+        let board = Board::new(40, 40);
+        let mesh = build_terrain(&board);
+        // 40 / 16 tiles per chunk -> 3 x 3 chunks.
+        assert_eq!(mesh.chunks.len(), 9);
+        for chunk in mesh.chunks.iter() {
+            assert!(chunk.soup.vertices.len() <= CHUNK_VERTICES);
+            // Every vertex of the chunk lies inside its (padded) box.
+            for v in chunk.soup.vertices.iter() {
+                let (x, y) = (v.x as f64, v.y as f64);
+                assert!(
+                    x >= chunk.bbox.0 - 1e-6
+                        && x <= chunk.bbox.2 + 1e-6
+                        && y >= chunk.bbox.1 - 1e-6
+                        && y <= chunk.bbox.3 + 1e-6,
+                    "vertex ({x},{y}) outside {:?}",
+                    chunk.bbox
+                );
+            }
+            for (a, b) in chunk.grid_lines.iter() {
+                for v in [a, b] {
+                    let (x, y) = (v.x as f64, v.y as f64);
+                    assert!(x >= chunk.bbox.0 - 1e-6 && x <= chunk.bbox.2 + 1e-6);
+                    assert!(y >= chunk.bbox.1 - 1e-6 && y <= chunk.bbox.3 + 1e-6);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn visible_bounds_include_the_camera_target() {
+        use crate::camera::Camera;
+        let mut camera = Camera::new((1180.0, 720.0));
+        camera.center_on_world(2000.0, 1000.0, 0.0);
+        let (x0, y0, x1, y1) = visible_world_bounds(&camera, 15.0 * constants::ELEVATION_PX, 36.0);
+        // The point the camera looks at must be inside the box...
+        assert!(x0 < 2000.0 && 2000.0 < x1, "x box {x0}..{x1}");
+        assert!(y0 < 1000.0 && 1000.0 < y1, "y box {y0}..{y1}");
+        // ...and the box must be tight to the viewport, not the whole world.
+        assert!(x1 - x0 < 4000.0, "box too wide: {}", x1 - x0);
+        assert!(y1 - y0 < 4000.0, "box too tall: {}", y1 - y0);
+        // Panning the camera moves the box with it.
+        camera.center_on_world(6000.0, 1000.0, 0.0);
+        let (nx0, _, nx1, _) = visible_world_bounds(&camera, 15.0 * constants::ELEVATION_PX, 36.0);
+        assert!(nx0 > x0 && nx1 > x1, "box did not follow the pan");
     }
 
     #[test]
@@ -668,10 +791,10 @@ mod tests {
             let mesh = build_terrain(&game.board);
             for chunk in mesh.chunks.iter() {
                 assert!(
-                    chunk.vertices.len() <= CHUNK_VERTICES,
+                    chunk.soup.vertices.len() <= CHUNK_VERTICES,
                     "{} chunk has {} vertices",
                     path.display(),
-                    chunk.vertices.len()
+                    chunk.soup.vertices.len()
                 );
             }
         }
