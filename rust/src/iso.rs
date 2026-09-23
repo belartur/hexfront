@@ -162,11 +162,7 @@ mod tests {
         camera.y = -150.0;
         camera.zoom = 1.7;
         let iso = IsoCamera::from_camera(&camera, 0.0, 20000.0);
-        for (x, y, z) in [
-            (0.0, 0.0, 0.0),
-            (900.0, 400.0, 45.0),
-            (2500.0, 1800.0, 9.0),
-        ] {
+        for (x, y, z) in [(0.0, 0.0, 0.0), (900.0, 400.0, 45.0), (2500.0, 1800.0, 9.0)] {
             let (ex, ey) = camera.world_to_screen(x, y, z);
             let (sx, sy, _) = iso.project_point(&camera, x, y, z);
             assert!((sx - ex).abs() < 0.5, "x at ({x},{y},{z}): {sx} vs {ex}");

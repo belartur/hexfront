@@ -371,6 +371,7 @@ impl Application {
                     crate::hexgrid::SQRT3 * game.board.side * (game.board.rows - 1) as f64 / 2.0;
                 self.camera.center_on_world(cx, cy, 0.0);
                 self.terrain = mesh::build_terrain(&game.board);
+                self.renderer.set_terrain(&self.terrain);
                 self.terrain_board_key = Some((game.board.cols, game.board.rows));
                 self.game = Some(game);
                 self.ai = ai;
@@ -452,8 +453,11 @@ impl Application {
             }
             let (lo, hi) = mesh::depth_span(&game.board);
             let iso = IsoCamera::from_camera(&self.camera, lo, hi);
-            let view_bounds =
-                mesh::visible_world_bounds(&self.camera, mesh::max_height(&game.board), game.board.side);
+            let view_bounds = mesh::visible_world_bounds(
+                &self.camera,
+                mesh::max_height(&game.board),
+                game.board.side,
+            );
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
             self.renderer.rotor_phase += 0.2;
             let sel = self.selection;

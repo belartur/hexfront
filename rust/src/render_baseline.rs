@@ -30,7 +30,7 @@ fn render_baseline() {
             build_dynamic(&game, 0.0, &mut dynamic);
         }
         let dynamic_ms = start.elapsed().as_secs_f64() * 1000.0 / frames as f64;
-        let tverts: usize = terrain.chunks.iter().map(|c| c.vertices.len()).sum();
+        let tverts: usize = terrain.chunks.iter().map(|c| c.soup.vertices.len()).sum();
         println!(
             "{}: tiles={} terrain={:.1} ms ({} verts) dynamic={:.3} ms/frame ({} verts)",
             name,

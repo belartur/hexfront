@@ -117,7 +117,6 @@ fn grow_bbox(bbox: &mut (f64, f64, f64, f64), x: f64, y: f64) {
     bbox.3 = bbox.3.max(y);
 }
 
-
 fn push_tri(soup: &mut TriangleSoup, a: GpuVertex, b: GpuVertex, c: GpuVertex) {
     let base = soup.vertices.len() as u16;
     soup.vertices.push(a);
@@ -714,12 +713,8 @@ mod tests {
                 .map(|c| c.soup.vertices.len())
                 .sum::<usize>()
         };
-        let indices = |m: &TerrainMesh| {
-            m.chunks
-                .iter()
-                .map(|c| c.soup.indices.len())
-                .sum::<usize>()
-        };
+        let indices =
+            |m: &TerrainMesh| m.chunks.iter().map(|c| c.soup.indices.len()).sum::<usize>();
         assert_eq!(count(&a), count(&b));
         assert_eq!(indices(&a), indices(&b));
         // One spatial chunk; 12 tiles at height 1 surrounded by water:

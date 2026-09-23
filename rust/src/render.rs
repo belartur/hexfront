@@ -207,12 +207,7 @@ fn draw_line_mesh(mesh: &macroquad::models::Mesh) {
         if pair.len() < 2 {
             break;
         }
-        let color = mq::Color::from_rgba(
-            pair[0].color[0],
-            pair[0].color[1],
-            pair[0].color[2],
-            255,
-        );
+        let color = mq::Color::from_rgba(pair[0].color[0], pair[0].color[1], pair[0].color[2], 255);
         mq::draw_line_3d(pair[0].position, pair[1].position, color);
     }
 }
