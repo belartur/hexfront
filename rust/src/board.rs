@@ -83,9 +83,11 @@ impl HexTile {
 /// A straight bridge connecting two non-adjacent equal-height tiles.
 #[derive(Clone, Debug)]
 pub struct Bridge {
-    /// Land tile at height `w`.
+    /// Land tile at one end (height `w`).
     pub a: Tile,
-    /// Land tile at height `w`.
+    /// Land tile at the other end (height `w`); unused by rendering but
+    /// kept for format round-trips and gameplay queries.
+    #[allow(dead_code)]
     pub b: Tile,
     /// Shared height of both ends.
     pub w: i32,
@@ -205,6 +207,7 @@ impl Board {
     /// input and the flat `Alt` mode of specification.md, section
     /// "Sterowanie"). With `flat` the tile is picked as if every field
     /// stood at height zero — no elevation refinement happens.
+    #[allow(dead_code)]
     pub fn pick_tile(
         &self,
         camera: &crate::camera::Camera,

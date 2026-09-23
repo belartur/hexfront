@@ -11,11 +11,12 @@ use macroquad::prelude::*;
 use crate::ai::AiController;
 use crate::camera::Camera;
 use crate::constants::{self};
-use crate::depth::DepthBuffer;
 use crate::entities::vehicle_kind_of;
 use crate::game::Game;
 use crate::hexgrid::Tile;
+use crate::iso::IsoCamera;
 use crate::mapfile::{self, level_seed};
+use crate::mesh::{self, DynamicMesh, TerrainMesh};
 use crate::render::Renderer;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,9 +31,9 @@ pub struct Application {
     game: Option<Game>,
     camera: Camera,
     renderer: Renderer,
-    buf: DepthBuffer,
-    image: Image,
-    texture: Texture2D,
+    terrain: TerrainMesh,
+    dynamic: DynamicMesh,
+    terrain_board_key: Option<(i32, i32)>,
     state: State,
     maps: Vec<PathBuf>,
     menu_scroll: f32,
@@ -52,19 +53,13 @@ pub struct Application {
 impl Application {
     /// Create the application (window is owned by macroquad).
     pub fn new() -> Self {
-        let (w, h) = (screen_width() as usize, screen_height() as usize);
-        let (w, h) = (w.max(2), h.max(2));
-        let buf = DepthBuffer::new(w, h, constants::WATER_COLOR);
-        let image = Image::gen_image_color(w as u16, h as u16, WHITE);
-        let texture = Texture2D::from_image(&image);
-        texture.set_filter(FilterMode::Nearest);
         Self {
             game: None,
             camera: Camera::new((screen_width(), screen_height())),
             renderer: Renderer::new(),
-            buf,
-            image,
-            texture,
+            terrain: TerrainMesh::default(),
+            dynamic: DynamicMesh::default(),
+            terrain_board_key: None,
             state: State::Menu,
             maps: mapfile::list_maps(None),
             menu_scroll: 0.0,
@@ -92,16 +87,7 @@ impl Application {
         }
     }
     fn ensure_buffers(&mut self) {
-        let (w, h) = (screen_width() as usize, screen_height() as usize);
-        let (w, h) = (w.max(2), h.max(2));
-        if self.buf.w != w || self.buf.h != h {
-            self.buf = DepthBuffer::new(w, h, constants::WATER_COLOR);
-            self.image = Image::gen_image_color(w as u16, h as u16, WHITE);
-            self.texture = Texture2D::from_image(&self.image);
-            self.texture.set_filter(FilterMode::Nearest);
-            self.camera.screen_size = (screen_width(), screen_height());
-            self.renderer.invalidate();
-        }
+        self.camera.screen_size = (screen_width(), screen_height());
     }
 }
 impl Application {
@@ -335,6 +321,8 @@ impl Application {
                 let cy =
                     crate::hexgrid::SQRT3 * game.board.side * (game.board.rows - 1) as f64 / 2.0;
                 self.camera.center_on_world(cx, cy, 0.0);
+                self.terrain = mesh::build_terrain(&game.board);
+                self.terrain_board_key = Some((game.board.cols, game.board.rows));
                 self.game = Some(game);
                 self.ai = ai;
                 self.paused = false;
@@ -344,7 +332,6 @@ impl Application {
                 self.load_timer = 0.0;
                 self.sim_acc = 0.0;
                 self.state = State::Loading;
-                self.renderer.invalidate();
             }
             Err(e) => eprintln!("cannot load {}: {}", path.display(), e),
         }
@@ -401,45 +388,35 @@ impl Application {
             State::Playing => self.draw_game(),
         }
     }
-    fn upload(&mut self) {
-        let (w, h) = (self.buf.w, self.buf.h);
-        let bytes = self.buf.color.clone();
-        // Write RGB bytes into the macroquad image (RGBA bytes).
-        let mut rgba = vec![255u8; w * h * 4];
-        for i in 0..w * h {
-            rgba[i * 4] = bytes[i * 3];
-            rgba[i * 4 + 1] = bytes[i * 3 + 1];
-            rgba[i * 4 + 2] = bytes[i * 3 + 2];
-            rgba[i * 4 + 3] = 255;
-        }
-        self.image = Image {
-            width: w as u16,
-            height: h as u16,
-            bytes: rgba,
-        };
-        self.texture.update(&self.image);
-    }
     fn draw_game(&mut self) {
         let (mx, my) = mouse_position();
         let hover = self.hover_tile((mx, my));
         // Update preview path rendering state.
         let preview = self.preview_path.clone();
         if let Some(game) = self.game.as_ref() {
-            let cam = self.camera.clone();
-            let sel = self.selection;
-            self.renderer
-                .draw_world(&mut self.buf, game, &cam, sel, hover);
-            // Preview path on top of ranges/paths.
-            if let Some(path) = preview.as_ref()
-                && !path.is_empty()
-            {
-                let dc = crate::depth::DepthCamera::new(cam.clone());
-                self.renderer.draw_preview(game, &dc, &mut self.buf, path);
+            // Rebuild static terrain when the board identity changed.
+            let key = Some((game.board.cols, game.board.rows));
+            if self.terrain_board_key != key {
+                self.terrain = mesh::build_terrain(&game.board);
+                self.terrain_board_key = key;
             }
+            let (lo, hi) = mesh::depth_span(&game.board);
+            let d_max = hi.max(lo + 1.0) + 500.0;
+            let iso = IsoCamera::from_camera(&self.camera, d_max);
+            mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
+            self.renderer.rotor_phase += 0.2;
+            let sel = self.selection;
+            self.renderer.draw_gpu(
+                &iso,
+                &self.camera,
+                &self.terrain,
+                &self.dynamic,
+                game,
+                sel,
+                hover,
+                preview.as_ref(),
+            );
         }
-        self.upload();
-        clear_background(BLACK);
-        draw_texture(&self.texture, 0.0, 0.0, WHITE);
         // HUD text on top (badges, floating texts, help).
         self.draw_badges();
         self.draw_float_texts();

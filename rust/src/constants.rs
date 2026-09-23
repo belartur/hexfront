@@ -56,11 +56,6 @@ pub const ELEVATION_PX: f64 = 9.0 * UNIT_J_TO_PX;
 pub const ISO_COS: f64 = 0.8660254037844387;
 /// Vertical squash factor of the isometric projection (2:1 isometric).
 pub const ISO_SIN: f64 = 0.5;
-/// Numerical coplanarity tolerance for the depth renderer
-/// (specification.md, "Grafika i interfejs uzytkownika").
-pub const DEPTH_EPSILON: f64 = 1e-7;
-/// Screen-space grid line width in px (specification.md, graphics).
-pub const GRID_LINE_WIDTH: f32 = 2.0;
 /// Radius of an ordinary turret projectile in screen px.
 pub const PROJECTILE_RADIUS: f32 = 3.0;
 /// Radius of a rocket projectile in screen px.
@@ -68,10 +63,6 @@ pub const ROCKET_RADIUS: f32 = 5.0;
 #[allow(dead_code)]
 /// Outline width of projectiles in screen px.
 pub const PROJECTILE_OUTLINE_WIDTH: f32 = 1.0;
-/// Vehicle shadows on visible receiving surfaces (specification.md).
-pub const SHADOW_RADIUS: f64 = 14.0 * UNIT_J_TO_PX;
-/// Circle resolution of shadows.
-pub const SHADOW_SEGMENTS: usize = 14;
 /// Visual deck thickness; the bridge deck and shadows share one surface.
 pub const BRIDGE_DECK_LIFT: f64 = 5.0 * UNIT_J_TO_PX;
 /// Fixed simulation frame rate (specification_rust.md, "Determinism").
@@ -246,20 +237,13 @@ pub const PLAYER_COLORS: [[u8; 3]; 4] = [
 ];
 /// Colour of objects that belong to no player.
 pub const NEUTRAL_COLOR: [u8; 3] = [165, 165, 165];
-/// Translucent overlays: turret ranges white, healing ranges light green.
-pub const RANGE_TURRET_FILL: [u8; 4] = [255, 255, 255, 42];
-/// Translucent overlays: healing ranges light green.
-pub const RANGE_HEAL_FILL: [u8; 4] = [150, 245, 150, 46];
-/// Range outlines: same hue as the fill but clearly less transparent.
-pub const RANGE_TURRET_OUTLINE: [u8; 4] = [255, 255, 255, 130];
-/// Range outlines: healing, same hue as the fill but less transparent.
-pub const RANGE_HEAL_OUTLINE: [u8; 4] = [150, 245, 150, 130];
-/// Range outline width in screen px.
-pub const RANGE_OUTLINE_WIDTH: f32 = 3.0;
+/// Alpha of translucent range discs on the GPU path (fills share one value).
+pub const RANGE_FILL_ALPHA: u8 = 70;
 #[allow(dead_code)]
 /// Route line colour of moving vehicles.
 pub const PATH_COLOR: [u8; 3] = [255, 255, 255];
 /// Route preview colour.
+#[allow(dead_code)]
 pub const PATH_PREVIEW_COLOR: [u8; 3] = [255, 240, 120];
 #[allow(dead_code)]
 /// UI text colour.

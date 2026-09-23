@@ -716,6 +716,7 @@ impl Game {
         self.vehicles[idx].dead = true;
     }
     /// Height of the bridge deck under a world point on a route segment.
+    #[allow(dead_code)]
     pub fn bridge_deck_height_at(
         &self,
         x: f64,

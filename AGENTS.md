@@ -76,8 +76,10 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 - `rust/src/rng.rs` — własny deterministyczny PRNG (splitmix64 + Box-Muller) na szum AI, bez dodatkowych crate'ów.
 - `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
 - `rust/src/camera.rs` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`).
-- `rust/src/depth.rs` — programowy bufor głębokości CPU: `ProjectedPoint`, `DepthCamera`, `DepthBuffer`.
-- `rust/src/render.rs` — rysowanie z kodu (bez assetów rastrowych): `Renderer::draw_world()` z cache nieruchomego terenu; `pick_tile()` / `snap_to_building()` delegują do `Board`.
+- `rust/src/iso.rs` — ortograficzna kamera GPU odtwarzająca rzut 2D: `IsoCamera` (`from_camera()`, macierze view/proj, głębia z D wzdłuż osi Z).
+- `rust/src/mesh.rs` — budowa meshy GPU bez zależności od macroquad: `TerrainMesh` (`build_terrain()`, chunki na u16), `DynamicMesh` (`build_dynamic()`), `depth_span()`, `tile_top_z()`.
+- `rust/src/render.rs` — rysowanie z kodu na GPU (bez assetów rastrowych): `Renderer::draw_gpu()` (chunki terenu, linie siatki, obiekty, przezroczyste zasięgi, kreski 3D, nakładki 2D); `snap_to_building()` deleguje do `Board`.
+- `rust/src/render_baseline.rs` — test-benchmark budowy meshy (`#[cfg(test)]`): `build_terrain()` raz na mapę + `build_dynamic()` co klatkę (`cargo test --release render_baseline -- --nocapture`).
 - `rust/src/app.rs` — okno, menu poziomów, input i HUD: `Application` (`run()`, LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza).
 
 ### Katalog `rust/` (implementacja w Rust)
@@ -107,7 +109,7 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 
 ## 6. Implementacja Rust
 
-1. Separacja modułów crate'a `hexfront`: logika w `board.rs` / `game.rs` / `ai.rs` / `rng.rs` (bez zależności od macroquad, więc testy działają bez okna), rysowanie w `render.rs` / `depth.rs`, obsługa wejścia w `app.rs`.
+1. Separacja modułów crate'a `hexfront`: logika w `board.rs` / `game.rs` / `ai.rs` / `rng.rs` (bez zależności od macroquad, więc testy działają bez okna), budowa meshy w `mesh.rs` / `iso.rs` (też bez macroquad), rysowanie w `render.rs`, obsługa wejścia w `app.rs`.
 2. Moduł stałych: `rust/src/constants.rs`; ścieżki plików plansz: `repo_root()`, `maps_dir()`, `MAP_EXTENSION`.
 3. Implementację formatu `.map` zmieniasz wyłącznie w `rust/src/mapfile.rs`; tabele kodów w `mapfile.rs` są implementacją tabel z `specification_of_map_format.md` — zmieniając format, zaktualizuj oba miejsca oraz drugą implementację.
 4. Gra i picking współdzielą geometrię `Board::pick_tile()` / `Board::snap_to_building()` (pick z Alt jako `flat=true`); `Renderer::pick_tile()` / `Renderer::snap_to_building()` tylko delegują do `Board`.
