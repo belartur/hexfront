@@ -566,7 +566,7 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
         if v.dead {
             continue;
         }
-        push_vehicle(game, v, rotor_phase, &mut out.opaque);
+        push_vehicle(game, v, rotor_phase, &mut out.opaque, &mut out.lines);
     }
     push_ranges(
         game,
@@ -802,6 +802,7 @@ fn push_vehicle(
     v: &crate::entities::Vehicle,
     rotor_phase: f64,
     mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
 ) {
     let color = constants::player_color(v.owner);
     let z = vehicle_z(game, v);
@@ -821,7 +822,7 @@ fn push_vehicle(
             );
         }
         constants::VehicleKind::Helicopter => {
-            push_disc(mesh, x, y, z, 10.0, 12, color);
+            push_helicopter(mesh, lines, x, y, z, rotor_phase, color);
         }
         constants::VehicleKind::Hovercraft => {
             // Hull sits flat on the ground: lift it like the flat obstacle
@@ -834,9 +835,87 @@ fn push_vehicle(
             push_box(mesh, x, y, z, 16.0, 20.0, 9.0, color);
         }
     }
-    // Rotor/tail details become lines below (thin strokes need no depth
-    // fighting on the GPU path); keep a rotor stub for animation parity.
-    let _ = rotor_phase;
+}
+
+/// Detailed helicopter: rounded body, cockpit, tail boom with a fin and a
+/// spinning two-blade main rotor plus a tail rotor.
+///
+/// The body stays an opaque low box stack (depth-tested like every other
+/// vehicle), while the thin rotor blades are 3D line strokes: they need no
+/// depth fighting on the GPU path and match the Python renderer, which
+/// draws the rotor as lines above the body. `rotor_phase` rotates the main
+/// blades around the mast, so consecutive frames built with an advancing
+/// phase show the spin.
+#[allow(clippy::too_many_lines)]
+fn push_helicopter(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    rotor_phase: f64,
+    color: [u8; 3],
+) {
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.55);
+    // Rounded body: stacked discs read as a hull from the isometric camera
+    // without extra orientation state.
+    push_disc(mesh, x, y, z + 2.0, 10.0, 12, color);
+    push_disc(mesh, x, y, z + 6.0, 8.0, 12, color);
+    // Cockpit canopy on the front (+x) side.
+    push_box(mesh, x + 5.0, y, z + 6.0, 7.0, 7.0, 4.0, [225, 240, 250]);
+    // Tail boom towards -x with an end fin (tail rotor mast).
+    push_box(mesh, x - 13.0, y, z + 4.0, 16.0, 4.0, 3.0, dark);
+    push_box(mesh, x - 20.0, y, z + 4.0, 2.5, 2.5, 9.0, darker);
+    // Skids below the hull.
+    push_box(mesh, x, y - 6.5, z, 16.0, 2.0, 2.0, darker);
+    push_box(mesh, x, y + 6.5, z, 16.0, 2.0, 2.0, darker);
+    // Mast holding the main rotor above the hull.
+    push_box(mesh, x, y, z + 10.0, 2.5, 2.5, 5.0, darker);
+    // Main rotor: two opposite blades rotating with `rotor_phase`, drawn as
+    // bright strokes like in the Python version (`_draw_vehicle`).
+    let rz = z + 15.0;
+    let (c, s) = (rotor_phase.cos(), rotor_phase.sin());
+    let r = 22.0;
+    let blade = [210, 210, 210];
+    push_beam(
+        lines,
+        x - r * c,
+        y - r * s,
+        rz,
+        x + r * c,
+        y + r * s,
+        rz,
+        blade,
+    );
+    // Second blade pair at 90 degrees fakes motion blur of a fast rotor.
+    let faint = [150, 150, 150];
+    push_beam(
+        lines,
+        x - r * s,
+        y + r * c,
+        rz,
+        x + r * s,
+        y - r * c,
+        rz,
+        faint,
+    );
+    // Tail rotor: short vertical stroke spinning on the fin tip. Its phase
+    // runs twice as fast as the main rotor.
+    let t_phase = rotor_phase * 2.0;
+    let (tc, ts) = (t_phase.cos(), t_phase.sin());
+    let tr = 5.0;
+    let (tx, ty, tz) = (x - 20.0, y, z + 13.0);
+    push_beam(
+        lines,
+        tx,
+        ty - tr * tc,
+        tz - tr * ts,
+        tx,
+        ty + tr * tc,
+        tz + tr * ts,
+        blade,
+    );
 }
 
 fn push_ranges(
@@ -963,6 +1042,70 @@ fn push_projectiles(game: &Game, mesh: &mut TriangleSoup) {
 mod tests {
     use super::*;
     use crate::board::Board;
+
+    #[test]
+    fn helicopter_has_body_tail_and_spinning_rotor() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(8, 8);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let (sx, sy) = crate::hexgrid::hex_to_world(3, 3, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            Vec::new(),
+            (sx, sy),
+            None,
+        ));
+        let mut first = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut first);
+        // Opaque hull + tail boom + fin + skids + mast: clearly more than
+        // the old single flat disc (12 triangles = 36 vertices).
+        assert!(
+            first.opaque.vertices.len() > 36,
+            "helicopter body has no details: {} vertices",
+            first.opaque.vertices.len()
+        );
+        // Two main-rotor strokes plus the tail-rotor stroke.
+        assert_eq!(
+            first.lines.len(),
+            3,
+            "rotor/tail lines: {:?}",
+            first.lines.len()
+        );
+        // The rotor sits above the hull.
+        let top_opaque = first
+            .opaque
+            .vertices
+            .iter()
+            .map(|v| v.z as f64)
+            .fold(f64::NEG_INFINITY, f64::max);
+        for (a, b) in first.lines.iter() {
+            assert!(
+                (a.z as f64) >= top_opaque - 5.0,
+                "rotor line below the hull: {} vs {top_opaque}",
+                a.z
+            );
+            let _ = b;
+        }
+        // Advancing the phase rotates the main blade.
+        let mut second = DynamicMesh::default();
+        build_dynamic(&game, 0.7, &mut second);
+        assert_eq!(second.lines.len(), 3);
+        let endpoints = |lines: &[(LineVertex, LineVertex)]| {
+            (lines[0].0.x, lines[0].0.y, lines[0].1.x, lines[0].1.y)
+        };
+        assert_ne!(
+            endpoints(&first.lines),
+            endpoints(&second.lines),
+            "rotor does not spin with the phase"
+        );
+    }
 
     #[test]
     fn range_fills_keep_distinct_alpha_and_stable_lift() {
