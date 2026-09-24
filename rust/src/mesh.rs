@@ -649,14 +649,26 @@ fn push_building(
             }
         }
         BuildingKind::BaseHelicopter => {
-            push_disc(mesh, cx, cy, z, 20.0, 20, dark);
-            push_disc(mesh, cx, cy, z + 1.0, 15.0, 20, color);
+            // Ground pad floats like the flat obstacle markers: coplanar
+            // with the tile top it loses the depth race against terrain.
+            push_disc(mesh, cx, cy, z + constants::OBSTACLE_LIFT, 20.0, 20, dark);
+            push_disc(
+                mesh,
+                cx,
+                cy,
+                z + constants::OBSTACLE_LIFT + 1.0,
+                15.0,
+                20,
+                color,
+            );
         }
         BuildingKind::BaseHovercraft => {
             push_box(mesh, cx, cy, z, 30.0, 20.0, 10.0, color);
         }
         BuildingKind::TurretNormal | BuildingKind::TurretRapid | BuildingKind::TurretRocket => {
-            push_disc(mesh, cx, cy, z, 14.0, 16, dark);
+            // Base ring floats like the flat obstacle markers: coplanar
+            // with the tile top it loses the depth race against terrain.
+            push_disc(mesh, cx, cy, z + constants::OBSTACLE_LIFT, 14.0, 16, dark);
             push_disc(mesh, cx, cy, z + 8.0, 10.0, 14, color);
             let (dx, dy) = match b.last_target_pos {
                 Some((tx, ty)) => {
@@ -812,8 +824,11 @@ fn push_vehicle(
             push_disc(mesh, x, y, z, 10.0, 12, color);
         }
         constants::VehicleKind::Hovercraft => {
-            push_disc(mesh, x, y, z, 13.0, 14, color);
-            push_disc(mesh, x, y, z + 4.0, 7.0, 12, constants::shade(color, 0.7));
+            // Hull sits flat on the ground: lift it like the flat obstacle
+            // markers so it does not z-fight with the tile top.
+            let dz = z + constants::OBSTACLE_LIFT;
+            push_disc(mesh, x, y, dz, 13.0, 14, color);
+            push_disc(mesh, x, y, dz + 4.0, 7.0, 12, constants::shade(color, 0.7));
         }
         constants::VehicleKind::Buffer => {
             push_box(mesh, x, y, z, 16.0, 20.0, 9.0, color);
@@ -1063,6 +1078,36 @@ mod tests {
             .iter()
             .any(|v| (v.z as f64) > top + 1.0);
         assert!(raised, "wall box has no height");
+    }
+
+    #[test]
+    fn flat_building_parts_float_above_terrain() {
+        use crate::entities::{Building, BuildingKind, Player};
+        use crate::game::Game;
+        let mut board = Board::new(10, 10);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let turret = Building::new(BuildingKind::TurretNormal, Some(0), 2, 2, 10.0);
+        let pad = Building::new(BuildingKind::BaseHelicopter, Some(0), 5, 5, 10.0);
+        let game = Game::new(board, vec![Player::new(0, true)], vec![turret, pad], 1);
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        assert!(!dynamic.opaque.vertices.is_empty());
+        // The lowest opaque vertex of the flat parts sits at the shared
+        // lift, not coplanar with the tile top (the 1-px upper pads and
+        // the raised turret dome sit higher by construction).
+        let top = tile_top_z(&game.board, (2, 2));
+        let lowest = dynamic
+            .opaque
+            .vertices
+            .iter()
+            .map(|v| v.z as f64)
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            lowest >= top + constants::OBSTACLE_LIFT - 1e-6,
+            "flat part not lifted: {lowest} vs {top}"
+        );
     }
 
     #[test]
