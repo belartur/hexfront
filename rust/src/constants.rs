@@ -65,6 +65,11 @@ pub const ROCKET_RADIUS: f32 = 5.0;
 pub const PROJECTILE_OUTLINE_WIDTH: f32 = 1.0;
 /// Visual deck thickness; the bridge deck and shadows share one surface.
 pub const BRIDGE_DECK_LIFT: f64 = 5.0 * UNIT_J_TO_PX;
+/// Lift of flat obstacle markers (mines, traps) above the tile top in px:
+/// exactly coplanar discs lose the depth race against the terrain, so they
+/// look faint or vanish (rendering only; obstacles themselves come from
+/// rules.md section 1).
+pub const OBSTACLE_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
 /// Fixed simulation frame rate (specification_rust.md, "Determinism").
 pub const FPS: f64 = 60.0;
 /// Length of one simulation step in seconds.

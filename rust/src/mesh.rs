@@ -559,7 +559,7 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
     }
     for (tile, t) in game.board.tiles.iter() {
         if t.obstacle.is_some() {
-            push_obstacle(game, *tile, &mut out.opaque);
+            push_obstacle(game, *tile, &mut out.opaque, &mut out.lines);
         }
     }
     for v in game.vehicles.iter() {
@@ -690,7 +690,12 @@ fn push_building(
     }
 }
 
-fn push_obstacle(game: &Game, tile: Tile, mesh: &mut TriangleSoup) {
+fn push_obstacle(
+    game: &Game,
+    tile: Tile,
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+) {
     use crate::board::ObstacleKind;
     let t = match game.board.tiles.get(&tile) {
         Some(t) => t,
@@ -701,14 +706,73 @@ fn push_obstacle(game: &Game, tile: Tile, mesh: &mut TriangleSoup) {
         None => return,
     };
     let (cx, cy) = game.board.center_world(tile);
-    let z = t.height as f64 * constants::ELEVATION_PX;
+    // Ramp tiles render their top at the lower end, so anchors (and the
+    // selection overlay in render.rs) use the same helper.
+    let z = tile_top_z(&game.board, tile);
     match o.kind {
         ObstacleKind::Wall => push_box(mesh, cx, cy, z, 30.0, 26.0, 18.0, [120, 100, 80]),
         ObstacleKind::Mine | ObstacleKind::MineWater => {
-            push_disc(mesh, cx, cy, z, 8.0, 10, [40, 40, 40]);
+            // Flat marker floats just above the tile top: a coplanar opaque
+            // disc loses the depth race against the terrain and flickers.
+            let dz = z + constants::OBSTACLE_LIFT;
+            push_disc(mesh, cx, cy, dz, 8.0, 10, [40, 40, 40]);
+            // Distinct centre colour (Python draws a small red disc here):
+            // both diagonals of a small cross, so the marker reads at
+            // every zoom. Lines draw after the opaque pass, so they stay
+            // visible over the base disc.
+            let r = 3.5;
+            push_beam(
+                lines,
+                cx - r,
+                cy - r,
+                dz + 0.1,
+                cx + r,
+                cy + r,
+                dz + 0.1,
+                [200, 60, 50],
+            );
+            push_beam(
+                lines,
+                cx - r,
+                cy + r,
+                dz + 0.1,
+                cx + r,
+                cy - r,
+                dz + 0.1,
+                [200, 60, 50],
+            );
         }
-        ObstacleKind::TrapFire => push_disc(mesh, cx, cy, z, 12.0, 12, [230, 120, 60]),
-        ObstacleKind::TrapIce => push_disc(mesh, cx, cy, z, 12.0, 12, [150, 210, 250]),
+        ObstacleKind::TrapFire => {
+            let dz = z + constants::OBSTACLE_LIFT;
+            push_disc(mesh, cx, cy, dz, 12.0, 12, [230, 120, 60]);
+            // Flame stub above the centre (Python draws a vertical line).
+            push_beam(lines, cx, cy, dz, cx, cy, dz + 10.0, [250, 170, 60]);
+        }
+        ObstacleKind::TrapIce => {
+            let dz = z + constants::OBSTACLE_LIFT;
+            push_disc(mesh, cx, cy, dz, 12.0, 12, [150, 210, 250]);
+            // Two pale slashes across the disc (Python draws two lines).
+            push_beam(
+                lines,
+                cx - 8.0,
+                cy - 4.0,
+                dz + 0.1,
+                cx + 8.0,
+                cy + 4.0,
+                dz + 0.1,
+                [240, 250, 255],
+            );
+            push_beam(
+                lines,
+                cx + 4.0,
+                cy + 6.0,
+                dz + 0.1,
+                cx - 4.0,
+                cy - 6.0,
+                dz + 0.1,
+                [240, 250, 255],
+            );
+        }
     }
 }
 
@@ -942,6 +1006,63 @@ mod tests {
             }
         }
         assert!(turret_ring);
+    }
+
+    #[test]
+    fn obstacles_float_above_terrain_with_details() {
+        use crate::board::Obstacle;
+        use crate::board::ObstacleKind;
+        use crate::entities::Player;
+        use crate::game::Game;
+        let kinds = [
+            ObstacleKind::Mine,
+            ObstacleKind::TrapFire,
+            ObstacleKind::TrapIce,
+        ];
+        for (i, kind) in kinds.iter().enumerate() {
+            let mut board = Board::new(8, 8);
+            let tile = (2 + i as i32, 2);
+            for t in board.tiles.clone().keys() {
+                board.tiles.get_mut(t).unwrap().height = 1;
+            }
+            board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(*kind));
+            let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+            let mut dynamic = DynamicMesh::default();
+            build_dynamic(&game, 0.0, &mut dynamic);
+            let top = tile_top_z(&game.board, tile);
+            assert!(
+                !dynamic.opaque.vertices.is_empty(),
+                "{kind:?} has no opaque marker"
+            );
+            for v in dynamic.opaque.vertices.iter() {
+                assert!(
+                    (v.z as f64) >= top + constants::OBSTACLE_LIFT - 1e-6,
+                    "{kind:?} marker not lifted: {} vs {top}",
+                    v.z
+                );
+            }
+            // Every flat marker carries detail lines (red mine cross, flame
+            // stub, ice slashes), so the kind reads even at small zoom.
+            assert!(!dynamic.lines.is_empty(), "{kind:?} has no detail lines");
+            dynamic.clear();
+        }
+        // A wall stays a raised box anchored at the tile top (no lift).
+        let mut board = Board::new(8, 8);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let tile = (2, 2);
+        board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Wall));
+        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        let top = tile_top_z(&game.board, tile);
+        let raised = dynamic
+            .opaque
+            .vertices
+            .iter()
+            .any(|v| (v.z as f64) > top + 1.0);
+        assert!(raised, "wall box has no height");
     }
 
     #[test]
