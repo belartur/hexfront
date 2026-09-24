@@ -587,6 +587,102 @@ pub fn push_oriented_box(
     push_quad(mesh, q[0], q[1], q[2], q[3]);
 }
 
+/// Vertical truncated cone: a faceted side wall closed by a flat top disc.
+///
+/// Stacked flat discs are enough for a helicopter hull seen from above, but
+/// a turret has to read as one solid volume: the side quads close the space
+/// between the base ring and the roof, so no terrain shows through while the
+/// turret rotates. Alternating facet shades fake a curved surface with two
+/// flat colours, like every other part of the scene.
+#[allow(clippy::too_many_arguments)]
+pub fn push_cylinder(
+    mesh: &mut TriangleSoup,
+    x: f64,
+    y: f64,
+    z: f64,
+    r0: f64,
+    r1: f64,
+    h: f64,
+    n: usize,
+    color: [u8; 3],
+) {
+    let facets = [constants::shade(color, 0.8), constants::shade(color, 0.65)];
+    for i in 0..n {
+        let a0 = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+        let a1 = 2.0 * std::f64::consts::PI * (i + 1) as f64 / n as f64;
+        let c = facets[i % 2];
+        let b0 = vert(x + r0 * a0.cos(), y + r0 * a0.sin(), z, c);
+        let b1 = vert(x + r0 * a1.cos(), y + r0 * a1.sin(), z, c);
+        let t0 = vert(x + r1 * a0.cos(), y + r1 * a0.sin(), z + h, c);
+        let t1 = vert(x + r1 * a1.cos(), y + r1 * a1.sin(), z + h, c);
+        push_quad(mesh, b0, b1, t1, t0);
+    }
+    push_disc(mesh, x, y, z + h, r1, n, constants::shade(color, 1.0));
+}
+
+/// Oriented wedge: a `len` x `wid` rectangle on base `z` whose top face
+/// tilts from `h_back` at its rear edge down to `h_front` at its front edge.
+///
+/// Both the top face and all four sides are filled, so the wedge reads as a
+/// solid sloped plate (the tank's glacis) from any heading.
+#[allow(clippy::too_many_arguments)]
+pub fn push_oriented_slope(
+    mesh: &mut TriangleSoup,
+    cx: f64,
+    cy: f64,
+    z: f64,
+    len: f64,
+    wid: f64,
+    h_back: f64,
+    h_front: f64,
+    fx: f64,
+    fy: f64,
+    color: [u8; 3],
+) {
+    let (px, py) = (-fy, fx);
+    let corner = |along: f64, across: f64, zz: f64, c: [u8; 3]| {
+        vert(
+            cx + fx * along + px * across,
+            cy + fy * along + py * across,
+            zz,
+            c,
+        )
+    };
+    let (hl, hw) = (len / 2.0, wid / 2.0);
+    let top = constants::shade(color, 1.0);
+    let b0 = corner(-hl, -hw, z, color);
+    let b1 = corner(hl, -hw, z, color);
+    let b2 = corner(hl, hw, z, color);
+    let b3 = corner(-hl, hw, z, color);
+    let t0 = corner(-hl, -hw, z + h_back, top);
+    let t1 = corner(hl, -hw, z + h_front, top);
+    let t2 = corner(hl, hw, z + h_front, top);
+    let t3 = corner(-hl, hw, z + h_back, top);
+    push_quad(mesh, t0, t1, t2, t3);
+    let side_a = constants::shade(color, 0.85);
+    let side_b = constants::shade(color, 0.7);
+    let mut q = [b0, b1, t1, t0];
+    for v in q.iter_mut() {
+        v.color = side_a;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+    let mut q = [b2, b3, t3, t2];
+    for v in q.iter_mut() {
+        v.color = side_a;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+    let mut q = [b1, b2, t2, t1];
+    for v in q.iter_mut() {
+        v.color = side_b;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+    let mut q = [b3, b0, t0, t3];
+    for v in q.iter_mut() {
+        v.color = side_b;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+}
+
 /// Flight heading of a vehicle as a unit `(fx, fy)` vector in world space.
 ///
 /// Points at the next route waypoint; when the vehicle has nowhere to go
@@ -629,6 +725,39 @@ fn vehicle_heading(game: &Game, v: &crate::entities::Vehicle) -> (f64, f64) {
         }
     }
     (1.0, 0.0)
+}
+
+/// Aim direction of a tank turret as a unit `(ax, ay)` vector in world space.
+///
+/// The gun points at whatever the tank is currently shooting: the enemy
+/// vehicle of its duel (rules.md section 9) or, when no duel is running, the
+/// wall it shells on its way (section 4). With no target at all the turret
+/// stays aligned with `heading` -- the chassis direction from
+/// [`vehicle_heading`] -- so a marching column keeps its barrels forward.
+/// `heading` is passed in because the caller needs it for the chassis too.
+fn tank_aim(game: &Game, v: &crate::entities::Vehicle, heading: (f64, f64)) -> (f64, f64) {
+    let aim_at = |tx: f64, ty: f64| {
+        let (dx, dy) = (tx - v.x, ty - v.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 1e-6 {
+            Some((dx / len, dy / len))
+        } else {
+            None
+        }
+    };
+    if let Some(tid) = v.combat_target
+        && let Some(enemy) = game.vehicles.iter().find(|x| x.id == tid && !x.dead)
+        && let Some(dir) = aim_at(enemy.x, enemy.y)
+    {
+        return dir;
+    }
+    if let Some(tile) = v.wall_target {
+        let (wx, wy) = game.board.center_world(tile);
+        if let Some(dir) = aim_at(wx, wy) {
+            return dir;
+        }
+    }
+    heading
 }
 
 /// Thick 3D segment as a camera-facing box strip (grid-free strokes).
@@ -914,19 +1043,7 @@ fn push_vehicle(
     let z = vehicle_z(game, v);
     let (x, y) = (v.x, v.y);
     match v.kind {
-        constants::VehicleKind::Tank => {
-            push_box(mesh, x, y, z, 16.0, 22.0, 9.0, color);
-            push_box(
-                mesh,
-                x,
-                y,
-                z + 9.0,
-                10.0,
-                10.0,
-                5.0,
-                constants::shade(color, 0.7),
-            );
-        }
+        constants::VehicleKind::Tank => push_tank(game, v, mesh, lines, x, y, z, color),
         constants::VehicleKind::Helicopter => {
             push_helicopter(game, v, mesh, lines, x, y, z, rotor_phase, color);
         }
@@ -938,7 +1055,13 @@ fn push_vehicle(
             push_disc(mesh, x, y, dz + 4.0, 7.0, 12, constants::shade(color, 0.7));
         }
         constants::VehicleKind::Buffer => {
-            push_box(mesh, x, y, z, 16.0, 20.0, 9.0, color);
+            // Same chassis as a tank (rules.md section 5.4: a buffer drives
+            // exactly like one) without a gun: the green healing cross the
+            // base uses marks it as the support vehicle instead.
+            let (fx, fy) = vehicle_heading(game, v);
+            // `deck_top` is already absolute (it includes the vehicle's `z`).
+            let deck_top = push_tank_chassis(mesh, lines, x, y, z, color, fx, fy);
+            push_cross(mesh, lines, x, y, deck_top + 4.0, [130, 235, 140]);
         }
     }
 }
@@ -1098,6 +1221,311 @@ fn push_helicopter_oriented(
         ty + tr * tc,
         tz + tr * ts,
         blade,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tank rendering (rules.md section 5.1; every value is a rendering-only size
+// in px, exactly like the other mesh dimensions -- colours come from the
+// owning player, not from here).
+// ---------------------------------------------------------------------------
+
+/// Length of the tank hull along its heading in px.
+const TANK_HULL_LEN: f64 = 22.0;
+/// Width of the tank hull across its heading in px.
+const TANK_HULL_WID: f64 = 13.0;
+/// Height of the lower hull box in px.
+const TANK_HULL_H: f64 = 5.0;
+/// Ground clearance of the hull bottom in px (the tracks touch the ground).
+const TANK_HULL_LIFT: f64 = 1.0;
+/// Length of the upper deck box in px.
+const TANK_DECK_LEN: f64 = 15.0;
+/// Width of the upper deck box in px.
+const TANK_DECK_WID: f64 = 10.0;
+/// Height of the upper deck box in px (it sits on the lower hull).
+const TANK_DECK_H: f64 = 3.0;
+/// Rearward shift of the deck centre in px (the glacis eats the front).
+const TANK_DECK_SHIFT: f64 = -1.0;
+/// Height of the glacis lip at its front edge in px (just above the hull).
+const TANK_GLACIS_LIP: f64 = 0.5;
+/// Length of one track in px (it overhangs the hull front and rear).
+const TANK_TRACK_LEN: f64 = 26.0;
+/// Width of one track in px.
+const TANK_TRACK_WID: f64 = 4.5;
+/// Height of one track in px (deliberately taller than the lower hull).
+const TANK_TRACK_H: f64 = 6.0;
+/// Distance of each track centre from the hull centre line in px.
+const TANK_TRACK_OFFSET: f64 = 6.5;
+/// Tread strokes painted across the top of each track.
+const TANK_TREAD_MARKS: usize = 4;
+/// Base radius of the rotating turret body in px.
+const TANK_TURRET_R: f64 = 7.5;
+/// Roof radius of the turret body in px (slightly tapered).
+const TANK_TURRET_TOP_R: f64 = 6.5;
+/// Height of the turret body in px.
+const TANK_TURRET_H: f64 = 4.5;
+/// Facets of the turret cylinder (low-poly, flat-shaded look).
+const TANK_TURRET_SEGMENTS: usize = 8;
+/// Radius of the commander cupola in px.
+const TANK_CUPOLA_R: f64 = 2.6;
+/// Roof radius of the commander cupola in px.
+const TANK_CUPOLA_TOP_R: f64 = 2.2;
+/// Height of the commander cupola in px.
+const TANK_CUPOLA_H: f64 = 2.0;
+/// Offset of the cupola towards the turret rear in px.
+const TANK_CUPOLA_SHIFT: f64 = -2.5;
+/// Facets of the cupola cylinder.
+const TANK_CUPOLA_SEGMENTS: usize = 6;
+/// Length of the rear turret bustle (stowage) box in px.
+const TANK_BUSTLE_LEN: f64 = 5.0;
+/// Width of the rear turret bustle box in px.
+const TANK_BUSTLE_WID: f64 = 8.0;
+/// Height of the rear turret bustle box in px.
+const TANK_BUSTLE_H: f64 = 2.5;
+/// Distance from the turret centre where the barrel starts in px; the rear
+/// end hides inside the turret, so no gap opens when the turret rotates.
+const TANK_BARREL_GAP: f64 = 3.0;
+/// Length of the gun barrel in px.
+const TANK_BARREL_LEN: f64 = 18.0;
+/// Width of the gun barrel in px.
+const TANK_BARREL_WID: f64 = 3.0;
+/// Height of the gun barrel in px.
+const TANK_BARREL_H: f64 = 3.0;
+/// Height of the barrel axis above the turret base in px.
+const TANK_BARREL_LIFT: f64 = 1.4;
+/// Length of the muzzle brake at the barrel tip in px.
+const TANK_MUZZLE_LEN: f64 = 3.5;
+/// Width of the muzzle brake in px.
+const TANK_MUZZLE_WID: f64 = 5.0;
+/// Height of the muzzle brake in px.
+const TANK_MUZZLE_H: f64 = 3.6;
+/// Height of the whip antenna stroke above the turret roof in px.
+const TANK_ANTENNA_H: f64 = 8.0;
+/// Reach of the barrel tip from the vehicle centre in px (derived: barrel
+/// gap + barrel length + muzzle length).
+const TANK_BARREL_REACH: f64 = TANK_BARREL_GAP + TANK_BARREL_LEN + TANK_MUZZLE_LEN;
+
+/// Chassis shared by tanks and buffers (rules.md sections 5.1 and 5.4: a
+/// buffer drives exactly like a tank, only its gun is replaced by the
+/// healing gear the caller adds on top).
+///
+/// Draws two tracks with tread strokes, the lower hull, the upper deck and
+/// the sloped glacis plate, all rotated into the chassis heading `(fx, fy)`.
+/// Returns the rendered elevation of the deck, i.e. the surface the turret
+/// (or the buffer's cross) stands on.
+#[allow(clippy::too_many_arguments)]
+fn push_tank_chassis(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    color: [u8; 3],
+    fx: f64,
+    fy: f64,
+) -> f64 {
+    let (px, py) = (-fy, fx);
+    let dark = constants::shade(color, 0.7);
+    let tread = constants::shade(color, 0.35);
+    for side in [-1.0, 1.0] {
+        let ox = x + px * side * TANK_TRACK_OFFSET;
+        let oy = y + py * side * TANK_TRACK_OFFSET;
+        push_oriented_box(
+            mesh,
+            ox,
+            oy,
+            z,
+            TANK_TRACK_LEN,
+            TANK_TRACK_WID,
+            TANK_TRACK_H,
+            fx,
+            fy,
+            constants::shade(color, 0.5),
+        );
+        // Tread strokes lie across the track top, clear of both ends.
+        let hw = TANK_TRACK_WID / 2.0;
+        for k in 0..TANK_TREAD_MARKS {
+            let along =
+                ((k as f64 + 0.5) / TANK_TREAD_MARKS as f64 * 2.0 - 1.0) * TANK_TRACK_LEN * 0.36;
+            push_beam(
+                lines,
+                ox + fx * along - px * side * hw,
+                oy + fy * along - py * side * hw,
+                z + TANK_TRACK_H + 0.15,
+                ox + fx * along + px * side * hw,
+                oy + fy * along + py * side * hw,
+                z + TANK_TRACK_H + 0.15,
+                tread,
+            );
+        }
+    }
+    let hull_z = z + TANK_HULL_LIFT;
+    push_oriented_box(
+        mesh,
+        x,
+        y,
+        hull_z,
+        TANK_HULL_LEN,
+        TANK_HULL_WID,
+        TANK_HULL_H,
+        fx,
+        fy,
+        color,
+    );
+    let hull_top = hull_z + TANK_HULL_H;
+    push_oriented_box(
+        mesh,
+        x + fx * TANK_DECK_SHIFT,
+        y + fy * TANK_DECK_SHIFT,
+        hull_top,
+        TANK_DECK_LEN,
+        TANK_DECK_WID,
+        TANK_DECK_H,
+        fx,
+        fy,
+        dark,
+    );
+    // Sloped glacis joining the hull front edge with the deck front edge.
+    let hull_front = TANK_HULL_LEN / 2.0;
+    let deck_front = TANK_DECK_SHIFT + TANK_DECK_LEN / 2.0;
+    push_oriented_slope(
+        mesh,
+        x + fx * ((hull_front + deck_front) / 2.0),
+        y + fy * ((hull_front + deck_front) / 2.0),
+        hull_top,
+        (hull_front - deck_front).max(0.5),
+        TANK_HULL_WID,
+        TANK_DECK_H,
+        TANK_GLACIS_LIP,
+        fx,
+        fy,
+        color,
+    );
+    hull_top + TANK_DECK_H
+}
+
+/// Detailed tank (rules.md section 5.1): the shared chassis plus a faceted
+/// turret, a commander cupola, a rear bustle, a whip antenna and a gun
+/// barrel that follows the current target.
+///
+/// The chassis turns with the travel heading while the turret and its barrel
+/// turn independently towards the aim direction (see [`tank_aim`]), so a tank
+/// driving north and fighting an enemy to the east shows its hull side-on
+/// with the gun trained east.
+#[allow(clippy::too_many_arguments)]
+fn push_tank(
+    game: &Game,
+    v: &crate::entities::Vehicle,
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    color: [u8; 3],
+) {
+    let (fx, fy) = vehicle_heading(game, v);
+    let (ax, ay) = tank_aim(game, v, (fx, fy));
+    push_tank_oriented(mesh, lines, x, y, z, color, fx, fy, ax, ay);
+}
+
+/// Tank parts in an explicit chassis/aim frame (unit tests drive this).
+#[allow(clippy::too_many_arguments)]
+fn push_tank_oriented(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    color: [u8; 3],
+    fx: f64,
+    fy: f64,
+    ax: f64,
+    ay: f64,
+) {
+    let deck_top = push_tank_chassis(mesh, lines, x, y, z, color, fx, fy);
+    let (tx, ty) = (-ay, ax);
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.5);
+    // Turret: one solid faceted cylinder, so the roof keeps a clean outline
+    // while the gun swings around it.
+    push_cylinder(
+        mesh,
+        x,
+        y,
+        deck_top,
+        TANK_TURRET_R,
+        TANK_TURRET_TOP_R,
+        TANK_TURRET_H,
+        TANK_TURRET_SEGMENTS,
+        color,
+    );
+    let turret_top = deck_top + TANK_TURRET_H;
+    // Rear bustle plus a cupola offset to the same side: both rotate with
+    // the gun, so the turret never looks symmetric.
+    let bustle_back = TANK_TURRET_TOP_R + TANK_BUSTLE_LEN / 2.0 - 1.0;
+    push_oriented_box(
+        mesh,
+        x - ax * bustle_back,
+        y - ay * bustle_back,
+        deck_top + 0.8,
+        TANK_BUSTLE_LEN,
+        TANK_BUSTLE_WID,
+        TANK_BUSTLE_H,
+        ax,
+        ay,
+        dark,
+    );
+    push_cylinder(
+        mesh,
+        x + ax * TANK_CUPOLA_SHIFT,
+        y + ay * TANK_CUPOLA_SHIFT,
+        turret_top,
+        TANK_CUPOLA_R,
+        TANK_CUPOLA_TOP_R,
+        TANK_CUPOLA_H,
+        TANK_CUPOLA_SEGMENTS,
+        dark,
+    );
+    // Whip antenna on the turret roof, drawn as a stroke like the
+    // helicopter rotor: thin parts need no depth fighting on the GPU path.
+    push_beam(
+        lines,
+        x - ax * 4.5 + tx * 3.0,
+        y - ay * 4.5 + ty * 3.0,
+        turret_top,
+        x - ax * 4.5 + tx * 3.0,
+        y - ay * 4.5 + ty * 3.0,
+        turret_top + TANK_ANTENNA_H,
+        darker,
+    );
+    // Gun: the barrel starts inside the turret (so no gap opens at any
+    // turret angle) and ends with a wider muzzle brake.
+    let barrel_z = deck_top + TANK_BARREL_LIFT;
+    let barrel_mid = TANK_BARREL_GAP + TANK_BARREL_LEN / 2.0;
+    push_oriented_box(
+        mesh,
+        x + ax * barrel_mid,
+        y + ay * barrel_mid,
+        barrel_z,
+        TANK_BARREL_LEN,
+        TANK_BARREL_WID,
+        TANK_BARREL_H,
+        ax,
+        ay,
+        dark,
+    );
+    let muzzle_mid = TANK_BARREL_REACH - TANK_MUZZLE_LEN / 2.0;
+    push_oriented_box(
+        mesh,
+        x + ax * muzzle_mid,
+        y + ay * muzzle_mid,
+        barrel_z - 0.3,
+        TANK_MUZZLE_LEN,
+        TANK_MUZZLE_WID,
+        TANK_MUZZLE_H,
+        ax,
+        ay,
+        darker,
     );
 }
 
@@ -1351,6 +1779,227 @@ mod tests {
         assert!(
             (ccx - tmx) * fx + (ccy - tmy) * fy > 15.0,
             "cockpit not ahead of tail"
+        );
+    }
+
+    #[test]
+    fn tank_gun_trains_on_the_fought_enemy() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(12, 12);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        // Tank driving north, enemy to the east: the chassis must keep
+        // facing north while the gun turns east onto the duel target.
+        let start = (3, 6);
+        let north = (3, 5);
+        let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
+        let mut game = Game::new(
+            board,
+            vec![Player::new(0, true), Player::new(1, false)],
+            Vec::new(),
+            1,
+        );
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            30.0,
+            vec![north],
+            (sx, sy),
+            Some(start),
+        ));
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            1,
+            30.0,
+            Vec::new(),
+            (sx + 120.0, sy),
+            None,
+        ));
+        game.vehicles[0].combat_target = Some(game.vehicles[1].id);
+        let (vx, vy) = (game.vehicles[0].x, game.vehicles[0].y);
+        let (fx, fy) = super::vehicle_heading(&game, &game.vehicles[0]);
+        assert!(fx.abs() < 1e-9 && fy < -0.999, "chassis heading {fx},{fy}");
+        let (ax, ay) = super::tank_aim(&game, &game.vehicles[0], (fx, fy));
+        assert!(ax > 0.999 && ay.abs() < 1e-9, "gun aim {ax},{ay}");
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        // Keep only the parts of the first tank: the enemy sits 120 px away
+        // and its own barrel stays outside this radius.
+        let (mut along_gun, mut across_gun) = (f64::NEG_INFINITY, 0.0f64);
+        for vtx in dynamic.opaque.vertices.iter() {
+            let (dx, dy) = (f64::from(vtx.x) - vx, f64::from(vtx.y) - vy);
+            if dx * dx + dy * dy > 60.0 * 60.0 {
+                continue;
+            }
+            along_gun = along_gun.max(dx * ax + dy * ay);
+            across_gun = across_gun.max((dx * -ay + dy * ax).abs());
+        }
+        // The muzzle brake ends TANK_BARREL_REACH along the gun axis...
+        assert!(
+            (along_gun - super::TANK_BARREL_REACH).abs() < 0.05,
+            "barrel reach {along_gun} vs {}",
+            super::TANK_BARREL_REACH
+        );
+        // ...while the chassis runs across it: the 26 px long tracks stay
+        // perpendicular to the barrel, so the hull is seen side-on.
+        assert!(
+            across_gun > 12.5,
+            "chassis did not follow the travel heading: {across_gun}"
+        );
+    }
+
+    #[test]
+    fn tank_gun_follows_walls_and_travel_heading() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(12, 12);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let start = (3, 6);
+        let north = (3, 5);
+        let wall_tile = (6, 6);
+        let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            30.0,
+            vec![north],
+            (sx, sy),
+            Some(start),
+        ));
+        let heading = (0.0, -1.0);
+        // Nothing in range: the gun rests along the chassis heading.
+        let (ax, ay) = super::tank_aim(&game, &game.vehicles[0], heading);
+        assert_eq!((ax, ay), heading);
+        // Shelling a wall (rules.md section 4): the gun turns onto it.
+        game.vehicles[0].wall_target = Some(wall_tile);
+        let (wx, wy) = game.board.center_world(wall_tile);
+        let (vx, vy) = (game.vehicles[0].x, game.vehicles[0].y);
+        let (dx, dy) = (wx - vx, wy - vy);
+        let len = (dx * dx + dy * dy).sqrt();
+        let (ax, ay) = super::tank_aim(&game, &game.vehicles[0], heading);
+        assert!(
+            (ax - dx / len).abs() < 1e-9 && (ay - dy / len).abs() < 1e-9,
+            "wall aim {ax},{ay} vs {dx},{dy}"
+        );
+        assert!(ax > 0.5, "gun did not turn east onto the wall: {ax}");
+    }
+
+    #[test]
+    fn tank_parts_stack_on_the_chassis_with_details() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(10, 10);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let (sx, sy) = hexgrid::hex_to_world(4, 4, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            30.0,
+            Vec::new(),
+            (sx, sy),
+            None,
+        ));
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        // Chassis (two tracks, hull, deck, glacis) plus turret, cupola,
+        // bustle, barrel and muzzle brake: far more than the two plain
+        // boxes the tank used to be (36 vertices).
+        assert!(
+            dynamic.opaque.vertices.len() > 240,
+            "tank lost its details: {} vertices",
+            dynamic.opaque.vertices.len()
+        );
+        // One tread stroke per mark on each track, plus the whip antenna.
+        assert_eq!(
+            dynamic.lines.len(),
+            2 * super::TANK_TREAD_MARKS + 1,
+            "tread/antenna strokes: {}",
+            dynamic.lines.len()
+        );
+        // The cupola roof is the highest opaque point: turret on the deck,
+        // cupola on the turret roof, all above the ground the tank stands on.
+        let ground = vehicle_ground_z(&game, sx, sy);
+        let top = dynamic
+            .opaque
+            .vertices
+            .iter()
+            .map(|v| f64::from(v.z))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let roof = ground
+            + super::TANK_HULL_LIFT
+            + super::TANK_HULL_H
+            + super::TANK_DECK_H
+            + super::TANK_TURRET_H
+            + super::TANK_CUPOLA_H;
+        assert!((top - roof).abs() < 0.05, "roof {top} vs {roof}");
+        // The tracks stick out past the hull, so the chassis is wider than
+        // the deck and the tank does not read as one flat block.
+        let mut wide = 0.0f64;
+        for vtx in dynamic.opaque.vertices.iter() {
+            wide = wide.max((f64::from(vtx.x) - sx).abs());
+        }
+        assert!(
+            wide > super::TANK_HULL_LEN / 2.0,
+            "tracks do not overhang the hull: {wide}"
+        );
+    }
+
+    #[test]
+    fn buffer_shares_the_tank_chassis_without_a_gun() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(10, 10);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let (sx, sy) = hexgrid::hex_to_world(4, 4, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Buffer,
+            0,
+            30.0,
+            Vec::new(),
+            (sx, sy),
+            None,
+        ));
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        // The healing cross (rules.md section 5.4) marks the support role
+        // and floats where a tank's turret would be, not above the whole
+        // vehicle twice over.
+        let cross_z = dynamic
+            .lines
+            .iter()
+            .find(|(a, _)| a.color[..3] == [130, 235, 140])
+            .map(|(a, _)| f64::from(a.z))
+            .expect("buffer has no healing cross");
+        let ground = vehicle_ground_z(&game, sx, sy);
+        let expected =
+            ground + super::TANK_HULL_LIFT + super::TANK_HULL_H + super::TANK_DECK_H + 4.0;
+        assert!(
+            (cross_z - expected).abs() < 0.05,
+            "cross at {cross_z}, expected {expected}"
+        );
+        // No gun: nothing reaches past the chassis, unlike a tank barrel.
+        let mut reach = 0.0f64;
+        for vtx in dynamic.opaque.vertices.iter() {
+            reach = reach.max((f64::from(vtx.x) - sx).abs());
+        }
+        assert!(
+            reach < super::TANK_BARREL_REACH - 5.0,
+            "buffer grew a barrel: {reach}"
         );
     }
 
