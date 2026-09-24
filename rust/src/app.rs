@@ -527,11 +527,28 @@ impl Application {
                 );
             }
             if crate::entities::is_base(b.kind) && b.owner.is_some() && b.units < b.capacity {
-                // Spawn ring progress.
-                let frac =
-                    (b.production_timer / constants::BASE_SPAWN_INTERVAL).clamp(0.0, 1.0) as f32;
-                draw_circle_lines(cx, cy, r + 4.0, 2.0, Color::new(1.0, 1.0, 1.0, 0.25));
-                draw_arc(cx, cy, 12, r + 4.0, 0.0, 360.0 * frac, 3.0, WHITE);
+                // Spawn progress ring (specification.md graphics): a base
+                // shows a thin white arc completing one full circle over
+                // the spawn interval, exactly like the Python badge.
+                let frac = (b.production_timer / constants::BASE_SPAWN_INTERVAL).clamp(0.0, 1.0);
+                if frac > 0.0 {
+                    let segs = ((frac * 24.0).ceil() as u8).max(1);
+                    // macroquad draws the arc from `rotation` to
+                    // `rotation + arc`; the call below used to pass the
+                    // thickness and the sweep swapped, which drew a fat
+                    // short bar instead of a thin ring (the "horizontal
+                    // tick" next to bases).
+                    draw_arc(
+                        cx,
+                        cy,
+                        segs,
+                        r + 4.0,
+                        -90.0,
+                        2.0,
+                        360.0 * frac as f32,
+                        WHITE,
+                    );
+                }
             }
         }
         for v in game.vehicles.iter() {

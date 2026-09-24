@@ -130,8 +130,15 @@ impl Renderer {
             }
         }
         draw_soup(&dynamic.opaque.vertices, &dynamic.opaque.indices);
-        // Translucent range discs: no depth write, depth test on.
-        draw_soup_alpha(&dynamic.translucent.vertices, &dynamic.translucent.indices);
+        // Translucent range discs: one draw call per fill kind (white
+        // turret vs. light-green heal), so overlapping fills of the same
+        // kind share one depth value per disc and blend in a stable order
+        // (specification_rust.md pass order); no depth write, depth test on.
+        draw_range_soup(
+            &dynamic.range_turret.vertices,
+            &dynamic.range_turret.indices,
+        );
+        draw_range_soup(&dynamic.range_heal.vertices, &dynamic.range_heal.indices);
         // 3D strokes (range rings, routes, details).
         {
             let mut verts: Vec<macroquad::models::Vertex> =
@@ -139,8 +146,8 @@ impl Renderer {
             let mut idx: Vec<u16> = Vec::with_capacity(dynamic.lines.len() * 2);
             for (a, b) in dynamic.lines.iter() {
                 let base = verts.len() as u16;
-                verts.push(mq_vertex(a));
-                verts.push(mq_vertex(b));
+                verts.push(mq_line_vertex(a));
+                verts.push(mq_line_vertex(b));
                 idx.push(base);
                 idx.push(base + 1);
             }
@@ -207,7 +214,12 @@ fn draw_line_mesh(mesh: &macroquad::models::Mesh) {
         if pair.len() < 2 {
             break;
         }
-        let color = mq::Color::from_rgba(pair[0].color[0], pair[0].color[1], pair[0].color[2], 255);
+        let color = mq::Color::from_rgba(
+            pair[0].color[0],
+            pair[0].color[1],
+            pair[0].color[2],
+            pair[0].color[3],
+        );
         mq::draw_line_3d(pair[0].position, pair[1].position, color);
     }
 }
@@ -218,6 +230,26 @@ fn mq_vertex(v: &crate::mesh::GpuVertex) -> macroquad::models::Vertex {
         position: macroquad::prelude::glam::vec3(v.x, v.y, v.z),
         uv: macroquad::prelude::glam::vec2(0.0, 0.0),
         color: [v.color[0], v.color[1], v.color[2], 255],
+        normal: macroquad::prelude::glam::vec4(0.0, 0.0, 0.0, 0.0),
+    }
+}
+
+/// Convert one translucent range vertex (carries its own alpha).
+fn mq_range_vertex(v: &crate::mesh::RangeVertex) -> macroquad::models::Vertex {
+    macroquad::models::Vertex {
+        position: macroquad::prelude::glam::vec3(v.x, v.y, v.z),
+        uv: macroquad::prelude::glam::vec2(0.0, 0.0),
+        color: [v.color[0], v.color[1], v.color[2], v.color[3]],
+        normal: macroquad::prelude::glam::vec4(0.0, 0.0, 0.0, 0.0),
+    }
+}
+
+/// Convert one 3D line endpoint (carries its own alpha).
+fn mq_line_vertex(v: &crate::mesh::LineVertex) -> macroquad::models::Vertex {
+    macroquad::models::Vertex {
+        position: macroquad::prelude::glam::vec3(v.x, v.y, v.z),
+        uv: macroquad::prelude::glam::vec2(0.0, 0.0),
+        color: [v.color[0], v.color[1], v.color[2], v.color[3]],
         normal: macroquad::prelude::glam::vec4(0.0, 0.0, 0.0, 0.0),
     }
 }
@@ -251,17 +283,22 @@ fn draw_soup(vertices: &[crate::mesh::GpuVertex], indices: &[u16]) {
     }
 }
 
-/// Draw one triangle soup with alpha blending (range discs).
-fn draw_soup_alpha(vertices: &[crate::mesh::GpuVertex], indices: &[u16]) {
+/// Draw one range soup with its own per-vertex alpha.
+///
+/// Turret fills and heal fills use separate draw calls (white vs.
+/// light-green transparency from the Python version); inside one kind
+/// every disc sits at a deterministic index-based lift, so coplanar
+/// blends no longer flicker while panning. Lines of one call always
+/// share one depth value, which keeps macroquad's draw batching from
+/// splitting the batch by depth (draw_line_3d state).
+fn draw_range_soup(vertices: &[crate::mesh::RangeVertex], indices: &[u16]) {
     use macroquad::prelude as mq;
     let mut vi = 0;
     while vi < vertices.len() {
         let vend = (vi + DRAW_BATCH_VERTICES).min(vertices.len());
         let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(vend - vi);
         for v in &vertices[vi..vend] {
-            let mut w = mq_vertex(v);
-            w.color[3] = crate::constants::RANGE_FILL_ALPHA;
-            verts.push(w);
+            verts.push(mq_range_vertex(v));
         }
         let mut idx: Vec<u16> = Vec::with_capacity(vend - vi);
         for i in 0..(vend - vi) {
@@ -292,8 +329,12 @@ fn chunked_lines(vertices: &[macroquad::models::Vertex], indices: &[u16]) {
             }
             let a = pair[0].position;
             let b = pair[1].position;
-            let col =
-                mq::Color::from_rgba(pair[0].color[0], pair[0].color[1], pair[0].color[2], 255);
+            let col = mq::Color::from_rgba(
+                pair[0].color[0],
+                pair[0].color[1],
+                pair[0].color[2],
+                pair[0].color[3],
+            );
             mq::draw_line_3d(a, b, col);
         }
         vi = vend;

@@ -237,8 +237,14 @@ pub const PLAYER_COLORS: [[u8; 3]; 4] = [
 ];
 /// Colour of objects that belong to no player.
 pub const NEUTRAL_COLOR: [u8; 3] = [165, 165, 165];
-/// Alpha of translucent range discs on the GPU path (fills share one value).
-pub const RANGE_FILL_ALPHA: u8 = 70;
+/// Alpha of a white turret range fill on the GPU path (specification.md,
+/// graphics: ranges are mostly transparent; matches the Python fill).
+pub const RANGE_TURRET_FILL_ALPHA: u8 = 42;
+/// Alpha of a light-green heal range fill (matches the Python fill).
+pub const RANGE_HEAL_FILL_ALPHA: u8 = 46;
+/// Alpha of range outlines (same hue as the fill but clearly less
+/// transparent, so an outline stays readable over other fills).
+pub const RANGE_OUTLINE_ALPHA: u8 = 130;
 #[allow(dead_code)]
 /// Route line colour of moving vehicles.
 pub const PATH_COLOR: [u8; 3] = [255, 255, 255];

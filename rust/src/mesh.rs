@@ -25,6 +25,48 @@ pub struct GpuVertex {
     pub color: [u8; 3],
 }
 
+/// One translucent range vertex: world position plus RGBA colour.
+///
+/// Range fills (and only they) carry their own alpha, so white turret
+/// fills and light-green heal fills keep the distinct transparencies
+/// from the Python version instead of sharing one value.
+#[derive(Clone, Copy, Debug)]
+pub struct RangeVertex {
+    /// World x in distance units (j).
+    pub x: f32,
+    /// World y in distance units (j).
+    pub y: f32,
+    /// Rendered elevation in px.
+    pub z: f32,
+    /// RGBA colour bytes.
+    pub color: [u8; 4],
+}
+
+/// One 3D line endpoint: world position plus RGBA colour.
+///
+/// Range outlines share the fill hue but are clearly less transparent;
+/// storing the alpha per line lets the two passes use one buffer.
+#[derive(Clone, Copy, Debug)]
+pub struct LineVertex {
+    /// World x in distance units (j).
+    pub x: f32,
+    /// World y in distance units (j).
+    pub y: f32,
+    /// Rendered elevation in px.
+    pub z: f32,
+    /// RGBA colour bytes.
+    pub color: [u8; 4],
+}
+
+/// Triangle soup with per-vertex RGBA colours for one range kind.
+#[derive(Clone, Debug, Default)]
+pub struct RangeSoup {
+    /// All vertices, three per triangle.
+    pub vertices: Vec<RangeVertex>,
+    /// Indices into `vertices` (always `0..len` for a soup).
+    pub indices: Vec<u16>,
+}
+
 /// Triangle soup with per-vertex colours (flat shading = 3 equal colours).
 #[derive(Clone, Debug, Default)]
 pub struct TriangleSoup {
@@ -138,6 +180,56 @@ fn vert(x: f64, y: f64, z: f64, color: [u8; 3]) -> GpuVertex {
         y: y as f32,
         z: z as f32,
         color,
+    }
+}
+
+fn range_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> RangeVertex {
+    RangeVertex {
+        x: x as f32,
+        y: y as f32,
+        z: z as f32,
+        color: [color[0], color[1], color[2], alpha],
+    }
+}
+
+fn line_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> LineVertex {
+    LineVertex {
+        x: x as f32,
+        y: y as f32,
+        z: z as f32,
+        color: [color[0], color[1], color[2], alpha],
+    }
+}
+
+fn push_range_tri(soup: &mut RangeSoup, a: RangeVertex, b: RangeVertex, c: RangeVertex) {
+    let base = soup.vertices.len() as u16;
+    soup.vertices.push(a);
+    soup.vertices.push(b);
+    soup.vertices.push(c);
+    soup.indices.push(base);
+    soup.indices.push(base + 1);
+    soup.indices.push(base + 2);
+}
+
+/// Flat ground disc with one RGBA colour (range fills keep their own alpha).
+#[allow(clippy::too_many_arguments)]
+fn push_range_disc(
+    mesh: &mut RangeSoup,
+    x: f64,
+    y: f64,
+    z: f64,
+    r: f64,
+    n: usize,
+    color: [u8; 3],
+    alpha: u8,
+) {
+    let center = range_vert(x, y, z, color, alpha);
+    let mut prev = range_vert(x + r, y, z, color, alpha);
+    for i in 1..=n {
+        let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+        let next = range_vert(x + r * a.cos(), y + r * a.sin(), z, color, alpha);
+        push_range_tri(mesh, center, prev, next);
+        prev = next;
     }
 }
 
@@ -270,38 +362,72 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
         Some(v) => *v,
         None => return,
     };
-    let mut axis = 0usize;
-    for d in 0..6 {
-        if hexgrid::neighbor(a.0, a.1, d) == tile {
-            axis = d % 3;
-            break;
-        }
+    // Same frame as the Python renderer (`_ramp_frame`/`_draw_ramp`): the
+    // strip runs edge to edge, its short edges lying on the midpoints of
+    // the hex edges facing the two joined neighbours, tilted by their
+    // height difference.
+    let corners = hexgrid::hex_corners(tile.0, tile.1, board.side);
+    let mut mids = [(0.0, 0.0); 6];
+    for k in 0..6 {
+        let c1 = corners[k];
+        let c2 = corners[(k + 1) % 6];
+        mids[k] = ((c1.0 + c2.0) / 2.0, (c1.1 + c2.1) / 2.0);
     }
+    let nearest = |target: Tile| -> usize {
+        let (tx, ty) = hexgrid::hex_to_world(target.0, target.1, board.side);
+        let mut best = 0;
+        let mut best_d = f64::INFINITY;
+        for (k, m) in mids.iter().enumerate() {
+            let d = (m.0 - tx).powi(2) + (m.1 - ty).powi(2);
+            if d < best_d {
+                best_d = d;
+                best = k;
+            }
+        }
+        best
+    };
+    let edge_a = mids[nearest(a)];
+    let edge_b = mids[nearest(b)];
     let ha = board.height(a) as f64 * constants::ELEVATION_PX;
     let hb = board.height(b) as f64 * constants::ELEVATION_PX;
-    let corners = hexgrid::hex_corners(tile.0, tile.1, board.side);
-    let mid = |dir: usize| -> (f64, f64) {
-        let k = dir % 6;
-        let c0 = corners[k];
-        let c1 = corners[(k + 1) % 6];
-        ((c0.0 + c1.0) / 2.0, (c0.1 + c1.1) / 2.0)
-    };
-    let ma = mid(axis);
-    let mb = mid((axis + 3) % 6);
-    let narrow = 0.35;
-    let (cx, cy) = hexgrid::hex_to_world(tile.0, tile.1, board.side);
-    let pa = (cx + (ma.0 - cx) * narrow, cy + (ma.1 - cy) * narrow);
-    let pb = (cx + (mb.0 - cx) * narrow, cy + (mb.1 - cy) * narrow);
-    let (dx, dy) = (pb.0 - pa.0, pb.1 - pa.1);
+    let (dx, dy) = (edge_b.0 - edge_a.0, edge_b.1 - edge_a.1);
     let len = (dx * dx + dy * dy).sqrt().max(1e-6);
-    let (nx, ny) = (-dy / len, dx / len);
-    let half = board.side * 0.35;
+    let (ux, uy) = (dx / len, dy / len);
+    // Strip half-width like the Python renderer: just under half the hex
+    // side, so the strip runs edge to edge without spilling past the hex.
+    let hw = board.side * 0.45;
+    let (px, py) = (-uy, ux);
+    let z_lo = ha.min(hb);
+    let a1 = (edge_a.0 + px * hw, edge_a.1 + py * hw);
+    let a2 = (edge_a.0 - px * hw, edge_a.1 - py * hw);
+    let b1 = (edge_b.0 + px * hw, edge_b.1 + py * hw);
+    let b2 = (edge_b.0 - px * hw, edge_b.1 - py * hw);
     let col = [168, 150, 110];
-    let q0 = vert(pa.0 + nx * half, pa.1 + ny * half, ha, col);
-    let q1 = vert(pa.0 - nx * half, pa.1 - ny * half, ha, col);
-    let q2 = vert(pb.0 - nx * half, pb.1 - ny * half, hb, col);
-    let q3 = vert(pb.0 + nx * half, pb.1 + ny * half, hb, col);
-    push_quad(soup, q0, q1, q2, q3);
+    let skirt = [104, 93, 68];
+    // Solid body: both sides filled from the tilted top edges down to the
+    // base elevation, so no empty space shows under the ramp.
+    push_quad(
+        soup,
+        vert(a1.0, a1.1, ha, skirt),
+        vert(b1.0, b1.1, hb, skirt),
+        vert(b1.0, b1.1, z_lo, skirt),
+        vert(a1.0, a1.1, z_lo, skirt),
+    );
+    push_quad(
+        soup,
+        vert(a2.0, a2.1, ha, skirt),
+        vert(b2.0, b2.1, hb, skirt),
+        vert(b2.0, b2.1, z_lo, skirt),
+        vert(a2.0, a2.1, z_lo, skirt),
+    );
+    // Tilted rectangular top face, edge midpoint to edge midpoint.
+    push_quad(
+        soup,
+        vert(a1.0, a1.1, ha, col),
+        vert(a2.0, a2.1, ha, col),
+        vert(b2.0, b2.1, hb, col),
+        vert(b1.0, b1.1, hb, col),
+    );
 }
 
 /// Dynamic per-frame geometry: buildings, obstacles, vehicles, effects.
@@ -309,10 +435,17 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
 pub struct DynamicMesh {
     /// Opaque boxes/discs (depth-tested, depth-writing).
     pub opaque: TriangleSoup,
+    /// Flat translucent white turret range discs (no depth write).
+    pub range_turret: RangeSoup,
+    /// Flat translucent light-green heal range discs (no depth write).
+    pub range_heal: RangeSoup,
     /// Flat translucent range discs (no depth write, drawn after opaque).
+    ///
+    /// Kept so older callers keep compiling; new code fills
+    /// [`DynamicMesh::range_turret`] and [`DynamicMesh::range_heal`].
     pub translucent: TriangleSoup,
     /// 3D line segments (grid already in terrain; ranges/routes here).
-    pub lines: Vec<(GpuVertex, GpuVertex)>,
+    pub lines: Vec<(LineVertex, LineVertex)>,
 }
 
 impl DynamicMesh {
@@ -320,6 +453,10 @@ impl DynamicMesh {
     pub fn clear(&mut self) {
         self.opaque.vertices.clear();
         self.opaque.indices.clear();
+        self.range_turret.vertices.clear();
+        self.range_turret.indices.clear();
+        self.range_heal.vertices.clear();
+        self.range_heal.indices.clear();
         self.translucent.vertices.clear();
         self.translucent.indices.clear();
         self.lines.clear();
@@ -391,7 +528,7 @@ pub fn push_box(
 /// Thick 3D segment as a camera-facing box strip (grid-free strokes).
 #[allow(clippy::too_many_arguments)]
 pub fn push_beam(
-    lines: &mut Vec<(GpuVertex, GpuVertex)>,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
     x0: f64,
     y0: f64,
     z0: f64,
@@ -400,7 +537,10 @@ pub fn push_beam(
     z1: f64,
     color: [u8; 3],
 ) {
-    lines.push((vert(x0, y0, z0, color), vert(x1, y1, z1, color)));
+    lines.push((
+        line_vert(x0, y0, z0, color, 255),
+        line_vert(x1, y1, z1, color, 255),
+    ));
 }
 
 /// Rebuild the dynamic mesh of one frame (buildings, obstacles, vehicles).
@@ -428,7 +568,12 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
         }
         push_vehicle(game, v, rotor_phase, &mut out.opaque);
     }
-    push_ranges(game, &mut out.translucent, &mut out.lines);
+    push_ranges(
+        game,
+        &mut out.range_turret,
+        &mut out.range_heal,
+        &mut out.lines,
+    );
     push_paths(game, &mut out.lines);
     push_projectiles(game, &mut out.opaque);
 }
@@ -442,7 +587,7 @@ fn building_color(b: &crate::entities::Building) -> [u8; 3] {
 
 fn push_cross(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(GpuVertex, GpuVertex)>,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -450,26 +595,34 @@ fn push_cross(
 ) {
     let h = 6.0;
     let _ = mesh;
-    lines.push((vert(x - h, y, z, color), vert(x + h, y, z, color)));
-    lines.push((vert(x, y - h, z, color), vert(x, y + h, z, color)));
+    lines.push((
+        line_vert(x - h, y, z, color, 255),
+        line_vert(x + h, y, z, color, 255),
+    ));
+    lines.push((
+        line_vert(x, y - h, z, color, 255),
+        line_vert(x, y + h, z, color, 255),
+    ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_ring(
-    lines: &mut Vec<(GpuVertex, GpuVertex)>,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
     x: f64,
     y: f64,
     z: f64,
     r: f64,
     n: usize,
     color: [u8; 3],
+    alpha: u8,
 ) {
     let mut prev = (x + r, y);
     for i in 1..=n {
         let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
         let next = (x + r * a.cos(), y + r * a.sin());
         lines.push((
-            vert(prev.0, prev.1, z, color),
-            vert(next.0, next.1, z, color),
+            line_vert(prev.0, prev.1, z, color, alpha),
+            line_vert(next.0, next.1, z, color, alpha),
         ));
         prev = next;
     }
@@ -479,7 +632,7 @@ fn push_building(
     game: &Game,
     b: &crate::entities::Building,
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(GpuVertex, GpuVertex)>,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
 ) {
     use crate::entities::BuildingKind;
     let (cx, cy) = b.pos(game.board.side);
@@ -607,58 +760,88 @@ fn push_vehicle(
     let _ = rotor_phase;
 }
 
-fn push_ranges(game: &Game, trans: &mut TriangleSoup, lines: &mut Vec<(GpuVertex, GpuVertex)>) {
+fn push_ranges(
+    game: &Game,
+    turret: &mut RangeSoup,
+    heal: &mut RangeSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+) {
     use crate::entities::BuildingKind;
-    for b in game.buildings.iter() {
+    for (idx, b) in game.buildings.iter().enumerate() {
+        // Deterministic lift per disc: coplanar translucent fills share one
+        // depth value, so the GPU blend order flips while panning (flicker).
+        // A tiny index-based step keeps every disc distinct and stable.
+        let lift = idx as f64 * 0.05;
         if let Some(tk) = crate::entities::turret_kind_of(b.kind) {
             let (cx, cy) = b.pos(game.board.side);
             let z = tile_top_z(&game.board, b.tile);
-            push_disc(
-                trans,
+            push_range_disc(
+                turret,
                 cx,
                 cy,
-                z + 0.5,
+                z + 0.5 + lift,
                 constants::turret_range(tk),
                 40,
                 [255, 255, 255],
+                constants::RANGE_TURRET_FILL_ALPHA,
             );
             push_ring(
                 lines,
                 cx,
                 cy,
-                z + 0.5,
+                z + 0.6 + lift,
                 constants::turret_range(tk),
                 48,
                 [255, 255, 255],
+                constants::RANGE_OUTLINE_ALPHA,
             );
         } else if b.kind == BuildingKind::HealTower {
             let (cx, cy) = b.pos(game.board.side);
             let z = tile_top_z(&game.board, b.tile);
             let r = b.units * constants::HEAL_TOWER_RANGE_PER_UNIT;
             if r > 1.0 {
-                push_disc(trans, cx, cy, z + 0.5, r, 40, [150, 245, 150]);
-                push_ring(lines, cx, cy, z + 0.5, r, 48, [150, 245, 150]);
+                push_range_disc(
+                    heal,
+                    cx,
+                    cy,
+                    z + 0.5 + lift,
+                    r,
+                    40,
+                    [150, 245, 150],
+                    constants::RANGE_HEAL_FILL_ALPHA,
+                );
+                push_ring(
+                    lines,
+                    cx,
+                    cy,
+                    z + 0.6 + lift,
+                    r,
+                    48,
+                    [150, 245, 150],
+                    constants::RANGE_OUTLINE_ALPHA,
+                );
             }
         }
     }
-    for v in game.vehicles.iter() {
+    for (idx, v) in game.vehicles.iter().enumerate() {
         if v.dead || v.kind != constants::VehicleKind::Buffer {
             continue;
         }
         let z = vehicle_z(game, v);
-        push_disc(
-            trans,
+        push_range_disc(
+            heal,
             v.x,
             v.y,
-            z - constants::ELEVATION_PX + 0.5,
+            z - constants::ELEVATION_PX + 0.5 + idx as f64 * 0.05,
             constants::BUFFER_HEAL_RADIUS,
             40,
             [150, 245, 150],
+            constants::RANGE_HEAL_FILL_ALPHA,
         );
     }
 }
 
-fn push_paths(game: &Game, lines: &mut Vec<(GpuVertex, GpuVertex)>) {
+fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
     for v in game.vehicles.iter() {
         if v.dead || v.route.is_empty() {
             continue;
@@ -668,8 +851,8 @@ fn push_paths(game: &Game, lines: &mut Vec<(GpuVertex, GpuVertex)>) {
         for t in v.route.iter().skip(v.route_index) {
             let (wx, wy) = game.board.center_world(*t);
             lines.push((
-                vert(prev.0, prev.1, z, [255, 255, 255]),
-                vert(wx, wy, z, [255, 255, 255]),
+                line_vert(prev.0, prev.1, z, [255, 255, 255], 255),
+                line_vert(wx, wy, z, [255, 255, 255], 255),
             ));
             prev = (wx, wy);
         }
@@ -701,6 +884,114 @@ fn push_projectiles(game: &Game, mesh: &mut TriangleSoup) {
 mod tests {
     use super::*;
     use crate::board::Board;
+
+    #[test]
+    fn range_fills_keep_distinct_alpha_and_stable_lift() {
+        use crate::entities::{Building, BuildingKind, Player};
+        use crate::game::Game;
+        let board = Board::new(30, 30);
+        let mut game = Game::new(
+            board,
+            vec![Player::new(0, true), Player::new(1, false)],
+            Vec::new(),
+            1,
+        );
+        game.buildings.push(Building::new(
+            BuildingKind::TurretNormal,
+            Some(0),
+            2,
+            2,
+            10.0,
+        ));
+        game.buildings.push(Building::new(
+            BuildingKind::TurretNormal,
+            Some(1),
+            5,
+            5,
+            10.0,
+        ));
+        game.buildings
+            .push(Building::new(BuildingKind::HealTower, Some(0), 8, 8, 10.0));
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        assert_eq!(dynamic.range_turret.vertices.len(), 2 * 40 * 3);
+        assert!(!dynamic.range_heal.vertices.is_empty());
+        // Turret fills are subtler than before (Python parity), heal fills
+        // keep their own light-green transparency.
+        for v in dynamic.range_turret.vertices.iter() {
+            assert_eq!(v.color[3], constants::RANGE_TURRET_FILL_ALPHA);
+            assert_eq!(&v.color[..3], &[255, 255, 255]);
+        }
+        for v in dynamic.range_heal.vertices.iter() {
+            assert_eq!(v.color[3], constants::RANGE_HEAL_FILL_ALPHA);
+            assert_eq!(&v.color[..3], &[150, 245, 150]);
+        }
+        // The two turret discs sit at distinct deterministic lifts, so
+        // their blend no longer depends on float rounding while panning.
+        let z0 = dynamic.range_turret.vertices[0].z;
+        let z1 = dynamic.range_turret.vertices[40 * 3].z;
+        assert!((z1 - z0 - 0.05).abs() < 1e-6, "{z0} vs {z1}");
+        // Outlines share the fill hue but are clearly less transparent.
+        let mut turret_ring = false;
+        for (a, b) in dynamic.lines.iter() {
+            if a.color[3] == constants::RANGE_OUTLINE_ALPHA
+                && a.color[..3] == [255, 255, 255]
+                && b.color[3] == constants::RANGE_OUTLINE_ALPHA
+            {
+                turret_ring = true;
+            }
+        }
+        assert!(turret_ring);
+    }
+
+    #[test]
+    fn ramp_strip_runs_edge_to_edge() {
+        let mut board = Board::new(6, 6);
+        // Neighbours (3, 2) and (5, 2) are opposite across (4, 2).
+        board.set_ramp((4, 2), (3, 2), (5, 2));
+        let mesh = build_terrain(&board);
+        let soup: Vec<&GpuVertex> = mesh
+            .chunks
+            .iter()
+            .flat_map(|c| c.soup.vertices.iter())
+            .collect();
+        assert!(!soup.is_empty());
+        // Edge midpoints of the ramp tile along the a->b axis.
+        let corners = crate::hexgrid::hex_corners(4, 2, board.side);
+        let mut mids = [(0.0, 0.0); 6];
+        for k in 0..6 {
+            let c1 = corners[k];
+            let c2 = corners[(k + 1) % 6];
+            mids[k] = ((c1.0 + c2.0) / 2.0, (c1.1 + c2.1) / 2.0);
+        }
+        let nearest = |target: (i32, i32)| -> usize {
+            let (tx, ty) = crate::hexgrid::hex_to_world(target.0, target.1, board.side);
+            let mut best = 0;
+            let mut best_d = f64::INFINITY;
+            for (k, m) in mids.iter().enumerate() {
+                let d = (m.0 - tx).powi(2) + (m.1 - ty).powi(2);
+                if d < best_d {
+                    best_d = d;
+                    best = k;
+                }
+            }
+            best
+        };
+        let edge_a = mids[nearest((3, 2))];
+        let edge_b = mids[nearest((5, 2))];
+        // The strip corners (top face + skirts) reach both edge midpoints
+        // within the strip half-width, instead of stopping at 35% of the
+        // way like the old short strip.
+        let hw = board.side * 0.45;
+        for edge in [edge_a, edge_b] {
+            let mut best = f64::INFINITY;
+            for v in soup.iter() {
+                let d = ((v.x as f64 - edge.0).powi(2) + (v.y as f64 - edge.1).powi(2)).sqrt();
+                best = best.min(d);
+            }
+            assert!(best <= hw + 1e-3, "edge {edge:?} far: {best}");
+        }
+    }
 
     #[test]
     fn terrain_mesh_counts_are_deterministic() {
