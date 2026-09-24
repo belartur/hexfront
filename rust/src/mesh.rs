@@ -525,6 +525,112 @@ pub fn push_box(
     push_quad(mesh, q[0], q[1], q[2], q[3]);
 }
 
+/// Oriented box centred at `(cx, cy)` on base `z`: `len` runs along the
+/// unit forward vector `(fx, fy)`, `wid` along its perpendicular, `h` up.
+///
+/// Same face set as [`push_box`] (top plus sides), so rotated vehicle parts
+/// keep the flat-shaded look of the axis-aligned boxes.
+#[allow(clippy::too_many_arguments)]
+pub fn push_oriented_box(
+    mesh: &mut TriangleSoup,
+    cx: f64,
+    cy: f64,
+    z: f64,
+    len: f64,
+    wid: f64,
+    h: f64,
+    fx: f64,
+    fy: f64,
+    color: [u8; 3],
+) {
+    let (px, py) = (-fy, fx);
+    let corner = |along: f64, across: f64, zz: f64, c: [u8; 3]| {
+        vert(
+            cx + fx * along + px * across,
+            cy + fy * along + py * across,
+            zz,
+            c,
+        )
+    };
+    let (hl, hw) = (len / 2.0, wid / 2.0);
+    let top = constants::shade(color, 1.0);
+    let t0 = corner(-hl, -hw, z + h, top);
+    let t1 = corner(hl, -hw, z + h, top);
+    let t2 = corner(hl, hw, z + h, top);
+    let t3 = corner(-hl, hw, z + h, top);
+    push_quad(mesh, t0, t1, t2, t3);
+    let b0 = corner(-hl, -hw, z, color);
+    let b1 = corner(hl, -hw, z, color);
+    let b2 = corner(hl, hw, z, color);
+    let b3 = corner(-hl, hw, z, color);
+    let side_a = constants::shade(color, 0.85);
+    let side_b = constants::shade(color, 0.7);
+    let mut q = [b0, b1, t1, t0];
+    for v in q.iter_mut() {
+        v.color = side_a;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+    let mut q = [b2, b3, t3, t2];
+    for v in q.iter_mut() {
+        v.color = side_a;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+    let mut q = [b1, b2, t2, t1];
+    for v in q.iter_mut() {
+        v.color = side_b;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+    let mut q = [b3, b0, t0, t3];
+    for v in q.iter_mut() {
+        v.color = side_b;
+    }
+    push_quad(mesh, q[0], q[1], q[2], q[3]);
+}
+
+/// Flight heading of a vehicle as a unit `(fx, fy)` vector in world space.
+///
+/// Points at the next route waypoint; when the vehicle has nowhere to go
+/// (empty route, arrived, ad-hoc test vehicle) it falls back to the leg it
+/// came from, and finally to east (+x), so parked helicopters still face a
+/// deterministic direction instead of snapping arbitrarily.
+fn vehicle_heading(game: &Game, v: &crate::entities::Vehicle) -> (f64, f64) {
+    let aim_at = |tx: f64, ty: f64| {
+        let (dx, dy) = (tx - v.x, ty - v.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 1e-6 {
+            Some((dx / len, dy / len))
+        } else {
+            None
+        }
+    };
+    if v.route_index < v.route.len() {
+        let (wx, wy) = game.board.center_world(v.route[v.route_index]);
+        if let Some(h) = aim_at(wx, wy) {
+            return h;
+        }
+    }
+    if v.route_index > 0 && v.route_index <= v.route.len() {
+        let prev = v.route[v.route_index - 1];
+        let (wx, wy) = game.board.center_world(prev);
+        // Heading is where we came *from* reversed: from the previous
+        // waypoint towards the current position.
+        let (dx, dy) = (v.x - wx, v.y - wy);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 1e-6 {
+            return (dx / len, dy / len);
+        }
+    }
+    if let Some(src) = v.src_tile {
+        let (wx, wy) = game.board.center_world(src);
+        let (dx, dy) = (v.x - wx, v.y - wy);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 1e-6 {
+            return (dx / len, dy / len);
+        }
+    }
+    (1.0, 0.0)
+}
+
 /// Thick 3D segment as a camera-facing box strip (grid-free strokes).
 #[allow(clippy::too_many_arguments)]
 pub fn push_beam(
@@ -822,7 +928,7 @@ fn push_vehicle(
             );
         }
         constants::VehicleKind::Helicopter => {
-            push_helicopter(mesh, lines, x, y, z, rotor_phase, color);
+            push_helicopter(game, v, mesh, lines, x, y, z, rotor_phase, color);
         }
         constants::VehicleKind::Hovercraft => {
             // Hull sits flat on the ground: lift it like the flat obstacle
@@ -840,14 +946,20 @@ fn push_vehicle(
 /// Detailed helicopter: rounded body, cockpit, tail boom with a fin and a
 /// spinning two-blade main rotor plus a tail rotor.
 ///
-/// The body stays an opaque low box stack (depth-tested like every other
-/// vehicle), while the thin rotor blades are 3D line strokes: they need no
-/// depth fighting on the GPU path and match the Python renderer, which
-/// draws the rotor as lines above the body. `rotor_phase` rotates the main
-/// blades around the mast, so consecutive frames built with an advancing
-/// phase show the spin.
+/// The airframe is oriented along the flight heading (see
+/// [`vehicle_heading`]): the cockpit faces the next waypoint and the tail
+/// boom trails behind it, so the tail always stays at the back of the
+/// flight direction. The body stays an opaque low box stack (depth-tested
+/// like every other vehicle), while the thin rotor blades and skid struts
+/// are 3D line strokes: they need no depth fighting on the GPU path and
+/// match the Python renderer, which draws the rotor as lines above the
+/// body. `rotor_phase` rotates the main blades around the mast, so
+/// consecutive frames built with an advancing phase show the spin.
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn push_helicopter(
+    game: &Game,
+    v: &crate::entities::Vehicle,
     mesh: &mut TriangleSoup,
     lines: &mut Vec<(LineVertex, LineVertex)>,
     x: f64,
@@ -856,20 +968,91 @@ fn push_helicopter(
     rotor_phase: f64,
     color: [u8; 3],
 ) {
+    let (fx, fy) = vehicle_heading(game, v);
+    push_helicopter_oriented(mesh, lines, x, y, z, rotor_phase, color, fx, fy);
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
+fn push_helicopter_oriented(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    rotor_phase: f64,
+    color: [u8; 3],
+    fx: f64,
+    fy: f64,
+) {
+    let (px, py) = (-fy, fx);
     let dark = constants::shade(color, 0.7);
     let darker = constants::shade(color, 0.55);
-    // Rounded body: stacked discs read as a hull from the isometric camera
-    // without extra orientation state.
+    // Rounded hull: stacked discs read as a body from the isometric camera
+    // without extra orientation state; only the nose/tail parts below are
+    // rotated into the flight direction.
     push_disc(mesh, x, y, z + 2.0, 10.0, 12, color);
     push_disc(mesh, x, y, z + 6.0, 8.0, 12, color);
-    // Cockpit canopy on the front (+x) side.
-    push_box(mesh, x + 5.0, y, z + 6.0, 7.0, 7.0, 4.0, [225, 240, 250]);
-    // Tail boom towards -x with an end fin (tail rotor mast).
-    push_box(mesh, x - 13.0, y, z + 4.0, 16.0, 4.0, 3.0, dark);
-    push_box(mesh, x - 20.0, y, z + 4.0, 2.5, 2.5, 9.0, darker);
-    // Skids below the hull.
-    push_box(mesh, x, y - 6.5, z, 16.0, 2.0, 2.0, darker);
-    push_box(mesh, x, y + 6.5, z, 16.0, 2.0, 2.0, darker);
+    // Cockpit canopy on the nose (forward) side.
+    push_oriented_box(
+        mesh,
+        x + fx * 5.0,
+        y + fy * 5.0,
+        z + 6.0,
+        7.0,
+        7.0,
+        4.0,
+        fx,
+        fy,
+        [225, 240, 250],
+    );
+    // Tail boom trailing behind (-forward) with an end fin (tail rotor
+    // mast). Lengths match the old axis-aligned boom, only rotated.
+    push_oriented_box(
+        mesh,
+        x - fx * 13.0,
+        y - fy * 13.0,
+        z + 4.0,
+        16.0,
+        4.0,
+        3.0,
+        fx,
+        fy,
+        dark,
+    );
+    push_oriented_box(
+        mesh,
+        x - fx * 20.0,
+        y - fy * 20.0,
+        z + 4.0,
+        2.5,
+        2.5,
+        9.0,
+        fx,
+        fy,
+        darker,
+    );
+    // Landing skids: two thin rails parallel to the hull, one on each side,
+    // joined to the belly by four strut strokes. The old build used two
+    // chunky axis-aligned boxes that read as one flat rectangle from the
+    // isometric view; thin rails with visible struts read as skids.
+    for side in [-1.0, 1.0] {
+        let rail_cx = x + px * side * 6.5;
+        let rail_cy = y + py * side * 6.5;
+        push_oriented_box(mesh, rail_cx, rail_cy, z, 16.0, 1.6, 1.6, fx, fy, darker);
+        for along in [-5.0, 5.0] {
+            push_beam(
+                lines,
+                x + fx * along + px * side * 6.5,
+                y + fy * along + py * side * 6.5,
+                z + 1.6,
+                x + fx * along + px * side * 3.0,
+                y + fy * along + py * side * 3.0,
+                z + 4.0,
+                darker,
+            );
+        }
+    }
     // Mast holding the main rotor above the hull.
     push_box(mesh, x, y, z + 10.0, 2.5, 2.5, 5.0, darker);
     // Main rotor: two opposite blades rotating with `rotor_phase`, drawn as
@@ -905,7 +1088,7 @@ fn push_helicopter(
     let t_phase = rotor_phase * 2.0;
     let (tc, ts) = (t_phase.cos(), t_phase.sin());
     let tr = 5.0;
-    let (tx, ty, tz) = (x - 20.0, y, z + 13.0);
+    let (tx, ty, tz) = (x - fx * 20.0, y - fy * 20.0, z + 13.0);
     push_beam(
         lines,
         tx,
@@ -1064,28 +1247,29 @@ mod tests {
         ));
         let mut first = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut first);
-        // Opaque hull + tail boom + fin + skids + mast: clearly more than
-        // the old single flat disc (12 triangles = 36 vertices).
+        // Opaque hull + tail boom + fin + skid rails + mast: clearly more
+        // than the old single flat disc (12 triangles = 36 vertices).
         assert!(
             first.opaque.vertices.len() > 36,
             "helicopter body has no details: {} vertices",
             first.opaque.vertices.len()
         );
-        // Two main-rotor strokes plus the tail-rotor stroke.
+        // Four skid struts + two main-rotor strokes + tail-rotor stroke.
         assert_eq!(
             first.lines.len(),
-            3,
+            7,
             "rotor/tail lines: {:?}",
             first.lines.len()
         );
-        // The rotor sits above the hull.
+        // The rotor sits above the hull (first rotor stroke is at index 4,
+        // after the four low skid struts).
         let top_opaque = first
             .opaque
             .vertices
             .iter()
             .map(|v| v.z as f64)
             .fold(f64::NEG_INFINITY, f64::max);
-        for (a, b) in first.lines.iter() {
+        for (a, b) in first.lines.iter().skip(4) {
             assert!(
                 (a.z as f64) >= top_opaque - 5.0,
                 "rotor line below the hull: {} vs {top_opaque}",
@@ -1093,17 +1277,80 @@ mod tests {
             );
             let _ = b;
         }
-        // Advancing the phase rotates the main blade.
+        // Advancing the phase rotates the main blade (first rotor stroke is
+        // at index 4, after the four skid struts).
         let mut second = DynamicMesh::default();
         build_dynamic(&game, 0.7, &mut second);
-        assert_eq!(second.lines.len(), 3);
+        assert_eq!(second.lines.len(), 7);
         let endpoints = |lines: &[(LineVertex, LineVertex)]| {
-            (lines[0].0.x, lines[0].0.y, lines[0].1.x, lines[0].1.y)
+            (lines[4].0.x, lines[4].0.y, lines[4].1.x, lines[4].1.y)
         };
         assert_ne!(
             endpoints(&first.lines),
             endpoints(&second.lines),
             "rotor does not spin with the phase"
+        );
+    }
+
+    #[test]
+    fn helicopter_tail_trails_behind_flight_heading() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(10, 10);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let start = (2, 2);
+        let dest = (6, 2);
+        let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            vec![dest],
+            (sx, sy),
+            Some(start),
+        ));
+        let (vx, vy) = (game.vehicles[0].x, game.vehicles[0].y);
+        let (fx, fy) = super::vehicle_heading(&game, &game.vehicles[0]);
+        let (wx, wy) = game.board.center_world(dest);
+        let (dx, dy) = (wx - vx, wy - vy);
+        let len = (dx * dx + dy * dy).sqrt();
+        assert!(
+            (fx - dx / len).abs() < 1e-9 && (fy - dy / len).abs() < 1e-9,
+            "heading {fx},{fy} misses waypoint {dx},{dy}"
+        );
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        // Tail-rotor stroke (last line) sits behind the hull.
+        let tail = &dynamic.lines[6];
+        let (tmx, tmy) = (
+            f64::from(tail.0.x + tail.1.x) / 2.0,
+            f64::from(tail.0.y + tail.1.y) / 2.0,
+        );
+        assert!(
+            (tmx - vx) * fx + (tmy - vy) * fy < -10.0,
+            "tail {tmx},{tmy} not behind heading {fx},{fy}"
+        );
+        // Cockpit box (first oriented box = verts 24..48) sits ahead.
+        let cockpit: Vec<(f64, f64)> = dynamic.opaque.vertices[24..48]
+            .iter()
+            .map(|vert| (f64::from(vert.x), f64::from(vert.y)))
+            .collect();
+        let n = cockpit.len() as f64;
+        let (ccx, ccy) = (
+            cockpit.iter().map(|p| p.0).sum::<f64>() / n,
+            cockpit.iter().map(|p| p.1).sum::<f64>() / n,
+        );
+        assert!(
+            (ccx - vx) * fx + (ccy - vy) * fy > 0.0,
+            "cockpit {ccx},{ccy} not ahead of heading {fx},{fy}"
+        );
+        assert!(
+            (ccx - tmx) * fx + (ccy - tmy) * fy > 15.0,
+            "cockpit not ahead of tail"
         );
     }
 
