@@ -70,6 +70,23 @@ pub const BRIDGE_DECK_LIFT: f64 = 5.0 * UNIT_J_TO_PX;
 /// terrain, so they look faint or vanish (rendering only; objects themselves
 /// come from rules.md sections 1-2).
 pub const OBSTACLE_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
+/// Fixed flight altitude of a helicopter above the *highest* terrain of the
+/// board in px (rendering only; rules.md section 5.2 makes helicopters
+/// ignore tile heights, so they do not bob up and down over hills). The
+/// clearance is larger than the whole rotor stack (15 px in `mesh.rs`), so
+/// even the blades stay above the tallest peak and a helicopter never
+/// disappears behind a hill. Its shadow disc (see [`SHADOW_RADIUS`]) marks
+/// the tile it flies over.
+pub const HELICOPTER_ALTITUDE_PX: f64 = 2.0 * ELEVATION_PX;
+/// Radius of a vehicle shadow decal in j (specification.md, section
+/// "Grafika i interfejs użytkownika").
+pub const SHADOW_RADIUS: f64 = 14.0 * UNIT_J_TO_PX;
+/// Outline segments of a shadow decal (specification.md).
+pub const SHADOW_SEGMENTS: usize = 14;
+/// Colour of the translucent shadow decal (specification.md).
+pub const SHADOW_COLOR: [u8; 3] = [0, 0, 0];
+/// Alpha of the translucent shadow decal, 70/255 (specification.md).
+pub const SHADOW_ALPHA: u8 = 70;
 /// Fixed simulation frame rate (specification_rust.md, "Determinism").
 pub const FPS: f64 = 60.0;
 /// Length of one simulation step in seconds.

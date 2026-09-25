@@ -84,12 +84,12 @@ impl Renderer {
     /// Render one frame of the running game.
     ///
     /// Pass order: opaque terrain chunks -> terrain grid lines -> opaque
-    /// dynamic objects -> translucent range discs -> 3D strokes -> 2D
-    /// overlays. Unit badges and floating texts are drawn by [`crate::app`]
-    /// on top, never occluded. Terrain chunks outside the viewport are
-    /// culled before they are submitted (their world boxes are tested
-    /// against the visible world box), which keeps huge boards bounded by
-    /// the view size.
+    /// dynamic objects -> translucent helicopter shadows -> translucent range
+    /// discs -> 3D strokes -> 2D overlays. Unit badges and floating texts are
+    /// drawn by [`crate::app`] on top, never occluded. Terrain chunks outside
+    /// the viewport are culled before they are submitted (their world boxes
+    /// are tested against the visible world box), which keeps huge boards
+    /// bounded by the view size.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_gpu(
         &mut self,
@@ -130,6 +130,11 @@ impl Renderer {
             }
         }
         draw_soup(&dynamic.opaque.vertices, &dynamic.opaque.indices);
+        // Translucent helicopter shadows: flat dark discs just above the
+        // receiving surface, drawn right after the opaque pass and before the
+        // range fills (specification_rust.md pass order). The depth test keeps
+        // them from darkening hulls, buildings or nearer cliffs.
+        draw_range_soup(&dynamic.shadow.vertices, &dynamic.shadow.indices);
         // Translucent range discs: one draw call per fill kind (white
         // turret vs. light-green heal), so overlapping fills of the same
         // kind share one depth value per disc and blend in a stable order

@@ -555,7 +555,7 @@ impl Application {
             if v.dead {
                 continue;
             }
-            let gz = mesh::vehicle_ground_z(game, v.x, v.y);
+            let gz = mesh::vehicle_z(game, v);
             let (cx, cy) = self.badge_anchor(v.x, v.y, gz);
             if !Self::on_screen(cx, cy) {
                 continue;
@@ -612,11 +612,7 @@ impl Application {
             if v.dead {
                 continue;
             }
-            let gz = game
-                .board
-                .height(game.board.world_to_tile(v.x, v.y).unwrap_or((0, 0)))
-                as f64
-                * constants::ELEVATION_PX;
+            let gz = mesh::vehicle_z(game, v);
             let (cx, cy) = self.badge_anchor(v.x, v.y, gz);
             for t in v.texts.iter() {
                 let frac = (t.age / constants::FLOAT_TEXT_LIFETIME).clamp(0.0, 1.0);

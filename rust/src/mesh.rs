@@ -435,6 +435,10 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
 pub struct DynamicMesh {
     /// Opaque boxes/discs (depth-tested, depth-writing).
     pub opaque: TriangleSoup,
+    /// Flat translucent vehicle shadow decals (no depth write, drawn after
+    /// the opaque pass and before the range fills; see
+    /// [`push_helicopter_shadow`]).
+    pub shadow: RangeSoup,
     /// Flat translucent white turret range discs (no depth write).
     pub range_turret: RangeSoup,
     /// Flat translucent light-green heal range discs (no depth write).
@@ -453,6 +457,8 @@ impl DynamicMesh {
     pub fn clear(&mut self) {
         self.opaque.vertices.clear();
         self.opaque.indices.clear();
+        self.shadow.vertices.clear();
+        self.shadow.indices.clear();
         self.range_turret.vertices.clear();
         self.range_turret.indices.clear();
         self.range_heal.vertices.clear();
@@ -802,6 +808,9 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
             continue;
         }
         push_vehicle(game, v, rotor_phase, &mut out.opaque, &mut out.lines);
+        if v.kind == constants::VehicleKind::Helicopter {
+            push_helicopter_shadow(game, v, &mut out.shadow);
+        }
     }
     push_ranges(
         game,
@@ -1023,13 +1032,29 @@ fn push_obstacle(
     }
 }
 
-fn vehicle_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
-    let ground = vehicle_ground_z(game, v.x, v.y);
+/// Rendered elevation of a vehicle in px.
+///
+/// A ground vehicle stands on the walkable surface below it (deck and ramp
+/// aware, see [`vehicle_ground_z`]). A helicopter ignores the terrain
+/// (rules.md section 5.2), so it flies at a fixed altitude above the
+/// *highest* tile of the board ([`helicopter_altitude`]): the altitude is
+/// constant for the whole level instead of following every bump, and the
+/// shadow disc built by [`push_helicopter_shadow`] still tells which tile
+/// the helicopter is over.
+pub fn vehicle_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     if v.kind == constants::VehicleKind::Helicopter {
-        ground + constants::ELEVATION_PX
+        helicopter_altitude(game)
     } else {
-        ground
+        vehicle_ground_z(game, v.x, v.y)
     }
+}
+
+/// Fixed flight altitude of the helicopters of `game` in px.
+///
+/// Measured above the highest terrain of the board, so a helicopter never
+/// hides behind a peak no matter where it crosses the map.
+fn helicopter_altitude(game: &Game) -> f64 {
+    max_height(&game.board) + constants::HELICOPTER_ALTITUDE_PX
 }
 
 fn push_vehicle(
@@ -1066,18 +1091,18 @@ fn push_vehicle(
     }
 }
 
-/// Detailed helicopter: rounded body, cockpit, tail boom with a fin and a
-/// spinning two-blade main rotor plus a tail rotor.
+/// Detailed helicopter: slender pod hull with a glazed cockpit, tail boom
+/// with a fin and a spinning two-blade main rotor plus a tail rotor.
 ///
 /// The airframe is oriented along the flight heading (see
 /// [`vehicle_heading`]): the cockpit faces the next waypoint and the tail
 /// boom trails behind it, so the tail always stays at the back of the
-/// flight direction. The body stays an opaque low box stack (depth-tested
-/// like every other vehicle), while the thin rotor blades and skid struts
-/// are 3D line strokes: they need no depth fighting on the GPU path and
-/// match the Python renderer, which draws the rotor as lines above the
-/// body. `rotor_phase` rotates the main blades around the mast, so
-/// consecutive frames built with an advancing phase show the spin.
+/// flight direction. The body stays an opaque box stack (depth-tested like
+/// every other vehicle), while the thin rotor blades and skid struts are 3D
+/// line strokes: they need no depth fighting on the GPU path and match the
+/// Python renderer, which draws the rotor as lines above the body.
+/// `rotor_phase` rotates the main blades around the mast, so consecutive
+/// frames built with an advancing phase show the spin.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn push_helicopter(
@@ -1095,6 +1120,76 @@ fn push_helicopter(
     push_helicopter_oriented(mesh, lines, x, y, z, rotor_phase, color, fx, fy);
 }
 
+// ---------------------------------------------------------------------------
+// Helicopter parts (rules.md section 5.2; every value is a rendering-only
+// size in px, exactly like the tank constants below -- colours come from the
+// owning player, only the cockpit glass has a fixed tint).
+// ---------------------------------------------------------------------------
+
+/// Length of the pod hull along the flight heading in px.
+const HELI_HULL_LEN: f64 = 26.0;
+/// Width of the pod hull across the heading in px; clearly longer than wide,
+/// so the hull reads as a slender pod instead of a disc.
+const HELI_HULL_WID: f64 = 11.0;
+/// Height of the pod hull in px.
+const HELI_HULL_H: f64 = 6.0;
+/// Clearance of the hull belly above the skid base in px.
+const HELI_HULL_LIFT: f64 = 3.0;
+/// Length of the glazed cockpit on the forward hull top in px.
+const HELI_CANOPY_LEN: f64 = 8.0;
+/// Width of the cockpit canopy in px.
+const HELI_CANOPY_WID: f64 = 8.0;
+/// Height of the cockpit canopy in px.
+const HELI_CANOPY_H: f64 = 3.5;
+/// Forward shift of the canopy centre from the hull centre in px.
+const HELI_CANOPY_SHIFT: f64 = 6.5;
+/// Elevation of the canopy base above the skid base in px: it sits on the
+/// forward hull top, so the glass reads as a windscreen (not a floating box).
+const HELI_CANOPY_BASE: f64 = HELI_HULL_LIFT + HELI_HULL_H - 1.5;
+/// Fixed tint of the cockpit glass (a dark canopy, never a white box).
+const HELI_CANOPY_COLOR: [u8; 3] = [72, 106, 126];
+/// Length of the tail boom behind the hull in px.
+const HELI_TAIL_LEN: f64 = 18.0;
+/// Width of the tail boom in px.
+const HELI_TAIL_WID: f64 = 3.0;
+/// Height of the tail boom in px.
+const HELI_TAIL_H: f64 = 3.0;
+/// Rearward shift of the tail boom centre from the hull centre in px.
+const HELI_TAIL_SHIFT: f64 = -20.0;
+/// Elevation of the tail boom base above the skid base in px.
+const HELI_TAIL_BASE: f64 = 4.5;
+/// Length of the vertical tail fin along the heading in px.
+const HELI_FIN_LEN: f64 = 3.0;
+/// Width of the vertical tail fin in px.
+const HELI_FIN_WID: f64 = 2.5;
+/// Height of the vertical tail fin in px (it carries the tail rotor).
+const HELI_FIN_H: f64 = 9.0;
+/// Rearward shift of the tail fin from the hull centre in px.
+const HELI_FIN_SHIFT: f64 = -27.0;
+/// Elevation of the tail fin base above the skid base in px.
+const HELI_FIN_BASE: f64 = 4.0;
+/// Length of one landing skid rail in px.
+const HELI_SKID_LEN: f64 = 20.0;
+/// Thickness of a skid rail in px.
+const HELI_SKID_THICK: f64 = 1.6;
+/// Lateral offset of each skid rail from the hull centre line in px.
+const HELI_SKID_OFFSET: f64 = 6.0;
+/// Offset along the heading of the skid struts from the hull centre in px.
+const HELI_STRUT_SHIFT: f64 = 7.0;
+/// Elevation of the rotor mast base above the skid base in px (hull top).
+const HELI_MAST_BASE: f64 = HELI_HULL_LIFT + HELI_HULL_H;
+/// Height of the rotor mast above the hull top in px.
+const HELI_MAST_H: f64 = 5.0;
+/// Thickness of the rotor mast in px.
+const HELI_MAST_THICK: f64 = 2.5;
+/// Radius of the main rotor in px.
+const HELI_ROTOR_R: f64 = 22.0;
+/// Radius of the tail rotor in px.
+const HELI_TAIL_ROTOR_R: f64 = 5.0;
+/// Elevation of the tail rotor axis above the skid base in px: just above
+/// the tip of the vertical fin.
+const HELI_TAIL_ROTOR_Z: f64 = HELI_FIN_BASE + HELI_FIN_H + 1.0;
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
 fn push_helicopter_oriented(
@@ -1111,78 +1206,109 @@ fn push_helicopter_oriented(
     let (px, py) = (-fy, fx);
     let dark = constants::shade(color, 0.7);
     let darker = constants::shade(color, 0.55);
-    // Rounded hull: stacked discs read as a body from the isometric camera
-    // without extra orientation state; only the nose/tail parts below are
-    // rotated into the flight direction.
-    push_disc(mesh, x, y, z + 2.0, 10.0, 12, color);
-    push_disc(mesh, x, y, z + 6.0, 8.0, 12, color);
-    // Cockpit canopy on the nose (forward) side.
+    // Slender pod hull: one long oriented box (much longer than wide and
+    // wider than it is tall) replaces the old stack of round discs.
     push_oriented_box(
         mesh,
-        x + fx * 5.0,
-        y + fy * 5.0,
-        z + 6.0,
-        7.0,
-        7.0,
-        4.0,
+        x,
+        y,
+        z + HELI_HULL_LIFT,
+        HELI_HULL_LEN,
+        HELI_HULL_WID,
+        HELI_HULL_H,
         fx,
         fy,
-        [225, 240, 250],
+        color,
     );
-    // Tail boom trailing behind (-forward) with an end fin (tail rotor
-    // mast). Lengths match the old axis-aligned boom, only rotated.
+    // Glazed cockpit on the forward hull top: a small tinted canopy, so the
+    // windscreen reads as glass instead of a glaring white box.
     push_oriented_box(
         mesh,
-        x - fx * 13.0,
-        y - fy * 13.0,
-        z + 4.0,
-        16.0,
-        4.0,
-        3.0,
+        x + fx * HELI_CANOPY_SHIFT,
+        y + fy * HELI_CANOPY_SHIFT,
+        z + HELI_CANOPY_BASE,
+        HELI_CANOPY_LEN,
+        HELI_CANOPY_WID,
+        HELI_CANOPY_H,
+        fx,
+        fy,
+        HELI_CANOPY_COLOR,
+    );
+    // Tail boom trailing behind (-forward) with an end fin (tail rotor
+    // mast). The boom overlaps the hull rear, so no gap opens while the
+    // helicopter turns.
+    push_oriented_box(
+        mesh,
+        x + fx * HELI_TAIL_SHIFT,
+        y + fy * HELI_TAIL_SHIFT,
+        z + HELI_TAIL_BASE,
+        HELI_TAIL_LEN,
+        HELI_TAIL_WID,
+        HELI_TAIL_H,
         fx,
         fy,
         dark,
     );
     push_oriented_box(
         mesh,
-        x - fx * 20.0,
-        y - fy * 20.0,
-        z + 4.0,
-        2.5,
-        2.5,
-        9.0,
+        x + fx * HELI_FIN_SHIFT,
+        y + fy * HELI_FIN_SHIFT,
+        z + HELI_FIN_BASE,
+        HELI_FIN_LEN,
+        HELI_FIN_WID,
+        HELI_FIN_H,
         fx,
         fy,
         darker,
     );
     // Landing skids: two thin rails parallel to the hull, one on each side,
-    // joined to the belly by four strut strokes. The old build used two
-    // chunky axis-aligned boxes that read as one flat rectangle from the
-    // isometric view; thin rails with visible struts read as skids.
+    // joined to the belly by four strut strokes. Chunky axis-aligned boxes
+    // would read as one flat rectangle from the isometric view.
     for side in [-1.0, 1.0] {
-        let rail_cx = x + px * side * 6.5;
-        let rail_cy = y + py * side * 6.5;
-        push_oriented_box(mesh, rail_cx, rail_cy, z, 16.0, 1.6, 1.6, fx, fy, darker);
-        for along in [-5.0, 5.0] {
+        let rail_cx = x + px * side * HELI_SKID_OFFSET;
+        let rail_cy = y + py * side * HELI_SKID_OFFSET;
+        push_oriented_box(
+            mesh,
+            rail_cx,
+            rail_cy,
+            z,
+            HELI_SKID_LEN,
+            HELI_SKID_THICK,
+            HELI_SKID_THICK,
+            fx,
+            fy,
+            darker,
+        );
+        for along in [-HELI_STRUT_SHIFT, HELI_STRUT_SHIFT] {
             push_beam(
                 lines,
-                x + fx * along + px * side * 6.5,
-                y + fy * along + py * side * 6.5,
-                z + 1.6,
-                x + fx * along + px * side * 3.0,
-                y + fy * along + py * side * 3.0,
-                z + 4.0,
+                x + fx * along + px * side * HELI_SKID_OFFSET,
+                y + fy * along + py * side * HELI_SKID_OFFSET,
+                z + HELI_SKID_THICK,
+                x + fx * along + px * side * (HELI_SKID_OFFSET / 2.0),
+                y + fy * along + py * side * (HELI_SKID_OFFSET / 2.0),
+                z + HELI_HULL_LIFT,
                 darker,
             );
         }
     }
     // Mast holding the main rotor above the hull.
-    push_box(mesh, x, y, z + 10.0, 2.5, 2.5, 5.0, darker);
+    push_box(
+        mesh,
+        x,
+        y,
+        z + HELI_MAST_BASE,
+        HELI_MAST_THICK,
+        HELI_MAST_THICK,
+        HELI_MAST_H,
+        darker,
+    );
     // Main rotor: two opposite blades rotating with `rotor_phase`, drawn as
-    // bright strokes like in the Python version (`_draw_vehicle`).
-    let rz = z + 15.0;
+    // bright strokes like in the Python version (`_draw_vehicle`); the disc
+    // sits one px above the mast top.
+    let rz = z + HELI_MAST_BASE + HELI_MAST_H + 1.0;
     let (c, s) = (rotor_phase.cos(), rotor_phase.sin());
-    let r = 22.0;
+    let r = HELI_ROTOR_R;
     let blade = [210, 210, 210];
     push_beam(
         lines,
@@ -1210,8 +1336,12 @@ fn push_helicopter_oriented(
     // runs twice as fast as the main rotor.
     let t_phase = rotor_phase * 2.0;
     let (tc, ts) = (t_phase.cos(), t_phase.sin());
-    let tr = 5.0;
-    let (tx, ty, tz) = (x - fx * 20.0, y - fy * 20.0, z + 13.0);
+    let tr = HELI_TAIL_ROTOR_R;
+    let (tx, ty, tz) = (
+        x + fx * HELI_FIN_SHIFT,
+        y + fy * HELI_FIN_SHIFT,
+        z + HELI_TAIL_ROTOR_Z,
+    );
     push_beam(
         lines,
         tx,
@@ -1221,6 +1351,45 @@ fn push_helicopter_oriented(
         ty + tr * tc,
         tz + tr * ts,
         blade,
+    );
+}
+
+/// Elevation in px of the surface that receives a helicopter shadow.
+///
+/// A deck fragment of a bridge shields the water below it, so a helicopter
+/// crossing a bridge drops its shadow on the deck; everywhere else the
+/// shadow follows the terrain (ramps included, see [`vehicle_ground_z`]).
+fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
+    if let Some(tile) = game.board.world_to_tile(x, y)
+        && let Some(bi) = game.board.tiles.get(&tile).and_then(|t| t.bridge)
+        && let Some(bridge) = game.board.bridges.get(bi)
+    {
+        return bridge.w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT;
+    }
+    vehicle_ground_z(game, x, y)
+}
+
+/// Translucent shadow disc of a helicopter, drawn below its hull.
+///
+/// The flight altitude does not follow the terrain (rules.md section 5.2),
+/// so the isometric view alone cannot tell which tile a helicopter is over;
+/// the dark decal marks it (specification.md, section "Grafika i interfejs
+/// użytkownika"). It is one flat disc lifted by [`OBSTACLE_LIFT`] so that it
+/// does not z-fight with the receiving surface, and it goes into the
+/// translucent pass: the GPU depth test keeps it from darkening the hull,
+/// other vehicles or nearer cliffs, and the terrain under the helicopter
+/// keeps its own colour everywhere else.
+fn push_helicopter_shadow(game: &Game, v: &crate::entities::Vehicle, shadow: &mut RangeSoup) {
+    let z = helicopter_shadow_z(game, v.x, v.y) + constants::OBSTACLE_LIFT;
+    push_range_disc(
+        shadow,
+        v.x,
+        v.y,
+        z,
+        constants::SHADOW_RADIUS,
+        constants::SHADOW_SEGMENTS,
+        constants::SHADOW_COLOR,
+        constants::SHADOW_ALPHA,
     );
 }
 
@@ -1615,15 +1784,18 @@ fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
         if v.dead || v.route.is_empty() {
             continue;
         }
-        let z = vehicle_z(game, v);
-        let mut prev = (v.x, v.y);
+        // The first leg starts at the vehicle itself (a helicopter above the
+        // terrain), the following waypoints sit on the terrain below them, so
+        // an airborne route descends to the ground instead of floating.
+        let mut prev = (v.x, v.y, vehicle_z(game, v));
         for t in v.route.iter().skip(v.route_index) {
             let (wx, wy) = game.board.center_world(*t);
+            let wz = tile_top_z(&game.board, *t);
             lines.push((
-                line_vert(prev.0, prev.1, z, [255, 255, 255], 255),
-                line_vert(wx, wy, z, [255, 255, 255], 255),
+                line_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
+                line_vert(wx, wy, wz, [255, 255, 255], 255),
             ));
-            prev = (wx, wy);
+            prev = (wx, wy, wz);
         }
     }
 }
@@ -1655,7 +1827,7 @@ mod tests {
     use crate::board::Board;
 
     #[test]
-    fn helicopter_has_body_tail_and_spinning_rotor() {
+    fn helicopter_has_slender_hull_and_spinning_rotor() {
         use crate::constants::VehicleKind;
         use crate::entities::{Player, Vehicle};
         use crate::game::Game;
@@ -1675,8 +1847,8 @@ mod tests {
         ));
         let mut first = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut first);
-        // Opaque hull + tail boom + fin + skid rails + mast: clearly more
-        // than the old single flat disc (12 triangles = 36 vertices).
+        // Opaque hull + canopy + tail boom + fin + skid rails + mast: clearly
+        // more than the old single flat disc (12 triangles = 36 vertices).
         assert!(
             first.opaque.vertices.len() > 36,
             "helicopter body has no details: {} vertices",
@@ -1689,33 +1861,65 @@ mod tests {
             "rotor/tail lines: {:?}",
             first.lines.len()
         );
-        // The rotor sits above the hull (first rotor stroke is at index 4,
-        // after the four low skid struts).
-        let top_opaque = first
-            .opaque
-            .vertices
-            .iter()
-            .map(|v| v.z as f64)
-            .fold(f64::NEG_INFINITY, f64::max);
-        for (a, b) in first.lines.iter().skip(4) {
-            assert!(
-                (a.z as f64) >= top_opaque - 5.0,
-                "rotor line below the hull: {} vs {top_opaque}",
-                a.z
-            );
-            let _ = b;
+        // Slender hull: the airframe is much longer along the heading (east
+        // for a parked helicopter) than it is wide across it.
+        let (mut lo_x, mut hi_x, mut lo_y, mut hi_y) = (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for vert in first.opaque.vertices.iter() {
+            lo_x = lo_x.min(f64::from(vert.x));
+            hi_x = hi_x.max(f64::from(vert.x));
+            lo_y = lo_y.min(f64::from(vert.y));
+            hi_y = hi_y.max(f64::from(vert.y));
         }
-        // Advancing the phase rotates the main blade (first rotor stroke is
-        // at index 4, after the four skid struts).
+        let (long, wide) = (hi_x - lo_x, hi_y - lo_y);
+        assert!(long > 1.6 * wide, "hull not slender: {long} x {wide}");
+        // Two main-rotor blades are the highest strokes: they span the full
+        // rotor diameter and their midpoint is the mast above the hull.
+        let blades = |mesh: &DynamicMesh| -> Vec<(LineVertex, LineVertex)> {
+            let top = mesh
+                .lines
+                .iter()
+                .map(|(a, _)| f64::from(a.z))
+                .fold(f64::NEG_INFINITY, f64::max);
+            mesh.lines
+                .iter()
+                .filter(|(a, b)| {
+                    (f64::from(a.z) - top).abs() < 1e-6 && (f64::from(b.z) - top).abs() < 1e-6
+                })
+                .copied()
+                .collect()
+        };
+        let first_blades = blades(&first);
+        assert_eq!(first_blades.len(), 2, "expected two main-rotor blades");
+        for (a, b) in first_blades.iter() {
+            let len = (f64::from(a.x) - f64::from(b.x)).hypot(f64::from(a.y) - f64::from(b.y));
+            assert!(
+                (len - 2.0 * HELI_ROTOR_R).abs() < 1e-3,
+                "rotor blade length {len}"
+            );
+            let (mx, my) = (f64::from(a.x + b.x) / 2.0, f64::from(a.y + b.y) / 2.0);
+            assert!(
+                (mx - sx).abs() < 1e-3 && (my - sy).abs() < 1e-3,
+                "rotor mast off centre: {mx},{my}"
+            );
+        }
+        // Advancing the phase rotates the main blades.
         let mut second = DynamicMesh::default();
         build_dynamic(&game, 0.7, &mut second);
         assert_eq!(second.lines.len(), 7);
-        let endpoints = |lines: &[(LineVertex, LineVertex)]| {
-            (lines[4].0.x, lines[4].0.y, lines[4].1.x, lines[4].1.y)
+        let endpoints = |mesh: &DynamicMesh| -> Vec<(f32, f32, f32, f32)> {
+            blades(mesh)
+                .iter()
+                .map(|(a, b)| (a.x, a.y, b.x, b.y))
+                .collect()
         };
         assert_ne!(
-            endpoints(&first.lines),
-            endpoints(&second.lines),
+            endpoints(&first),
+            endpoints(&second),
             "rotor does not spin with the phase"
         );
     }
@@ -1752,33 +1956,144 @@ mod tests {
         );
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut dynamic);
-        // Tail-rotor stroke (last line) sits behind the hull.
-        let tail = &dynamic.lines[6];
-        let (tmx, tmy) = (
-            f64::from(tail.0.x + tail.1.x) / 2.0,
-            f64::from(tail.0.y + tail.1.y) / 2.0,
-        );
-        assert!(
-            (tmx - vx) * fx + (tmy - vy) * fy < -10.0,
-            "tail {tmx},{tmy} not behind heading {fx},{fy}"
-        );
-        // Cockpit box (first oriented box = verts 24..48) sits ahead.
-        let cockpit: Vec<(f64, f64)> = dynamic.opaque.vertices[24..48]
+        // Distance of a stroke midpoint along the heading.
+        let along = |p: &(LineVertex, LineVertex)| {
+            let (mx, my) = (
+                f64::from(p.0.x + p.1.x) / 2.0,
+                f64::from(p.0.y + p.1.y) / 2.0,
+            );
+            (mx - vx) * fx + (my - vy) * fy
+        };
+        // The tail rotor is the rearmost stroke: it trails the hull.
+        let tail = dynamic
+            .lines
             .iter()
-            .map(|vert| (f64::from(vert.x), f64::from(vert.y)))
-            .collect();
-        let n = cockpit.len() as f64;
-        let (ccx, ccy) = (
-            cockpit.iter().map(|p| p.0).sum::<f64>() / n,
-            cockpit.iter().map(|p| p.1).sum::<f64>() / n,
-        );
+            .min_by(|a, b| along(a).partial_cmp(&along(b)).unwrap())
+            .expect("tail rotor stroke");
         assert!(
-            (ccx - vx) * fx + (ccy - vy) * fy > 0.0,
+            along(tail) < -10.0,
+            "tail not behind the flight heading: {}",
+            along(tail)
+        );
+        // The glazed cockpit (identified by its fixed tint) sits ahead and on
+        // top of the hull instead of sticking out as a white box.
+        let canopy: Vec<&GpuVertex> = dynamic
+            .opaque
+            .vertices
+            .iter()
+            .filter(|vert| vert.color == HELI_CANOPY_COLOR)
+            .collect();
+        assert!(!canopy.is_empty(), "no cockpit canopy found");
+        let n = canopy.len() as f64;
+        let (ccx, ccy, ccz) = (
+            canopy.iter().map(|p| f64::from(p.x)).sum::<f64>() / n,
+            canopy.iter().map(|p| f64::from(p.y)).sum::<f64>() / n,
+            canopy.iter().map(|p| f64::from(p.z)).sum::<f64>() / n,
+        );
+        let forward = (ccx - vx) * fx + (ccy - vy) * fy;
+        assert!(
+            forward > 0.0,
             "cockpit {ccx},{ccy} not ahead of heading {fx},{fy}"
         );
         assert!(
-            (ccx - tmx) * fx + (ccy - tmy) * fy > 15.0,
-            "cockpit not ahead of tail"
+            forward - along(tail) > 15.0,
+            "cockpit not ahead of the tail"
+        );
+        let hull_top = vehicle_z(&game, &game.vehicles[0]) + HELI_MAST_BASE;
+        assert!(
+            ccz > hull_top - HELI_HULL_H && ccz < hull_top + HELI_CANOPY_H,
+            "canopy {ccz} is not on the hull top {hull_top}"
+        );
+    }
+
+    #[test]
+    fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        // A board with a low tile and a hill: a helicopter must fly at the
+        // same altitude over both, above the highest terrain, while its
+        // shadow stays on the receiving surface right below it.
+        let mut board = Board::new(10, 10);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let hill = (7, 7);
+        board.tiles.get_mut(&hill).unwrap().height = 6;
+        let low = (2, 2);
+        let (lx, ly) = hexgrid::hex_to_world(low.0, low.1, board.side);
+        let (hx, hy) = hexgrid::hex_to_world(hill.0, hill.1, board.side);
+        let tank_board = board.clone();
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        for pos in [(lx, ly), (hx, hy)] {
+            game.vehicles.push(Vehicle::new(
+                VehicleKind::Helicopter,
+                0,
+                10.0,
+                Vec::new(),
+                pos,
+                Some(low),
+            ));
+        }
+        let alt = vehicle_z(&game, &game.vehicles[0]);
+        let hill_top = 6.0 * constants::ELEVATION_PX;
+        assert!(
+            alt >= hill_top + constants::HELICOPTER_ALTITUDE_PX - 1e-6,
+            "helicopter at {alt} does not clear the hill at {hill_top}"
+        );
+        assert_eq!(
+            alt,
+            vehicle_z(&game, &game.vehicles[1]),
+            "altitude follows the terrain instead of staying fixed"
+        );
+        // The shadow lands on the surface under the helicopter: on the low
+        // tile far below the hull, on the hill closer to it.
+        let low_shadow = helicopter_shadow_z(&game, lx, ly) + constants::OBSTACLE_LIFT;
+        let hill_shadow = helicopter_shadow_z(&game, hx, hy) + constants::OBSTACLE_LIFT;
+        assert!((low_shadow - (constants::ELEVATION_PX + constants::OBSTACLE_LIFT)).abs() < 1e-9);
+        assert!((hill_shadow - (hill_top + constants::OBSTACLE_LIFT)).abs() < 1e-9);
+        assert!(
+            low_shadow < alt && hill_shadow < alt,
+            "shadow {low_shadow}/{hill_shadow} not below the hull {alt}"
+        );
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        // One dark translucent disc per helicopter, 14 segments each.
+        assert_eq!(
+            dynamic.shadow.vertices.len(),
+            2 * constants::SHADOW_SEGMENTS * 3,
+            "helicopter shadows: {}",
+            dynamic.shadow.vertices.len()
+        );
+        for vert in dynamic.shadow.vertices.iter() {
+            assert_eq!(&vert.color[..3], &constants::SHADOW_COLOR[..]);
+            assert_eq!(vert.color[3], constants::SHADOW_ALPHA);
+        }
+        let shadow_z: Vec<f64> = dynamic
+            .shadow
+            .vertices
+            .iter()
+            .map(|vert| f64::from(vert.z))
+            .collect();
+        assert!(
+            shadow_z.contains(&low_shadow) && shadow_z.contains(&hill_shadow),
+            "shadows not on the receiving surfaces: {shadow_z:?}"
+        );
+        // Ground vehicles hug the terrain and get no shadow disc.
+        let mut tank_game = Game::new(tank_board, vec![Player::new(0, true)], Vec::new(), 1);
+        tank_game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            10.0,
+            Vec::new(),
+            (lx, ly),
+            None,
+        ));
+        let mut tank_mesh = DynamicMesh::default();
+        build_dynamic(&tank_game, 0.0, &mut tank_mesh);
+        assert!(
+            tank_mesh.shadow.vertices.is_empty(),
+            "a ground vehicle needs no shadow disc"
         );
     }
 

@@ -77,8 +77,8 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 - `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
 - `rust/src/camera.rs` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`).
 - `rust/src/iso.rs` — ortograficzna kamera GPU odtwarzająca rzut 2D: `IsoCamera` (`from_camera()`, macierze view/proj, głębia z D wzdłuż osi Z).
-- `rust/src/mesh.rs` — budowa meshy GPU bez zależności od macroquad: `TerrainMesh` (`build_terrain()`, chunki na u16), `DynamicMesh` (`build_dynamic()`), `depth_span()`, `tile_top_z()`.
-- `rust/src/render.rs` — rysowanie z kodu na GPU (bez assetów rastrowych): `Renderer::draw_gpu()` (chunki terenu, linie siatki, obiekty, przezroczyste zasięgi, kreski 3D, nakładki 2D); `snap_to_building()` deleguje do `Board`.
+- `rust/src/mesh.rs` — budowa meshy GPU bez zależności od macroquad: `TerrainMesh` (`build_terrain()`, chunki na u16), `DynamicMesh` (`build_dynamic()`), `vehicle_z()` (stała wysokość lotu helikoptera nad najwyższym terenem), przezroczysty cień helikoptera (`DynamicMesh::shadow`), `depth_span()`, `tile_top_z()`.
+- `rust/src/render.rs` — rysowanie z kodu na GPU (bez assetów rastrowych): `Renderer::draw_gpu()` (chunki terenu, linie siatki, obiekty, przezroczyste cienie i zasięgi, kreski 3D, nakładki 2D); `snap_to_building()` deleguje do `Board`.
 - `rust/src/render_baseline.rs` — test-benchmark budowy meshy (`#[cfg(test)]`): `build_terrain()` raz na mapę + `build_dynamic()` co klatkę (`cargo test --release render_baseline -- --nocapture`).
 - `rust/src/app.rs` — okno, menu poziomów, input i HUD: `Application` (`run()`, LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza).
 
