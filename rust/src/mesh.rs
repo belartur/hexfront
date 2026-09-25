@@ -1226,6 +1226,8 @@ const HELI_TAIL_ROTOR_R: f64 = 5.0;
 /// Width of one rotor blade in the helicopter shadow in px (wider than the
 /// air stroke, so the spinning blades stay readable on the ground).
 const HELI_SHADOW_BLADE_WID: f64 = 2.5;
+/// Phase multiplier of the tail rotor: it spins faster than the main rotor.
+const HELI_TAIL_ROTOR_RATIO: f64 = 2.0;
 /// Elevation of the tail rotor axis above the skid base in px: just above
 /// the tip of the vertical fin.
 const HELI_TAIL_ROTOR_Z: f64 = HELI_FIN_BASE + HELI_FIN_H + 1.0;
@@ -1373,8 +1375,8 @@ fn push_helicopter_oriented(
         faint,
     );
     // Tail rotor: short vertical stroke spinning on the fin tip. Its phase
-    // runs twice as fast as the main rotor.
-    let t_phase = rotor_phase * 2.0;
+    // runs faster than the main rotor.
+    let t_phase = rotor_phase * HELI_TAIL_ROTOR_RATIO;
     let (tc, ts) = (t_phase.cos(), t_phase.sin());
     let tr = HELI_TAIL_ROTOR_R;
     let (tx, ty, tz) = (
@@ -1417,9 +1419,11 @@ fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
 /// interfejs użytkownika"). Instead of one plain disc it traces the parts of
 /// the airframe, all at the same elevation so the light reads as coming from
 /// straight above: a faint disc for the swept rotor area, the two main rotor
-/// blades at their current `rotor_phase`, both skid rails, the tail boom
-/// with its fin and, on top, the hull. Every part reuses the px constants of
-/// the 3D parts, so the shadow follows a redesign of the airframe for free.
+/// blades at their current `rotor_phase` — the very phase the airframe used
+/// this frame, so a helicopter and its shadow spin in lockstep — both skid
+/// rails, the tail boom with its fin and, on top, the hull. Every part reuses
+/// the px constants of the 3D parts, so the shadow follows a redesign of the
+/// airframe for free.
 ///
 /// All pieces are black and only differ in alpha, so the blend order does
 /// not matter; they sit [`OBSTACLE_LIFT`] above the receiving surface (a
@@ -2255,6 +2259,59 @@ mod tests {
             tank_mesh.shadow.vertices.is_empty(),
             "a ground vehicle needs no shadow disc"
         );
+    }
+
+    #[test]
+    fn helicopter_shadow_blades_follow_the_rotor_phase() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(8, 8);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let (sx, sy) = crate::hexgrid::hex_to_world(3, 3, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            Vec::new(),
+            (sx, sy),
+            None,
+        ));
+        // Both the airframe blades and the shadow blades read one shared
+        // phase, so every blade tip must have a shadow right below it.
+        for phase in [0.0, 1.1, 3.7] {
+            let mut dynamic = DynamicMesh::default();
+            build_dynamic(&game, phase, &mut dynamic);
+            let top = dynamic
+                .lines
+                .iter()
+                .map(|(a, _)| f64::from(a.z))
+                .fold(f64::NEG_INFINITY, f64::max);
+            let blades: Vec<_> = dynamic
+                .lines
+                .iter()
+                .filter(|(a, b)| {
+                    (f64::from(a.z) - top).abs() < 1e-6 && (f64::from(b.z) - top).abs() < 1e-6
+                })
+                .collect();
+            assert_eq!(blades.len(), 2, "phase {phase}");
+            for (a, b) in blades {
+                for tip in [a, b] {
+                    let covered = dynamic.shadow.vertices.iter().any(|s| {
+                        (f64::from(s.x) - f64::from(tip.x)).hypot(f64::from(s.y) - f64::from(tip.y))
+                            < HELI_SHADOW_BLADE_WID
+                    });
+                    assert!(
+                        covered,
+                        "no shadow blade under the tip {},{} at phase {phase}",
+                        tip.x, tip.y
+                    );
+                }
+            }
+        }
     }
 
     #[test]

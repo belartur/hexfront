@@ -15,6 +15,12 @@ use crate::game::Game;
 use crate::hexgrid::Tile;
 
 /// Draws a whole game state with the GPU.
+///
+/// The rotor animation phase ([`Renderer::rotor_phase`]) is shared by the
+/// airframe blades and the rotor blades of the shadow
+/// ([`crate::mesh::build_dynamic`]), so a helicopter and its shadow always
+/// spin together; [`crate::app`] advances it by
+/// [`crate::constants::ROTOR_SPIN_RAD_PER_S`] every frame.
 pub struct Renderer {
     /// Phase of the helicopter rotor animation.
     pub rotor_phase: f64,

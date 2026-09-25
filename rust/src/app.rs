@@ -120,7 +120,7 @@ impl Application {
                     self.slow_frames.clear();
                 }
             }
-            self.draw();
+            self.draw(dt);
             if self.capture.is_some() {
                 if self.capture_frames > 0 {
                     self.capture_frames -= 1;
@@ -430,15 +430,15 @@ impl Application {
             }
         }
     }
-    fn draw(&mut self) {
+    fn draw(&mut self, dt: f32) {
         self.ensure_buffers();
         match self.state {
             State::Menu => self.draw_menu(),
             State::Loading => self.draw_loading(),
-            State::Playing => self.draw_game(),
+            State::Playing => self.draw_game(dt),
         }
     }
-    fn draw_game(&mut self) {
+    fn draw_game(&mut self, dt: f32) {
         let (mx, my) = mouse_position();
         let hover = self.hover_tile((mx, my));
         // Update preview path rendering state.
@@ -459,7 +459,12 @@ impl Application {
                 game.board.side,
             );
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
-            self.renderer.rotor_phase += 0.2;
+            // Advance the shared rotor phase by wall-clock time, so the
+            // spin speed does not depend on the frame rate; the next frame
+            // uses it for the airframe blades and their shadow alike.
+            self.renderer.rotor_phase = (self.renderer.rotor_phase
+                + constants::ROTOR_SPIN_RAD_PER_S * f64::from(dt))
+                % std::f64::consts::TAU;
             let sel = self.selection;
             self.renderer.draw_gpu(
                 &iso,

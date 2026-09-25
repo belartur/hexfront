@@ -99,6 +99,11 @@ pub const SHADOW_DISC_ALPHA: u8 = 26;
 pub const FPS: f64 = 60.0;
 /// Length of one simulation step in seconds.
 pub const SIM_DT: f64 = 1.0 / FPS;
+/// Angular speed of the helicopter rotor animation in rad/s (rendering
+/// only; rules.md has no rotor state). The same phase drives the airframe
+/// blades and their shadow, so both stay in lockstep, and the tail rotor
+/// uses [`crate::mesh`]'s faster multiplier.
+pub const ROTOR_SPIN_RAD_PER_S: f64 = 3.0;
 
 // ---------------------------------------------------------------------------
 // Vehicles (rules.md sections 4-5)
