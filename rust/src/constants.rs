@@ -79,14 +79,22 @@ pub const OBSTACLE_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
 /// the tile it flies over.
 pub const HELICOPTER_ALTITUDE_PX: f64 = 2.0 * ELEVATION_PX;
 /// Radius of a vehicle shadow decal in j (specification.md, section
-/// "Grafika i interfejs użytkownika").
+/// "Grafika i interfejs użytkownika"). The Rust implementation draws the
+/// helicopter silhouette instead of this disc (specification_rust.md,
+/// "Renderowanie"), so only the outline resolution is reused.
+#[allow(dead_code)]
 pub const SHADOW_RADIUS: f64 = 14.0 * UNIT_J_TO_PX;
-/// Outline segments of a shadow decal (specification.md).
+/// Outline segments of a shadow decal (specification.md); used for the
+/// rotor-sweep disc of a helicopter shadow.
 pub const SHADOW_SEGMENTS: usize = 14;
 /// Colour of the translucent shadow decal (specification.md).
 pub const SHADOW_COLOR: [u8; 3] = [0, 0, 0];
 /// Alpha of the translucent shadow decal, 70/255 (specification.md).
 pub const SHADOW_ALPHA: u8 = 70;
+/// Alpha of the faint rotor-sweep disc of a helicopter shadow: it covers the
+/// whole rotor area, so it is much lighter than the hull silhouette drawn on
+/// top of it (rendering only; specification.md fixes only [`SHADOW_ALPHA`]).
+pub const SHADOW_DISC_ALPHA: u8 = 26;
 /// Fixed simulation frame rate (specification_rust.md, "Determinism").
 pub const FPS: f64 = 60.0;
 /// Length of one simulation step in seconds.

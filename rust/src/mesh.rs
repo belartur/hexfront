@@ -233,6 +233,43 @@ fn push_range_disc(
     }
 }
 
+/// Flat oriented rectangle with one RGBA colour (helicopter shadow parts).
+///
+/// `len` runs along the unit direction `(fx, fy)`, `wid` across it, exactly
+/// like [`push_oriented_box`] draws the part itself, so the shadow keeps the
+/// silhouette of the airframe.
+#[allow(clippy::too_many_arguments)]
+fn push_range_rect(
+    soup: &mut RangeSoup,
+    cx: f64,
+    cy: f64,
+    z: f64,
+    len: f64,
+    wid: f64,
+    fx: f64,
+    fy: f64,
+    color: [u8; 3],
+    alpha: u8,
+) {
+    let (px, py) = (-fy, fx);
+    let (hl, hw) = (len / 2.0, wid / 2.0);
+    let corner = |along: f64, across: f64| {
+        range_vert(
+            cx + fx * along + px * across,
+            cy + fy * along + py * across,
+            z,
+            color,
+            alpha,
+        )
+    };
+    let a = corner(-hl, -hw);
+    let b = corner(hl, -hw);
+    let c = corner(hl, hw);
+    let d = corner(-hl, hw);
+    push_range_tri(soup, a, b, c);
+    push_range_tri(soup, a, c, d);
+}
+
 /// Base tile colour (checkerboard for land, blue for water).
 pub fn tile_color(tile: Tile, height: i32) -> [u8; 3] {
     if height == 0 {
@@ -809,7 +846,7 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
         }
         push_vehicle(game, v, rotor_phase, &mut out.opaque, &mut out.lines);
         if v.kind == constants::VehicleKind::Helicopter {
-            push_helicopter_shadow(game, v, &mut out.shadow);
+            push_helicopter_shadow(game, v, rotor_phase, &mut out.shadow);
         }
     }
     push_ranges(
@@ -1186,6 +1223,9 @@ const HELI_MAST_THICK: f64 = 2.5;
 const HELI_ROTOR_R: f64 = 22.0;
 /// Radius of the tail rotor in px.
 const HELI_TAIL_ROTOR_R: f64 = 5.0;
+/// Width of one rotor blade in the helicopter shadow in px (wider than the
+/// air stroke, so the spinning blades stay readable on the ground).
+const HELI_SHADOW_BLADE_WID: f64 = 2.5;
 /// Elevation of the tail rotor axis above the skid base in px: just above
 /// the tip of the vertical fin.
 const HELI_TAIL_ROTOR_Z: f64 = HELI_FIN_BASE + HELI_FIN_H + 1.0;
@@ -1369,27 +1409,113 @@ fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
     vehicle_ground_z(game, x, y)
 }
 
-/// Translucent shadow disc of a helicopter, drawn below its hull.
+/// Detailed shadow of one helicopter, projected straight down.
 ///
 /// The flight altitude does not follow the terrain (rules.md section 5.2),
 /// so the isometric view alone cannot tell which tile a helicopter is over;
-/// the dark decal marks it (specification.md, section "Grafika i interfejs
-/// użytkownika"). It is one flat disc lifted by [`OBSTACLE_LIFT`] so that it
-/// does not z-fight with the receiving surface, and it goes into the
-/// translucent pass: the GPU depth test keeps it from darkening the hull,
-/// other vehicles or nearer cliffs, and the terrain under the helicopter
-/// keeps its own colour everywhere else.
-fn push_helicopter_shadow(game: &Game, v: &crate::entities::Vehicle, shadow: &mut RangeSoup) {
+/// the dark silhouette marks it (specification.md, section "Grafika i
+/// interfejs użytkownika"). Instead of one plain disc it traces the parts of
+/// the airframe, all at the same elevation so the light reads as coming from
+/// straight above: a faint disc for the swept rotor area, the two main rotor
+/// blades at their current `rotor_phase`, both skid rails, the tail boom
+/// with its fin and, on top, the hull. Every part reuses the px constants of
+/// the 3D parts, so the shadow follows a redesign of the airframe for free.
+///
+/// All pieces are black and only differ in alpha, so the blend order does
+/// not matter; they sit [`OBSTACLE_LIFT`] above the receiving surface (a
+/// bridge deck when the helicopter crosses one) so they do not z-fight with
+/// it. They go into the translucent pass: the GPU depth test keeps them from
+/// darkening the hull, other vehicles or nearer cliffs.
+fn push_helicopter_shadow(
+    game: &Game,
+    v: &crate::entities::Vehicle,
+    rotor_phase: f64,
+    shadow: &mut RangeSoup,
+) {
     let z = helicopter_shadow_z(game, v.x, v.y) + constants::OBSTACLE_LIFT;
+    let (fx, fy) = vehicle_heading(game, v);
+    let (px, py) = (-fy, fx);
+    let black = constants::SHADOW_COLOR;
+    let solid = constants::SHADOW_ALPHA;
+    // Swept area of the main rotor.
     push_range_disc(
         shadow,
         v.x,
         v.y,
         z,
-        constants::SHADOW_RADIUS,
+        HELI_ROTOR_R,
         constants::SHADOW_SEGMENTS,
-        constants::SHADOW_COLOR,
-        constants::SHADOW_ALPHA,
+        black,
+        constants::SHADOW_DISC_ALPHA,
+    );
+    // The two main rotor blades, at the phase the airframe shows this frame.
+    let (c, s) = (rotor_phase.cos(), rotor_phase.sin());
+    for (bx, by) in [(c, s), (s, -c)] {
+        push_range_rect(
+            shadow,
+            v.x,
+            v.y,
+            z,
+            2.0 * HELI_ROTOR_R,
+            HELI_SHADOW_BLADE_WID,
+            bx,
+            by,
+            black,
+            solid,
+        );
+    }
+    // Skid rails.
+    for side in [-1.0, 1.0] {
+        push_range_rect(
+            shadow,
+            v.x + px * side * HELI_SKID_OFFSET,
+            v.y + py * side * HELI_SKID_OFFSET,
+            z,
+            HELI_SKID_LEN,
+            HELI_SKID_THICK,
+            fx,
+            fy,
+            black,
+            solid,
+        );
+    }
+    // Tail boom with its end fin.
+    push_range_rect(
+        shadow,
+        v.x + fx * HELI_TAIL_SHIFT,
+        v.y + fy * HELI_TAIL_SHIFT,
+        z,
+        HELI_TAIL_LEN,
+        HELI_TAIL_WID,
+        fx,
+        fy,
+        black,
+        solid,
+    );
+    push_range_rect(
+        shadow,
+        v.x + fx * HELI_FIN_SHIFT,
+        v.y + fy * HELI_FIN_SHIFT,
+        z,
+        HELI_FIN_LEN,
+        HELI_FIN_WID,
+        fx,
+        fy,
+        black,
+        solid,
+    );
+    // Hull on top of the rest (the darkest part of the silhouette).
+    push_range_rect(
+        shadow,
+        v.x,
+        v.y,
+        z,
+        HELI_HULL_LEN,
+        HELI_HULL_WID,
+        fx,
+        fy,
+        black,
+        solid,
     );
 }
 
@@ -2058,17 +2184,35 @@ mod tests {
         );
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut dynamic);
-        // One dark translucent disc per helicopter, 14 segments each.
+        // The shadow is a silhouette (rotor disc + blades + skids + tail +
+        // hull), not one plain disc, and it uses the two shadow alphas.
+        let rotor_disc = constants::SHADOW_SEGMENTS * 3;
+        let solid_parts = 7; // two blades, two skids, tail boom, fin, hull
+        let per_heli = rotor_disc + solid_parts * 6;
         assert_eq!(
             dynamic.shadow.vertices.len(),
-            2 * constants::SHADOW_SEGMENTS * 3,
+            2 * per_heli,
             "helicopter shadows: {}",
             dynamic.shadow.vertices.len()
         );
+        let mut alphas: Vec<u8> = dynamic
+            .shadow
+            .vertices
+            .iter()
+            .map(|vert| vert.color[3])
+            .collect();
+        alphas.sort_unstable();
+        alphas.dedup();
+        assert_eq!(
+            alphas,
+            vec![constants::SHADOW_DISC_ALPHA, constants::SHADOW_ALPHA],
+            "shadow parts must use the two shadow alphas"
+        );
         for vert in dynamic.shadow.vertices.iter() {
             assert_eq!(&vert.color[..3], &constants::SHADOW_COLOR[..]);
-            assert_eq!(vert.color[3], constants::SHADOW_ALPHA);
         }
+        // Every part lies in the receiving plane, on the surface right below
+        // the helicopter it belongs to.
         let shadow_z: Vec<f64> = dynamic
             .shadow
             .vertices
@@ -2078,6 +2222,22 @@ mod tests {
         assert!(
             shadow_z.contains(&low_shadow) && shadow_z.contains(&hill_shadow),
             "shadows not on the receiving surfaces: {shadow_z:?}"
+        );
+        // The blade part of the silhouette follows the rotor phase.
+        let mut spun = DynamicMesh::default();
+        build_dynamic(&game, 0.9, &mut spun);
+        assert_eq!(spun.shadow.vertices.len(), dynamic.shadow.vertices.len());
+        let coords = |mesh: &DynamicMesh| -> Vec<(f32, f32)> {
+            mesh.shadow
+                .vertices
+                .iter()
+                .map(|vert| (vert.x, vert.y))
+                .collect()
+        };
+        assert_ne!(
+            coords(&dynamic),
+            coords(&spun),
+            "the rotor shadow does not spin with the phase"
         );
         // Ground vehicles hug the terrain and get no shadow disc.
         let mut tank_game = Game::new(tank_board, vec![Player::new(0, true)], Vec::new(), 1);
