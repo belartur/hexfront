@@ -81,20 +81,23 @@ pub const HELICOPTER_ALTITUDE_PX: f64 = 2.0 * ELEVATION_PX;
 /// Radius of a vehicle shadow decal in j (specification.md, section
 /// "Grafika i interfejs użytkownika"). The Rust implementation draws the
 /// helicopter silhouette instead of this disc (specification_rust.md,
-/// "Renderowanie"), so only the outline resolution is reused.
+/// "Renderowanie"), so this is kept only as the documented contract value.
 #[allow(dead_code)]
 pub const SHADOW_RADIUS: f64 = 14.0 * UNIT_J_TO_PX;
-/// Outline segments of a shadow decal (specification.md); used for the
-/// rotor-sweep disc of a helicopter shadow.
+/// Outline segments of a shadow decal (specification.md). The Rust
+/// helicopter silhouette needs no disc tessellation, so this is kept only
+/// as the documented contract value (specification_rust.md, "Renderowanie").
+#[allow(dead_code)]
 pub const SHADOW_SEGMENTS: usize = 14;
 /// Colour of the translucent shadow decal (specification.md).
 pub const SHADOW_COLOR: [u8; 3] = [0, 0, 0];
 /// Alpha of the translucent shadow decal, 70/255 (specification.md).
 pub const SHADOW_ALPHA: u8 = 70;
-/// Alpha of the faint rotor-sweep disc of a helicopter shadow: it covers the
-/// whole rotor area, so it is much lighter than the hull silhouette drawn on
-/// top of it (rendering only; specification.md fixes only [`SHADOW_ALPHA`]).
-pub const SHADOW_DISC_ALPHA: u8 = 26;
+/// Lift of the helicopter shadow silhouette above the receiving surface in
+/// px (rendering only; rules.md has no shadows). Just high enough that the
+/// decal never loses the depth race against the terrain (no flicker), low
+/// enough that it still reads as lying on the ground.
+pub const SHADOW_LIFT: f64 = 1.0 * UNIT_J_TO_PX;
 /// Fixed simulation frame rate (specification_rust.md, "Determinism").
 pub const FPS: f64 = 60.0;
 /// Length of one simulation step in seconds.
@@ -103,7 +106,7 @@ pub const SIM_DT: f64 = 1.0 / FPS;
 /// only; rules.md has no rotor state). The same phase drives the airframe
 /// blades and their shadow, so both stay in lockstep, and the tail rotor
 /// uses [`crate::mesh`]'s faster multiplier.
-pub const ROTOR_SPIN_RAD_PER_S: f64 = 3.0;
+pub const ROTOR_SPIN_RAD_PER_S: f64 = 12.0;
 
 // ---------------------------------------------------------------------------
 // Vehicles (rules.md sections 4-5)

@@ -1418,40 +1418,30 @@ fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
 /// the dark silhouette marks it (specification.md, section "Grafika i
 /// interfejs użytkownika"). Instead of one plain disc it traces the parts of
 /// the airframe, all at the same elevation so the light reads as coming from
-/// straight above: a faint disc for the swept rotor area, the two main rotor
-/// blades at their current `rotor_phase` — the very phase the airframe used
-/// this frame, so a helicopter and its shadow spin in lockstep — both skid
-/// rails, the tail boom with its fin and, on top, the hull. Every part reuses
-/// the px constants of the 3D parts, so the shadow follows a redesign of the
-/// airframe for free.
+/// straight above: the two main rotor blades at their current `rotor_phase` —
+/// the very phase the airframe used this frame, so a helicopter and its
+/// shadow spin in lockstep — both skid rails, the tail boom with its fin
+/// and the hull. Every part reuses the px constants of the 3D
+/// parts, so the shadow follows a redesign of the airframe for free.
 ///
-/// All pieces are black and only differ in alpha, so the blend order does
-/// not matter; they sit [`OBSTACLE_LIFT`] above the receiving surface (a
-/// bridge deck when the helicopter crosses one) so they do not z-fight with
-/// it. They go into the translucent pass: the GPU depth test keeps them from
-/// darkening the hull, other vehicles or nearer cliffs.
+/// All pieces share one flat elevation, so no part of the silhouette fights
+/// another in the depth buffer; they sit [`SHADOW_LIFT`] above the receiving
+/// surface (a bridge deck when the helicopter crosses one), high enough to
+/// win the depth race against the terrain (no flicker) yet low enough to
+/// read as lying on the ground. They go into the translucent pass: the GPU
+/// depth test keeps them from darkening the hull, other vehicles or nearer
+/// cliffs.
 fn push_helicopter_shadow(
     game: &Game,
     v: &crate::entities::Vehicle,
     rotor_phase: f64,
     shadow: &mut RangeSoup,
 ) {
-    let z = helicopter_shadow_z(game, v.x, v.y) + constants::OBSTACLE_LIFT;
+    let z = helicopter_shadow_z(game, v.x, v.y) + constants::SHADOW_LIFT;
     let (fx, fy) = vehicle_heading(game, v);
     let (px, py) = (-fy, fx);
     let black = constants::SHADOW_COLOR;
     let solid = constants::SHADOW_ALPHA;
-    // Swept area of the main rotor.
-    push_range_disc(
-        shadow,
-        v.x,
-        v.y,
-        z,
-        HELI_ROTOR_R,
-        constants::SHADOW_SEGMENTS,
-        black,
-        constants::SHADOW_DISC_ALPHA,
-    );
     // The two main rotor blades, at the phase the airframe shows this frame.
     let (c, s) = (rotor_phase.cos(), rotor_phase.sin());
     for (bx, by) in [(c, s), (s, -c)] {
@@ -1508,7 +1498,7 @@ fn push_helicopter_shadow(
         black,
         solid,
     );
-    // Hull on top of the rest (the darkest part of the silhouette).
+    // Hull (the widest part of the silhouette).
     push_range_rect(
         shadow,
         v.x,
@@ -2188,32 +2178,20 @@ mod tests {
         );
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut dynamic);
-        // The shadow is a silhouette (rotor disc + blades + skids + tail +
-        // hull), not one plain disc, and it uses the two shadow alphas.
-        let rotor_disc = constants::SHADOW_SEGMENTS * 3;
-        let solid_parts = 7; // two blades, two skids, tail boom, fin, hull
-        let per_heli = rotor_disc + solid_parts * 6;
+        // The shadow is a flat silhouette (blades + skids + tail boom + fin
+        // + hull), not one plain disc, and every piece is black, 70/255.
+        let per_heli = 7 * 6; // seven oriented rectangles, two triangles each
         assert_eq!(
             dynamic.shadow.vertices.len(),
             2 * per_heli,
             "helicopter shadows: {}",
             dynamic.shadow.vertices.len()
         );
-        let mut alphas: Vec<u8> = dynamic
-            .shadow
-            .vertices
-            .iter()
-            .map(|vert| vert.color[3])
-            .collect();
-        alphas.sort_unstable();
-        alphas.dedup();
-        assert_eq!(
-            alphas,
-            vec![constants::SHADOW_DISC_ALPHA, constants::SHADOW_ALPHA],
-            "shadow parts must use the two shadow alphas"
-        );
+        // One flat elevation, one black, one alpha: the silhouette can neither
+        // fight itself in the depth buffer nor accumulate darker overlaps.
         for vert in dynamic.shadow.vertices.iter() {
             assert_eq!(&vert.color[..3], &constants::SHADOW_COLOR[..]);
+            assert_eq!(vert.color[3], constants::SHADOW_ALPHA);
         }
         // Every part lies in the receiving plane, on the surface right below
         // the helicopter it belongs to.
