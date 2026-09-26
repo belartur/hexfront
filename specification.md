@@ -80,7 +80,7 @@ Prędkość klatki (FPS) nie jest częścią kontraktu — jest decyzją każdej
 ## Plansze
 Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Każda implementacja listuje katalog `maps` dynamicznie, a nazwa pliku jest wyświetlaną nazwą poziomu w menu — lista poziomów nie jest hardkodowana.
 
-Edytor plansz jest osobną aplikacją o specyfikacji opisanej w [specification_of_map_editor.md](specification_of_map_editor.md); na razie istnieje wyłącznie w implementacji Pythonowej ([specification_python.md](specification_python.md)).
+Edytor plansz istnieje w implementacji Pythonowej ([specification_python.md](specification_python.md)) o specyfikacji opisanej w [specification_of_map_editor.md](specification_of_map_editor.md); edytor Rustowy jest planowany jako integralna część gry (bez osobnej aplikacji), opisana w [specification_rust.md](specification_rust.md) (sekcja „Edytor plansz”).
 
 ## Format pliku planszy
 Format pliku planszy jest wspólny dla wszystkich implementacji i opisany jest w [specification_of_map_format.md](specification_of_map_format.md).
