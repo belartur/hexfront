@@ -11,7 +11,7 @@ Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasa
 | `specification_python.md` | Specyfikacja implementacji Python (PyGame + NumPy): układ kodu, uruchamianie i testy, mechanika renderera (NumPy, cache), edytor, format mapy, parametry (FPS). | Przed zmianą `python/**` (poza czystą logiką gry, którą opisuje `rules.md`). |
 | `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — układ modułów, uruchamianie i testy, renderowanie, determinizm. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
 | `specification_of_map_format.md` | Binarny format pliku planszy: układ bajtów, tabele typów budynków i utrudnień, kodowanie mostów i podjazdów. Wspólny dla wszystkich implementacji (bez odwołań do kodu). | Przed zmianą formatu `.map` oraz implementacji formatu w dowolnej implementacji (Python: `python/hexfront/mapfile.py`). |
-| `specification_of_map_editor.md` | Uzupełnienie specyfikacji o edytor map (klawisze, walidacja, trim/pad). | Przed zmianą edytora (implementacja Python: `python/editor.py`; planowany edytor wbudowany w grę w implementacji Rust, opisany w `specification_rust.md`) lub implementacji formatu `.map`. |
+| `specification_of_map_editor.md` | Uzupełnienie specyfikacji o edytor map (klawisze, walidacja, trim/pad). | Przed zmianą edytora (implementacja Python: `python/editor.py`; edytor wbudowany w grę w implementacji Rust, opisany w `specification_rust.md`) lub implementacji formatu `.map`. |
 | `README.md` | Skrócony opis uruchomienia i sterowania dla gracza. | Przy zmianie UX / dodawaniu poziomu. |
 
 Zasada: nie przepisuj liczb ani reguł z `rules.md` / `specification*.md` do kodu ani do tego pliku. W każdej implementacji trzymaj wartości liczbowe w jej module stałych (nazwę modułu i pliku podaje specyfikacja tego języka); w dokumentacji dawaj odnośniki do sekcji źródłowych, a nie kopie wartości.
@@ -67,24 +67,24 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 ### Katalog `rust/src/` (implementacja w Rust)
 - `rust/Cargo.toml` — manifest binarnego crate'a `hexfront` (tylko `macroquad =0.4.16`; `Cargo.lock` wersjonowany, `target/` w `.gitignore`).
 - `rust/src/main.rs` — tylko konfiguracja okna i `Application::run()`. Nic tu nie dopisuj.
-- `rust/src/constants.rs` — moduł stałych: `UNIT_J_TO_PX` dokładnie raz, `FPS`/`SIM_DT`, współczynniki rzutu, `maps_dir()`/`MAP_EXTENSION`, presety `AiDifficulty` / `AI_DIFFICULTIES`; każda stała z komentarzem wskazującym sekcję `rules.md`.
+- `rust/src/constants.rs` — moduł stałych: `UNIT_J_TO_PX` dokładnie raz, `FPS`/`SIM_DT`, współczynniki rzutu, `maps_dir()`/`MAP_EXTENSION`, presety `AiDifficulty` / `AI_DIFFICULTIES`, stałe edytora `EDITOR_*`; każda stała z komentarzem wskazującym sekcję `rules.md`.
 - `rust/src/hexgrid.rs` — czysta geometria flat-top hex (odd-q) bez logiki gry.
-- `rust/src/board.rs` — plansza: `HexTile`, `Obstacle`/`ObstacleKind`, `Bridge`, `Board` (`passable()`, `find_path()` BFS, `reachable()`, `pick_tile()` / `snap_to_building()` z trybem płaskim na Alt, `set_ramp()` / `remove_ramp()`, `add_bridge()`).
+- `rust/src/board.rs` — plansza: `HexTile`, `Obstacle`/`ObstacleKind`, `Bridge`, `Board` (`passable()`, `find_path()` BFS, `reachable()`, `pick_tile()` / `snap_to_building()` z trybem płaskim na Alt, `set_ramp()` / `remove_ramp()` / `refresh_ramps_around()`, `add_bridge()` / `rebuild_single_bridge()`).
 - `rust/src/entities.rs` — dane: `BuildingKind`, `Player`, `Building`, `Vehicle`; helpery `is_base()`, `is_turret()`, `vehicle_kind_of()`, `turret_kind_of()`, `capacity_of()`. Logika w `game.rs`.
 - `rust/src/game.rs` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od macroquad.
 - `rust/src/ai.rs` — `AiController` (pętla decyzyjna z sekcji 13 `rules.md`). Determinystyczny dla danego seeda.
 - `rust/src/rng.rs` — własny deterministyczny PRNG (splitmix64 + Box-Muller) na szum AI, bez dodatkowych crate'ów.
-- `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
+- `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `save_path()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()` / `rebuild_bridges_keep()`. Jedynie tu wolno ruszać format pliku.
 - `rust/src/camera.rs` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`).
 - `rust/src/iso.rs` — ortograficzna kamera GPU odtwarzająca rzut 2D: `IsoCamera` (`from_camera()`, macierze view/proj, głębia z D wzdłuż osi Z).
 - `rust/src/mesh.rs` — budowa meshy GPU bez zależności od macroquad: `TerrainMesh` (`build_terrain()`, chunki na u16), `DynamicMesh` (`build_dynamic()`), `vehicle_z()` (stała wysokość lotu helikoptera nad najwyższym terenem), przezroczysty cień helikoptera (`DynamicMesh::shadow`), `depth_span()`, `tile_top_z()`.
 - `rust/src/render.rs` — rysowanie z kodu na GPU (bez assetów rastrowych): `Renderer::draw_gpu()` (chunki terenu, linie siatki, obiekty, przezroczyste cienie i zasięgi, kreski 3D, nakładki 2D); `snap_to_building()` deleguje do `Board`.
 - `rust/src/render_baseline.rs` — test-benchmark budowy meshy (`#[cfg(test)]`): `build_terrain()` raz na mapę + `build_dynamic()` co klatkę (`cargo test --release render_baseline -- --nocapture`).
-- `rust/src/app.rs` — okno, menu poziomów, input i HUD: `Application` (`run()`, LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza).
-- `rust/src/editor.rs` — planowany edytor map jako stan aplikacji (nie osobny program): operacje na `Board`, trim/pad, walidacja, pamięć ostatniego budynku/utrudnienia; wejścia z menu: przycisk `add map` (nowa mapa) i RMB na mapie (edycja).
+- `rust/src/app.rs` — okno, menu poziomów, gra i edytor: `Application` (`run()`, LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza; w edytorze stan `Editor` z klawiszami z `specification_rust.md`).
+- `rust/src/editor.rs` — edytor map jako stan aplikacji (nie osobny program): operacje na `Board`, trim/pad, walidacja, pamięć ostatniego budynku/utrudnienia; wejścia z menu: przycisk `add map` (nowa mapa) i RMB na mapie (edycja).
 
 ### Katalog `rust/` (implementacja w Rust)
-- Kod istnieje i jest kompletny (gra + testy); edytor plansz pozostaje poza zakresem (tylko Python). Zakres, układ modułów i otwarte punkty opisuje `specification_rust.md`.
+- Kod gry i edytora plansz istnieje i jest kompletny (gra + edytor + testy). Zakres, układ modułów i otwarte punkty opisuje `specification_rust.md`.
 - Testy logiki działają bez okna (`#[cfg(test)]` wewnątrz modułów logiki): `cd rust && cargo test`.
 
 ## 4. Zasady wspólne dla wszystkich implementacji
@@ -113,7 +113,7 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 1. Separacja modułów crate'a `hexfront`: logika w `board.rs` / `game.rs` / `ai.rs` / `rng.rs` (bez zależności od macroquad, więc testy działają bez okna), budowa meshy w `mesh.rs` / `iso.rs` (też bez macroquad), rysowanie w `render.rs`, obsługa wejścia w `app.rs`.
 2. Moduł stałych: `rust/src/constants.rs`; ścieżki plików plansz: `repo_root()`, `maps_dir()`, `MAP_EXTENSION`.
 3. Implementację formatu `.map` zmieniasz wyłącznie w `rust/src/mapfile.rs`; tabele kodów w `mapfile.rs` są implementacją tabel z `specification_of_map_format.md` — zmieniając format, zaktualizuj oba miejsca oraz drugą implementację.
-4. Gra i picking współdzielą geometrię `Board::pick_tile()` / `Board::snap_to_building()` (pick z Alt jako `flat=true`); `Renderer::pick_tile()` / `Renderer::snap_to_building()` tylko delegują do `Board`. Planowany edytor wbudowany w grę (`rust/src/editor.rs` jako stan aplikacji, nie osobny program) współdzieli ten sam renderer i picking.
+4. Gra i picking współdzielą geometrię `Board::pick_tile()` / `Board::snap_to_building()` (pick z Alt jako `flat=true`); `Renderer::pick_tile()` / `Renderer::snap_to_building()` tylko delegują do `Board`. Edytor wbudowany w grę (`rust/src/editor.rs` jako stan aplikacji, nie osobny program) współdzieli ten sam renderer i picking.
 5. Uruchamianie (z dowolnego katalogu): `cd rust && cargo run --release` (gra; wymaga toolchaina Rust + pobrania `macroquad =0.4.16` z crates.io).
 6. Testy: `cd rust && cargo test` (reguły gry headless + format map na prawdziwych `maps/*.map`); formatowanie `cargo fmt --check`, lint `cargo clippy --all-targets`.
 

@@ -1853,7 +1853,8 @@ fn push_ranges(
                 [255, 255, 255],
                 constants::RANGE_OUTLINE_ALPHA,
             );
-        } else if b.kind == BuildingKind::HealTower {
+        } else if b.kind == BuildingKind::HealTower && b.owner.is_some() {
+            // Neutral heal towers show no range (game rules and editor spec).
             let (cx, cy) = b.pos(game.board.side);
             let z = tile_top_z(&game.board, b.tile);
             let r = b.units * constants::HEAL_TOWER_RANGE_PER_UNIT;

@@ -11,7 +11,8 @@ use macroquad::prelude::*;
 use crate::ai::AiController;
 use crate::camera::Camera;
 use crate::constants::{self};
-use crate::entities::vehicle_kind_of;
+use crate::editor::{EditorOverlay, EditorState};
+use crate::entities::{Player, vehicle_kind_of};
 use crate::game::Game;
 use crate::hexgrid::Tile;
 use crate::iso::IsoCamera;
@@ -24,6 +25,7 @@ enum State {
     Menu,
     Loading,
     Playing,
+    Editor,
 }
 
 /// Owns the window and drives the whole program.
@@ -48,6 +50,18 @@ pub struct Application {
     down_pos: Option<(f32, f32)>,
     last_mouse: (f32, f32),
     dragging: bool,
+    /// Map editor state (entered from the menu via `add map` / RMB).
+    editor: Option<EditorState>,
+    /// Editor preview wrapped as a game so the shared renderer draws it.
+    editor_game: Option<Game>,
+    /// True when the editor terrain buffers match `editor_game`.
+    editor_clean: bool,
+    /// Fingerprint of the board the terrain buffers were built from, so
+    /// building-only edits (units, owner, kind) skip the expensive static
+    /// mesh rebuild; terrain-affecting edits change the fingerprint.
+    editor_terrain_fp: u64,
+    /// Last frame's hovered editor tile (for click edge detection).
+    editor_tile: Option<Tile>,
     /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`).
     capture: Option<String>,
     /// TEMPORARY debug hook frame countdown.
@@ -80,6 +94,11 @@ impl Application {
             down_pos: None,
             last_mouse: mouse_position(),
             dragging: false,
+            editor: None,
+            editor_game: None,
+            editor_clean: true,
+            editor_terrain_fp: 0,
+            editor_tile: None,
             capture: None,
             capture_frames: 0,
             slow_frames: Vec::new(),
@@ -105,7 +124,9 @@ impl Application {
             let dt = get_frame_time().min(0.1);
             self.handle_input(dt);
             self.update(dt);
-            if std::env::var("HEXFRONT_TIMING").is_ok() && self.state == State::Playing {
+            if std::env::var("HEXFRONT_TIMING").is_ok()
+                && (self.state == State::Playing || self.state == State::Editor)
+            {
                 self.slow_frames.push(dt);
                 if self.slow_frames.len() >= 120 {
                     let mut sorted = self.slow_frames.clone();
@@ -148,7 +169,7 @@ impl Application {
         if wheel.1 != 0.0 {
             if self.state == State::Menu {
                 self.menu_scroll -= wheel.1 * constants::MENU_SCROLL_STEP;
-            } else if self.state == State::Playing {
+            } else if self.state == State::Playing || self.state == State::Editor {
                 let (mx, my) = mouse_position();
                 let f = if wheel.1 > 0.0 {
                     constants::ZOOM_STEP
@@ -158,38 +179,13 @@ impl Application {
                 self.camera.zoom_at(f, mx, my);
             }
         }
+        if self.state == State::Editor {
+            self.handle_editor_input(dt);
+            return;
+        }
         if self.state == State::Playing {
+            self.pan_view(dt, true);
             let (mx, my) = mouse_position();
-            let (w, h) = (screen_width(), screen_height());
-            let mut dx = 0.0f32;
-            let mut dy = 0.0f32;
-            if mx < constants::EDGE_PAN_MARGIN {
-                dx += constants::PAN_SPEED as f32 * dt;
-            }
-            if mx > w - constants::EDGE_PAN_MARGIN {
-                dx -= constants::PAN_SPEED as f32 * dt;
-            }
-            if my < constants::EDGE_PAN_MARGIN {
-                dy += constants::PAN_SPEED as f32 * dt;
-            }
-            if my > h - constants::EDGE_PAN_MARGIN {
-                dy -= constants::PAN_SPEED as f32 * dt;
-            }
-            if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
-                dx += constants::PAN_SPEED as f32 * dt;
-            }
-            if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
-                dx -= constants::PAN_SPEED as f32 * dt;
-            }
-            if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
-                dy += constants::PAN_SPEED as f32 * dt;
-            }
-            if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
-                dy -= constants::PAN_SPEED as f32 * dt;
-            }
-            if dx != 0.0 || dy != 0.0 {
-                self.camera.pan(dx, dy);
-            }
             if is_mouse_button_down(MouseButton::Left) {
                 if let Some((dx0, dy0)) = self.down_pos {
                     if !self.dragging
@@ -266,6 +262,42 @@ impl Application {
             self.enter_menu();
         }
     }
+    /// View panning shared by the game and the editor: arrow keys, screen
+    /// edges and LMB drag. The editor skips WASD (key `s` saves) and RMB pan
+    /// (RMB deletes objects).
+    fn pan_view(&mut self, dt: f32, wasd: bool) {
+        let (mx, my) = mouse_position();
+        let (w, h) = (screen_width(), screen_height());
+        let mut dx = 0.0f32;
+        let mut dy = 0.0f32;
+        if mx < constants::EDGE_PAN_MARGIN {
+            dx += constants::PAN_SPEED as f32 * dt;
+        }
+        if mx > w - constants::EDGE_PAN_MARGIN {
+            dx -= constants::PAN_SPEED as f32 * dt;
+        }
+        if my < constants::EDGE_PAN_MARGIN {
+            dy += constants::PAN_SPEED as f32 * dt;
+        }
+        if my > h - constants::EDGE_PAN_MARGIN {
+            dy -= constants::PAN_SPEED as f32 * dt;
+        }
+        if is_key_down(KeyCode::Left) || (wasd && is_key_down(KeyCode::A)) {
+            dx += constants::PAN_SPEED as f32 * dt;
+        }
+        if is_key_down(KeyCode::Right) || (wasd && is_key_down(KeyCode::D)) {
+            dx -= constants::PAN_SPEED as f32 * dt;
+        }
+        if is_key_down(KeyCode::Up) || (wasd && is_key_down(KeyCode::W)) {
+            dy += constants::PAN_SPEED as f32 * dt;
+        }
+        if is_key_down(KeyCode::Down) || (wasd && is_key_down(KeyCode::S)) {
+            dy -= constants::PAN_SPEED as f32 * dt;
+        }
+        if dx != 0.0 || dy != 0.0 {
+            self.camera.pan(dx, dy);
+        }
+    }
     fn enter_menu(&mut self) {
         self.state = State::Menu;
         self.maps = mapfile::list_maps(None);
@@ -273,6 +305,8 @@ impl Application {
         self.game = None;
         self.ai.clear();
         self.selection = None;
+        self.editor = None;
+        self.editor_game = None;
     }
     fn set_selection(&mut self, src: Option<Tile>) {
         self.preview_tile = None;
@@ -394,6 +428,14 @@ impl Application {
             }
             return;
         }
+        if self.state == State::Editor {
+            // Digit-entry commit timer; the terrain/game preview rebuild
+            // happens lazily in draw (macroquad context).
+            if let Some(ed) = self.editor.as_mut() {
+                ed.tick(dt as f64);
+            }
+            return;
+        }
         if self.state != State::Playing || self.paused {
             return;
         }
@@ -436,6 +478,7 @@ impl Application {
             State::Menu => self.draw_menu(),
             State::Loading => self.draw_loading(),
             State::Playing => self.draw_game(dt),
+            State::Editor => self.draw_editor(dt),
         }
     }
     fn draw_game(&mut self, dt: f32) {
@@ -791,6 +834,47 @@ impl Application {
                 WHITE,
             );
         }
+        // "add map" button opens a fresh editor board (specification_rust.md).
+        let add_rect = Rect::new(w / 2.0 - 90.0, h * 0.08 + 118.0, 180.0, 40.0);
+        draw_rectangle(
+            add_rect.x,
+            add_rect.y,
+            add_rect.w,
+            add_rect.h,
+            Color::new(0.16, 0.35, 0.18, 1.0),
+        );
+        draw_rectangle_lines(
+            add_rect.x,
+            add_rect.y,
+            add_rect.w,
+            add_rect.h,
+            2.0,
+            Color::new(0.45, 0.85, 0.5, 1.0),
+        );
+        {
+            let t = "add map";
+            let dim = measure_text(t, None, 22, 1.0);
+            draw_text(
+                t,
+                w / 2.0 - dim.width / 2.0,
+                h * 0.08 + 118.0 + 27.0,
+                22.0,
+                WHITE,
+            );
+        }
+        if add_rect.contains(vec2(mx, my)) && is_mouse_button_pressed(MouseButton::Left) {
+            self.enter_editor_new();
+            return;
+        }
+        // RMB on a map cell edits that map (specification_rust.md).
+        if is_mouse_button_pressed(MouseButton::Right) {
+            for (rect, path) in self.menu_rects.clone() {
+                if rect.contains(vec2(mx, my)) {
+                    self.enter_editor_path(&path);
+                    return;
+                }
+            }
+        }
         if max_scroll > 0.0 {
             let bar_h = (visible_h * visible_h / content_h.max(1.0)).max(24.0);
             let bar_y = grid_top + (visible_h - bar_h) * scroll / max_scroll;
@@ -810,9 +894,9 @@ impl Application {
             );
         }
         let hint = if max_scroll > 0.0 {
-            "click a level to play - wheel/Up/Down scrolls"
+            "click a level to play - RMB edits - wheel/Up/Down scrolls"
         } else {
-            "click a level to play"
+            "click a level to play - RMB edits"
         };
         draw_text(
             hint,
@@ -821,5 +905,722 @@ impl Application {
             20.0,
             GRAY,
         );
+    }
+}
+
+impl Application {
+    /// Ctrl held on either side (quick save / new map).
+    fn ctrl_down() -> bool {
+        is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)
+    }
+    /// Tile under the cursor in the editor (Alt picks flat, like the game).
+    fn editor_hover(&self) -> Option<Tile> {
+        let ed = self.editor.as_ref()?;
+        let (mx, my) = mouse_position();
+        ed.board.pick_tile(&self.camera, mx, my, Self::flat())
+    }
+    /// Rebuild the editor preview game from the editor board.
+    ///
+    /// The `Game` wrapper (buildings, obstacles, ranges) is rebuilt on every
+    /// sync, but the static terrain mesh only when the terrain fingerprint
+    /// changed (height, ramp or bridge edit) — a full 256x256 rebuild costs
+    /// ~50 ms and must not hitch digit typing or owner cycling.
+    fn sync_editor_game(&mut self) {
+        let Some(ed) = self.editor.as_ref() else {
+            return;
+        };
+        let players = vec![
+            Player::new(0, true),
+            Player::new(1, false),
+            Player::new(2, false),
+            Player::new(3, false),
+        ];
+        let fp = ed.terrain_fingerprint();
+        let game = Game::new(ed.board.clone(), players, ed.buildings.clone(), 0);
+        self.editor_game = Some(game);
+        // NOTE: unlike the game (immutable board per level), the editor board
+        // mutates in place (terrain height, ramps, bridges), so the (cols,
+        // rows) key is not enough to skip the static mesh rebuild
+        // (specification_rust.md: rebuild on each terrain/ramp/bridge change).
+        // `build_dynamic` below still runs every frame for objects.
+        if fp != self.editor_terrain_fp {
+            if let Some(g) = self.editor_game.as_ref() {
+                self.terrain = mesh::build_terrain(&g.board);
+                self.renderer.set_terrain(&self.terrain);
+                self.terrain_board_key = Some((g.board.cols, g.board.rows));
+            }
+            self.editor_terrain_fp = fp;
+        }
+        self.editor_clean = true;
+    }
+    /// Enter the editor with a fresh board, centred on the land rectangle.
+    fn enter_editor_new(&mut self) {
+        let ed = EditorState::new_board();
+        self.camera = Camera::new((screen_width(), screen_height()));
+        self.camera.limit_to_board(&ed.board);
+        let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
+        let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64 / 2.0;
+        self.camera.center_on_world(cx, cy, 0.0);
+        self.editor = Some(ed);
+        self.editor_game = None;
+        self.editor_clean = false;
+        self.editor_terrain_fp = 0;
+        self.editor_tile = None;
+        self.down_pos = None;
+        self.dragging = false;
+        self.state = State::Editor;
+        self.sync_editor_game();
+    }
+    /// Enter the editor editing the map at `path`.
+    fn enter_editor_path(&mut self, path: &std::path::Path) {
+        let mut ed = EditorState::new_board();
+        match ed.load_path(path) {
+            Ok(()) => {
+                self.camera = Camera::new((screen_width(), screen_height()));
+                self.camera.limit_to_board(&ed.board);
+                let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
+                let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64 / 2.0;
+                self.camera.center_on_world(cx, cy, 0.0);
+                self.editor = Some(ed);
+                self.editor_game = None;
+                self.editor_clean = false;
+                self.editor_terrain_fp = 0;
+                self.editor_tile = None;
+                self.down_pos = None;
+                self.dragging = false;
+                self.state = State::Editor;
+                self.sync_editor_game();
+            }
+            Err(e) => eprintln!("cannot edit {}: {}", path.display(), e),
+        }
+    }
+}
+
+impl Application {
+    /// Editor keyboard/mouse handling (see specification_rust.md, "Edytor plansz").
+    fn handle_editor_input(&mut self, dt: f32) {
+        // View: arrows/edges/LMB drag/wheel/+- like the game, but no WASD and
+        // no RMB pan (RMB deletes objects).
+        self.pan_view(dt, false);
+        let (mx, my) = mouse_position();
+        // LMB drag pans; a click without drag edits via Delete/RMB path below
+        // (keys do the editing, clicks only delete with RMB).
+        if is_mouse_button_down(MouseButton::Left) {
+            if let Some((dx0, dy0)) = self.down_pos {
+                if !self.dragging
+                    && ((mx - dx0).powi(2) + (my - dy0).powi(2)).sqrt() > constants::DRAG_THRESHOLD
+                {
+                    self.dragging = true;
+                }
+                if self.dragging {
+                    self.camera
+                        .pan(mx - self.last_mouse.0, my - self.last_mouse.1);
+                }
+            } else {
+                self.down_pos = Some((mx, my));
+                self.dragging = false;
+            }
+        } else if let Some(_down) = self.down_pos.take() {
+            self.dragging = false;
+        }
+        self.last_mouse = (mx, my);
+        if is_mouse_button_pressed(MouseButton::Right) {
+            let tile = self.editor_hover();
+            if let Some(ed) = self.editor.as_mut()
+                && ed.overlay == EditorOverlay::None
+                && ed.delete_at(tile)
+            {
+                self.editor_clean = false;
+            }
+        }
+        if is_key_pressed(KeyCode::Equal) || is_key_pressed(KeyCode::KpAdd) {
+            self.camera.zoom_at(constants::ZOOM_STEP, mx, my);
+        }
+        if is_key_pressed(KeyCode::Minus) || is_key_pressed(KeyCode::KpSubtract) {
+            self.camera.zoom_at(1.0 / constants::ZOOM_STEP, mx, my);
+        }
+        self.handle_editor_keys();
+        // Track hover for digit acceptance display.
+        self.editor_tile = self.editor_hover();
+    }
+    /// Editor key handling split out for readability.
+    fn handle_editor_keys(&mut self) {
+        let overlay = self
+            .editor
+            .as_ref()
+            .map(|e| e.overlay)
+            .unwrap_or(EditorOverlay::None);
+        // Overlay input first.
+        if overlay != EditorOverlay::None {
+            self.handle_editor_overlay_keys(overlay);
+            return;
+        }
+        let ctrl = Self::ctrl_down();
+        // ctrl+n: new map, ctrl+s: quick save (both work even with overlays closed).
+        if ctrl && is_key_pressed(KeyCode::N) {
+            if let Some(ed) = self.editor.as_mut() {
+                ed.new_map();
+                self.camera.limit_to_board(&ed.board);
+                let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
+                let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64 / 2.0;
+                self.camera.center_on_world(cx, cy, 0.0);
+                self.editor_clean = false;
+            }
+            return;
+        }
+        if ctrl && is_key_pressed(KeyCode::S) {
+            let opened = {
+                let ed = self.editor.as_mut().unwrap();
+                match ed.quick_save() {
+                    Ok(true) => false,
+                    Ok(false) => true,
+                    Err(e) => {
+                        eprintln!("cannot save: {}", e);
+                        false
+                    }
+                }
+            };
+            let _ = opened;
+            return;
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            let dirty = self.editor.as_ref().map(|e| e.dirty).unwrap_or(false);
+            if dirty {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.commit_digits();
+                    ed.overlay = EditorOverlay::Exit;
+                }
+            } else {
+                self.enter_menu();
+            }
+            return;
+        }
+        let tile = self.editor_hover();
+        // Digit keys: Key0-Key9 + keypad.
+        let mut digit: Option<char> = None;
+        for (code, ch) in [
+            (KeyCode::Key0, '0'),
+            (KeyCode::Key1, '1'),
+            (KeyCode::Key2, '2'),
+            (KeyCode::Key3, '3'),
+            (KeyCode::Key4, '4'),
+            (KeyCode::Key5, '5'),
+            (KeyCode::Key6, '6'),
+            (KeyCode::Key7, '7'),
+            (KeyCode::Key8, '8'),
+            (KeyCode::Key9, '9'),
+        ] {
+            if is_key_pressed(code) {
+                digit = Some(ch);
+                break;
+            }
+        }
+        if digit.is_none() {
+            for (code, ch) in [
+                (KeyCode::Kp0, '0'),
+                (KeyCode::Kp1, '1'),
+                (KeyCode::Kp2, '2'),
+                (KeyCode::Kp3, '3'),
+                (KeyCode::Kp4, '4'),
+                (KeyCode::Kp5, '5'),
+                (KeyCode::Kp6, '6'),
+                (KeyCode::Kp7, '7'),
+                (KeyCode::Kp8, '8'),
+                (KeyCode::Kp9, '9'),
+            ] {
+                if is_key_pressed(code) {
+                    digit = Some(ch);
+                    break;
+                }
+            }
+        }
+        if let Some(ch) = digit {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.type_digit(tile, ch)
+            {
+                self.editor_clean = false;
+            }
+            return;
+        }
+        // Typed letters arrive via chars too, but B/O/T/M/R/L/S brackets are
+        // physical keys; check them explicitly (layout-independent enough for
+        // the Latin keys the spec names).
+        if is_key_pressed(KeyCode::B) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.press_b(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::O) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.press_o(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::T) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.press_t(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::M) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.press_m(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::R) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.press_r(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::LeftBracket) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.change_height(tile, -1)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::RightBracket) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.change_height(tile, 1)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::Delete) || is_key_pressed(KeyCode::Backspace) {
+            if let Some(ed) = self.editor.as_mut()
+                && ed.delete_at(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::L) {
+            if let Some(ed) = self.editor.as_mut() {
+                ed.open_load();
+            }
+        } else if is_key_pressed(KeyCode::S)
+            && !ctrl
+            && let Some(ed) = self.editor.as_mut()
+        {
+            ed.open_save();
+        }
+    }
+}
+
+impl Application {
+    /// Keys inside the load/save/exit overlays.
+    fn handle_editor_overlay_keys(&mut self, overlay: EditorOverlay) {
+        if is_key_pressed(KeyCode::Escape) {
+            if let Some(ed) = self.editor.as_mut() {
+                ed.overlay = EditorOverlay::None;
+            }
+            return;
+        }
+        match overlay {
+            EditorOverlay::Load => {
+                let n = self
+                    .editor
+                    .as_ref()
+                    .map(|e| e.overlay_items.len())
+                    .unwrap_or(0);
+                if is_key_pressed(KeyCode::Up)
+                    && let Some(ed) = self.editor.as_mut()
+                    && ed.overlay_cursor > 0
+                {
+                    ed.overlay_cursor -= 1;
+                }
+                if is_key_pressed(KeyCode::Down)
+                    && let Some(ed) = self.editor.as_mut()
+                    && ed.overlay_cursor + 1 < n
+                {
+                    ed.overlay_cursor += 1;
+                }
+                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    let path = self
+                        .editor
+                        .as_ref()
+                        .and_then(|e| e.overlay_items.get(e.overlay_cursor).cloned());
+                    if let Some(path) = path {
+                        let ok = {
+                            let ed = self.editor.as_mut().unwrap();
+                            ed.load_path(&path).is_ok()
+                        };
+                        if ok {
+                            if let Some(ed) = self.editor.as_ref() {
+                                self.camera.limit_to_board(&ed.board);
+                                let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
+                                let cy = crate::hexgrid::SQRT3
+                                    * ed.board.side
+                                    * (ed.board.rows - 1) as f64
+                                    / 2.0;
+                                self.camera.center_on_world(cx, cy, 0.0);
+                            }
+                            self.editor_clean = false;
+                        }
+                    }
+                }
+                // Click selection happens in draw (rects need layout); see draw_editor_overlay.
+            }
+            EditorOverlay::Save => {
+                // Type the name with printable chars; Backspace deletes.
+                while let Some(ch) = get_char_pressed() {
+                    if ch == '\n' || ch == '\r' {
+                        continue;
+                    }
+                    if let Some(ed) = self.editor.as_mut() {
+                        if ch.is_control() {
+                            continue;
+                        }
+                        ed.input_text.push(ch);
+                    }
+                }
+                // get_char_pressed already consumed text keys; Backspace
+                // arrives as a key press (not a char) on most layouts.
+                if is_key_pressed(KeyCode::Backspace)
+                    && let Some(ed) = self.editor.as_mut()
+                {
+                    ed.input_text.pop();
+                }
+                let n = self
+                    .editor
+                    .as_ref()
+                    .map(|e| e.overlay_items.len())
+                    .unwrap_or(0);
+                if is_key_pressed(KeyCode::Up)
+                    && let Some(ed) = self.editor.as_mut()
+                    && ed.overlay_cursor > 0
+                {
+                    ed.overlay_cursor -= 1;
+                }
+                if is_key_pressed(KeyCode::Down)
+                    && let Some(ed) = self.editor.as_mut()
+                    && ed.overlay_cursor + 1 < n
+                {
+                    ed.overlay_cursor += 1;
+                }
+                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    // Empty field + cursor on a list entry: reuse that name.
+                    let pick = self.editor.as_ref().and_then(|e| {
+                        if e.input_text.trim().is_empty() {
+                            e.overlay_items.get(e.overlay_cursor).cloned()
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(path) = pick
+                        && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                        && let Some(ed) = self.editor.as_mut()
+                    {
+                        ed.input_text = stem.to_string();
+                    }
+                    let res = self.editor.as_mut().map(|ed| ed.save());
+                    if let Some(Err(e)) = res {
+                        eprintln!("cannot save: {}", e);
+                    }
+                }
+            }
+            EditorOverlay::Exit => {
+                // S: save and exit, N: discard and exit, Esc: keep editing.
+                if is_key_pressed(KeyCode::S) {
+                    let saved = self.editor.as_mut().map(|ed| ed.save());
+                    match saved {
+                        Some(Ok(_)) => self.enter_menu(),
+                        Some(Err(_)) => {
+                            // No name yet: switch to the save overlay.
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.open_save();
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                if is_key_pressed(KeyCode::N) {
+                    self.enter_menu();
+                }
+            }
+            EditorOverlay::None => {}
+        }
+    }
+}
+
+impl Application {
+    /// Draw the editor: shared 3D preview plus legend, errors and overlays.
+    fn draw_editor(&mut self, dt: f32) {
+        if !self.editor_clean {
+            self.sync_editor_game();
+        }
+        let hover = self.editor_hover();
+        if let Some(game) = self.editor_game.as_ref() {
+            let (lo, hi) = mesh::depth_span(&game.board);
+            let iso = IsoCamera::from_camera(&self.camera, lo, hi);
+            let view_bounds = mesh::visible_world_bounds(
+                &self.camera,
+                mesh::max_height(&game.board),
+                game.board.side,
+            );
+            mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
+            self.renderer.rotor_phase = (self.renderer.rotor_phase
+                + constants::ROTOR_SPIN_RAD_PER_S * f64::from(dt))
+                % std::f64::consts::TAU;
+            self.renderer.draw_gpu(
+                &iso,
+                &self.camera,
+                view_bounds,
+                &self.dynamic,
+                game,
+                hover,
+                None,
+                None,
+            );
+        }
+        self.draw_editor_badges(hover);
+        self.draw_editor_hud();
+        let overlay = self
+            .editor
+            .as_ref()
+            .map(|e| e.overlay)
+            .unwrap_or(EditorOverlay::None);
+        match overlay {
+            EditorOverlay::Load => self.draw_editor_list("load map", false),
+            EditorOverlay::Save => self.draw_editor_save(),
+            EditorOverlay::Exit => self.draw_editor_exit(),
+            EditorOverlay::None => {}
+        }
+    }
+    /// Unit badges for the editor preview (typed digits show live).
+    fn draw_editor_badges(&self, hover: Option<Tile>) {
+        let Some(game) = self.editor_game.as_ref() else {
+            return;
+        };
+        for b in game.buildings.iter() {
+            let (wx, wy) = b.pos(game.board.side);
+            let wz = mesh::tile_top_z(&game.board, b.tile);
+            let (cx, cy) = self.badge_anchor(wx, wy, wz);
+            if !Self::on_screen(cx, cy) {
+                continue;
+            }
+            let fs = ((17.0 * self.camera.zoom as f32).max(10.0)) as u16;
+            // Pending digit entry shows the typed buffer on its tile.
+            let txt = if let Some(ed) = self.editor.as_ref() {
+                if ed.digit_tile == Some(b.tile) && !ed.digit_buf.is_empty() {
+                    ed.digit_buf.clone()
+                } else {
+                    format!("{}", b.units.round() as i64)
+                }
+            } else {
+                format!("{}", b.units.round() as i64)
+            };
+            let dim = measure_text(&txt, None, fs, 1.0);
+            draw_text(&txt, cx - dim.width / 2.0, cy, fs as f32, WHITE);
+            let _ = hover;
+        }
+    }
+    /// Legend (bottom-left) and validation errors (top-left, red).
+    fn draw_editor_hud(&self) {
+        let Some(ed) = self.editor.as_ref() else {
+            return;
+        };
+        let errors = ed.validate();
+        for (i, e) in errors.iter().enumerate() {
+            let ec = constants::EDITOR_ERROR_COLOR;
+            draw_text(
+                e,
+                10.0,
+                24.0 + i as f32 * 22.0,
+                18.0,
+                Color::from_rgba(ec[0], ec[1], ec[2], 255),
+            );
+        }
+        let h = screen_height();
+        for (i, line) in crate::editor::LEGEND.iter().enumerate() {
+            draw_text(
+                line,
+                10.0,
+                h - (crate::editor::LEGEND.len() - i) as f32 * 20.0 - 8.0,
+                16.0,
+                Color::new(0.75, 0.78, 0.85, 1.0),
+            );
+        }
+        let name = ed.map_name.as_deref().unwrap_or("(unnamed)");
+        let dirty = if ed.dirty { " *" } else { "" };
+        let title = format!("editor: {}{}", name, dirty);
+        draw_text(
+            &title,
+            10.0,
+            h - crate::editor::LEGEND.len() as f32 * 20.0 - 32.0,
+            20.0,
+            WHITE,
+        );
+    }
+    /// Generic overlay panel with a centred title box.
+    fn editor_panel(&self, title: &str, height: f32) {
+        let (w, h) = (screen_width(), screen_height());
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let (pw, ph) = (520.0, height);
+        let (px, py) = ((w - pw) / 2.0, (h - ph) / 2.0);
+        draw_rectangle(px, py, pw, ph, Color::new(0.10, 0.11, 0.15, 1.0));
+        draw_rectangle_lines(px, py, pw, ph, 2.0, Color::new(0.47, 0.55, 0.78, 1.0));
+        draw_text(
+            title,
+            w / 2.0 - measure_text(title, None, 26, 1.0).width / 2.0,
+            py + 34.0,
+            26.0,
+            WHITE,
+        );
+    }
+    /// Load/save list overlay; clicks pick entries (current name highlighted first).
+    fn draw_editor_list(&mut self, title: &str, is_save: bool) {
+        let items = self
+            .editor
+            .as_ref()
+            .map(|e| {
+                (
+                    e.overlay_items.clone(),
+                    e.overlay_cursor,
+                    e.map_name.clone(),
+                )
+            })
+            .unwrap_or_default();
+        let (paths, cursor, current) = items;
+        self.editor_panel(title, 560.0);
+        let (w, h) = (screen_width(), screen_height());
+        // Clickable rows.
+        let mut clicked: Option<PathBuf> = None;
+        let (mx, my) = mouse_position();
+        let mut y = h / 2.0 - 210.0;
+        for (i, path) in paths.iter().enumerate().take(12) {
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+            let rect = Rect::new(w / 2.0 - 230.0, y, 460.0, 30.0);
+            let hl = Some(name.to_string()) == current || i == cursor;
+            let bg = if hl {
+                Color::new(0.20, 0.23, 0.31, 1.0)
+            } else {
+                Color::new(0.13, 0.14, 0.18, 1.0)
+            };
+            draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
+            if hl {
+                draw_rectangle_lines(
+                    rect.x,
+                    rect.y,
+                    rect.w,
+                    rect.h,
+                    2.0,
+                    Color::new(1.0, 1.0, 0.47, 1.0),
+                );
+            }
+            draw_text(name, rect.x + 10.0, rect.y + 22.0, 20.0, WHITE);
+            if rect.contains(vec2(mx, my)) {
+                if is_mouse_button_pressed(MouseButton::Left) {
+                    clicked = Some(path.clone());
+                }
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.overlay_cursor = i;
+                }
+            }
+            y += 34.0;
+        }
+        if paths.len() > 12 {
+            draw_text(
+                format!("... and {} more", paths.len() - 12),
+                w / 2.0 - 200.0,
+                y + 10.0,
+                18.0,
+                GRAY,
+            );
+        }
+        draw_text(
+            "Up/Down + Enter, click, or Esc",
+            w / 2.0 - 200.0,
+            h / 2.0 + 250.0,
+            18.0,
+            GRAY,
+        );
+        if let Some(path) = clicked {
+            if is_save
+                && let Some(stem) = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                && let Some(ed) = self.editor.as_mut()
+            {
+                if ed.input_text.trim().is_empty() {
+                    ed.input_text = stem;
+                } else {
+                    // Non-empty field: save under the typed name right away.
+                    let res = ed.save();
+                    if let Err(e) = res {
+                        eprintln!("cannot save: {}", e);
+                    }
+                }
+            } else if !is_save {
+                let ok = {
+                    let ed = self.editor.as_mut().unwrap();
+                    ed.load_path(&path).is_ok()
+                };
+                if ok {
+                    if let Some(ed) = self.editor.as_ref() {
+                        self.camera.limit_to_board(&ed.board);
+                        let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
+                        let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64
+                            / 2.0;
+                        self.camera.center_on_world(cx, cy, 0.0);
+                    }
+                    self.editor_clean = false;
+                }
+            }
+        }
+    }
+    /// Save overlay: name field plus the existing-map list.
+    fn draw_editor_save(&mut self) {
+        self.draw_editor_list("save map", true);
+        let (w, h) = (screen_width(), screen_height());
+        let txt = self
+            .editor
+            .as_ref()
+            .map(|e| e.input_text.clone())
+            .unwrap_or_default();
+        let field = Rect::new(w / 2.0 - 230.0, h / 2.0 - 252.0, 460.0, 34.0);
+        draw_rectangle(
+            field.x,
+            field.y,
+            field.w,
+            field.h,
+            Color::new(0.07, 0.08, 0.10, 1.0),
+        );
+        draw_rectangle_lines(
+            field.x,
+            field.y,
+            field.w,
+            field.h,
+            1.0,
+            Color::new(1.0, 1.0, 0.47, 1.0),
+        );
+        draw_text(
+            format!("{}_", txt),
+            field.x + 10.0,
+            field.y + 24.0,
+            20.0,
+            Color::new(1.0, 1.0, 0.47, 1.0),
+        );
+    }
+    /// Unsaved-changes prompt on exit.
+    fn draw_editor_exit(&self) {
+        self.editor_panel("unsaved changes", 190.0);
+        let (w, h) = (screen_width(), screen_height());
+        for (i, line) in [
+            "S - save and exit",
+            "N - discard changes and exit",
+            "Esc - keep editing",
+        ]
+        .iter()
+        .enumerate()
+        {
+            draw_text(
+                line,
+                w / 2.0 - 140.0,
+                h / 2.0 - 10.0 + i as f32 * 32.0,
+                22.0,
+                WHITE,
+            );
+        }
     }
 }

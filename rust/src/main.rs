@@ -8,6 +8,7 @@ mod app;
 mod board;
 mod camera;
 mod constants;
+mod editor;
 mod entities;
 mod game;
 mod hexgrid;

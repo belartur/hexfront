@@ -295,6 +295,90 @@ impl Board {
         }
         self.ramps.remove(&tile);
     }
+    /// Repair the bookkeeping after an in-place height edit of a ramp tile.
+    ///
+    /// [`Board::set_ramp`] normally sets the ramp height itself, but the map
+    /// editor edits heights directly (Python `editor.py`: ramps follow the
+    /// lower end); this re-applies `min(height(a), height(b))` to every ramp
+    /// touching `tile` without changing which tiles are joined.
+    pub fn refresh_ramps_around(&mut self, tile: Tile) {
+        use crate::hexgrid;
+        let mut neighbours = hexgrid::neighbors(tile.0, tile.1).to_vec();
+        neighbours.push(tile);
+        for n in neighbours {
+            if let Some((a, b)) = self.ramps.get(&n).copied() {
+                let h = self.height(a).min(self.height(b));
+                if let Some(t) = self.tiles.get_mut(&n) {
+                    t.height = h;
+                }
+            }
+        }
+    }
+    /// Rebuild a single bridge fragment tile into a whole bridge object.
+    ///
+    /// The editor keeps geometry-invalid fragments for the preview (like the
+    /// Python editor): `frag_marks` holds the axis 0-2 per deck tile and the
+    /// maximal straight run through `tile` becomes one [`Bridge`] (validated
+    /// when possible via [`Board::add_bridge`], kept as-is otherwise, mirroring
+    /// [`crate::mapfile::rebuild_bridges`] with `validate = false`).
+    pub fn rebuild_single_bridge(
+        &mut self,
+        tile: Tile,
+        axis: usize,
+        frag_marks: &std::collections::HashMap<Tile, usize>,
+    ) {
+        use crate::hexgrid;
+        let axis = axis % 3;
+        let back = (axis + 3) % 6;
+        let mut start = tile;
+        let mut prev = hexgrid::neighbor(start.0, start.1, back);
+        while frag_marks.get(&prev) == Some(&axis) {
+            start = prev;
+            prev = hexgrid::neighbor(start.0, start.1, back);
+        }
+        let mut run = vec![start];
+        let mut cur = hexgrid::neighbor(start.0, start.1, axis);
+        while frag_marks.get(&cur) == Some(&axis) {
+            run.push(cur);
+            cur = hexgrid::neighbor(cur.0, cur.1, axis);
+        }
+        let a = hexgrid::neighbor(start.0, start.1, back);
+        if self.contains(a) && self.contains(cur) {
+            if self.add_bridge(a, cur, axis).is_none() {
+                let mut w = self.height(a).max(self.height(cur));
+                for f in run.iter() {
+                    w = w.max(self.height(*f));
+                }
+                let idx = self.bridges.len();
+                let br = Bridge::new(a, cur, w, axis, run.clone());
+                for f in run.iter() {
+                    if let Some(t) = self.tiles.get_mut(f) {
+                        t.bridge = Some(idx);
+                    }
+                }
+                self.bridges.push(br);
+            }
+            return;
+        }
+        let mut w = 0;
+        for f in run.iter() {
+            w = w.max(self.height(*f));
+        }
+        if self.contains(a) {
+            w = w.max(self.height(a));
+        }
+        if self.contains(cur) {
+            w = w.max(self.height(cur));
+        }
+        let idx = self.bridges.len();
+        let br = Bridge::new(a, cur, w, axis, run.clone());
+        for f in run.iter() {
+            if let Some(t) = self.tiles.get_mut(f) {
+                t.bridge = Some(idx);
+            }
+        }
+        self.bridges.push(br);
+    }
     /// Try to build a bridge from `a` towards `b` in `direction`.
     /// Returns the new bridge index or `None` when the geometry does not
     /// permit one (sec. 8): the ends must share a height w >= 3, the

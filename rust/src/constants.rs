@@ -317,6 +317,25 @@ pub const MENU_SCROLL_STEP: f32 = 48.0;
 // Map files (specification.md "Plansze")
 /// AI difficulty used for maps loaded from files (rules.md section 13.8).
 pub const MAP_DEFAULT_AI_DIFFICULTY: &str = "normal";
+// Board editor (specification_rust.md, section "Edytor plansz": copies the
+// behaviour of specification_of_map_editor.md; rules.md section 1 for the
+// 0..15 heights and player bases).
+/// Seconds after which an unfinished 1- or 2-digit units entry commits.
+pub const EDITOR_DIGIT_COMMIT_DELAY: f64 = 1.0;
+/// Columns of a newly created editor board (mostly water).
+pub const EDITOR_NEW_COLS: i32 = 256;
+/// Rows of a newly created editor board.
+pub const EDITOR_NEW_ROWS: i32 = 256;
+/// Columns of the central land rectangle on a new board.
+pub const EDITOR_LAND_COLS: i32 = 20;
+/// Rows of the central land rectangle on a new board.
+pub const EDITOR_LAND_ROWS: i32 = 13;
+/// Terrain height of the central land rectangle of a new board.
+pub const EDITOR_LAND_HEIGHT: i32 = 1;
+/// Highest unit count typed in the editor (the map format stores 0-999).
+pub const EDITOR_MAX_UNITS: u32 = 999;
+/// Colour of the rule-violation lines on the editor screen.
+pub const EDITOR_ERROR_COLOR: [u8; 3] = [255, 80, 80];
 // AI difficulty (rules.md sections 13.5, 13.8)
 /// Tunable parameters of one AI difficulty level (rules.md section 13.8).
 #[derive(Clone, Copy, Debug)]
