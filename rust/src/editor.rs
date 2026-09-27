@@ -66,6 +66,18 @@ pub enum EditorOverlay {
     Exit,
 }
 
+/// True when the editor UI reads typed characters (only the Save overlay's
+/// name field does).
+///
+/// macroquad queues one char per pressed key and never drops it on its own,
+/// so every other state must drain that queue — otherwise keys pressed while
+/// playing or editing pile up and spill into the map name when Save opens
+/// (the Python editor solves the same problem by swallowing the `s`
+/// TEXTINPUT that opens its save overlay).
+pub fn consumes_text(overlay: EditorOverlay) -> bool {
+    overlay == EditorOverlay::Save
+}
+
 /// Stateful map editor: a board plus its buildings plus remembered defaults.
 ///
 /// Placing an object overwrites the object previously on the tile. The first
@@ -925,6 +937,12 @@ pub fn pad_map(board: Board, buildings: Vec<Building>) -> (Board, Vec<Building>)
     }
     let r0 = ((tr - rows) / 2).max(0);
     let mut out = Board::new(tc.max(cols), tr.max(rows));
+    // Board::new() fills height 1, but the padding around a loaded level must
+    // be water (height 0) — otherwise the padded area counts as land, trim
+    // keeps it, and the map overflows the format limits on save.
+    for t in out.tiles.values_mut() {
+        t.height = 0;
+    }
     for ((q, r), t) in board.tiles.iter() {
         if let Some(nt) = out.tiles.get_mut(&(q + q0, r + r0)) {
             nt.height = t.height;
@@ -1125,6 +1143,46 @@ mod tests {
         let after_ramp = ed.terrain_fingerprint();
         assert!(ed.press_m(Some((130, 128))));
         assert_ne!(ed.terrain_fingerprint(), after_ramp);
+    }
+
+    #[test]
+    fn pad_map_fills_water_around_loaded_level() {
+        // Regression test: Board::new() fills height 1, but the area padded
+        // around a loaded level must be water — otherwise trim keeps it and
+        // the map overflows the format limits on save.
+        let mut board = Board::new(10, 8);
+        for t in board.tiles.values_mut() {
+            t.height = 0;
+        }
+        board.tiles.get_mut(&(3, 2)).unwrap().height = 1;
+        let buildings = vec![Building::new(BuildingKind::BaseTank, Some(0), 5, 4, 7.0)];
+        let (trimmed, tb) = trim_map(&board, &buildings);
+        let (padded, pb) = pad_map(trimmed, tb);
+        assert_eq!(
+            (padded.cols, padded.rows),
+            (constants::EDITOR_NEW_COLS, constants::EDITOR_NEW_ROWS)
+        );
+        assert_eq!(pb.len(), 1);
+        // Only the trimmed content is land; everything padded is water.
+        // (The building stands at height 0 — trim keeps its tile as occupied,
+        // but the height stays 0, so only one tile is land.)
+        let land = padded.tiles.values().filter(|t| t.height != 0).count();
+        assert_eq!(land, 1);
+        // ...so saving the padded board trims back down to the level size.
+        let (retrimmed, rb) = trim_map(&padded, &pb);
+        assert_eq!((retrimmed.cols, retrimmed.rows), (4, 3));
+        assert_eq!(rb.len(), 1);
+    }
+
+    #[test]
+    fn only_save_overlay_consumes_typed_text() {
+        // The UI drains macroquad's char queue in every state except the
+        // Save overlay, so keys pressed while editing never leak into the
+        // file-name field (the `s` that opens Save included).
+        assert!(!consumes_text(EditorOverlay::None));
+        assert!(!consumes_text(EditorOverlay::Load));
+        assert!(!consumes_text(EditorOverlay::Exit));
+        assert!(consumes_text(EditorOverlay::Save));
     }
 
     #[test]

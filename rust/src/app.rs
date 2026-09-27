@@ -165,6 +165,19 @@ impl Application {
         is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt)
     }
     fn handle_input(&mut self, dt: f32) {
+        // macroquad queues one char per pressed key and never drops them on
+        // its own; only the editor's Save overlay reads that queue. Drain it
+        // in every other state so keys pressed while playing or editing never
+        // pile up and then spill into the map-name field.
+        let save_open = self.state == State::Editor
+            && self
+                .editor
+                .as_ref()
+                .map(|e| crate::editor::consumes_text(e.overlay))
+                .unwrap_or(false);
+        if !save_open {
+            while get_char_pressed().is_some() {}
+        }
         let wheel = mouse_wheel();
         if wheel.1 != 0.0 {
             if self.state == State::Menu {
@@ -1262,6 +1275,9 @@ impl Application {
             }
             EditorOverlay::Save => {
                 // Type the name with printable chars; Backspace deletes.
+                // The char that opened this overlay was already drained in
+                // handle_input (the queue is only left alone while Save is
+                // open), so everything read here is real typing.
                 while let Some(ch) = get_char_pressed() {
                     if ch == '\n' || ch == '\r' {
                         continue;
