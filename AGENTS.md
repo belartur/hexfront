@@ -71,7 +71,7 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 - `rust/src/hexgrid.rs` — czysta geometria flat-top hex (odd-q) bez logiki gry.
 - `rust/src/board.rs` — plansza: `HexTile`, `Obstacle`/`ObstacleKind`, `Bridge`, `Board` (`passable()`, `find_path()` BFS, `reachable()`, `pick_tile()` / `snap_to_building()` z trybem płaskim na Alt, `set_ramp()` / `remove_ramp()` / `refresh_ramps_around()`, `add_bridge()` / `rebuild_single_bridge()`).
 - `rust/src/entities.rs` — dane: `BuildingKind`, `Player`, `Building`, `Vehicle`; helpery `is_base()`, `is_turret()`, `vehicle_kind_of()`, `turret_kind_of()`, `capacity_of()`. Logika w `game.rs`.
-- `rust/src/game.rs` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od macroquad.
+- `rust/src/game.rs` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od macroquad; flaga `sandbox` wyłącza warunki zakończenia meczu dla gry testowej edytora.
 - `rust/src/ai.rs` — `AiController` (pętla decyzyjna z sekcji 13 `rules.md`). Determinystyczny dla danego seeda.
 - `rust/src/rng.rs` — własny deterministyczny PRNG (splitmix64 + Box-Muller) na szum AI, bez dodatkowych crate'ów.
 - `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `save_path()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()` / `rebuild_bridges_keep()`. Jedynie tu wolno ruszać format pliku.
@@ -81,7 +81,7 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 - `rust/src/render.rs` — rysowanie z kodu na GPU (bez assetów rastrowych): `Renderer::draw_gpu()` (chunki terenu, linie siatki, obiekty, przezroczyste cienie i zasięgi, kreski 3D, nakładki 2D); `snap_to_building()` deleguje do `Board`.
 - `rust/src/render_baseline.rs` — test-benchmark budowy meshy (`#[cfg(test)]`): `build_terrain()` raz na mapę + `build_dynamic()` co klatkę (`cargo test --release render_baseline -- --nocapture`).
 - `rust/src/app.rs` — okno, menu poziomów, gra i edytor: `Application` (`run()`, LMB/RMB/Esc/P, drag/strzałki/WASD/krawędź, kółko/`+`/`-`, podgląd trasy, pauza; w edytorze stan `Editor` z klawiszami z `specification_rust.md`).
-- `rust/src/editor.rs` — edytor map jako stan aplikacji (nie osobny program): operacje na `Board`, trim/pad, walidacja, pamięć ostatniego budynku/utrudnienia; wejścia z menu: przycisk `add map` (nowa mapa) i RMB na mapie (edycja).
+- `rust/src/editor.rs` — edytor map jako stan aplikacji (nie osobny program): operacje na `Board`, trim/pad, walidacja, pamięć ostatniego budynku/utrudnienia, gra testowa na edytowanej mapie (`r`, Esc w tej grze wraca do edytora); wejścia z menu: przycisk `add map` (nowa mapa) i RMB na mapie (edycja).
 
 ### Katalog `rust/` (implementacja w Rust)
 - Kod gry i edytora plansz istnieje i jest kompletny (gra + edytor + testy). Zakres, układ modułów i otwarte punkty opisuje `specification_rust.md`.

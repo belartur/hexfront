@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 
 use crate::board::{Board, Obstacle, ObstacleKind};
 use crate::constants;
-use crate::entities::{Building, BuildingKind, is_base};
+use crate::entities::{Building, BuildingKind, Player, is_base};
+use crate::game::Game;
 use crate::hexgrid::{self, Tile};
 use crate::mapfile;
 
@@ -43,13 +44,14 @@ pub const OBSTACLE_ORDER: [ObstacleKind; 5] = [
 ];
 
 /// Legend lines shown on the editor screen.
-pub const LEGEND: [&str; 6] = [
+pub const LEGEND: [&str; 7] = [
     "b: building (again: cycle kind)    digits: units 0-999",
     "o: cycle owner                     t: obstacle (again: cycle kind)",
-    "m: bridge (again: rotate)          r: ramp (again: rotate)",
-    "[/]: lower/raise terrain          Del/RMB: delete object",
+    "m: bridge (again: rotate)          p: ramp (again: rotate)",
+    "[/]: lower/raise terrain           Del/RMB: delete object",
     "l: load   s: save   ctrl+s: quick save   ctrl+n: new map",
-    "Esc: menu (asks to save if dirty)   arrows/edge drag/wheel: view",
+    "r: play the level (Esc there: back to editing)",
+    "Esc: menu (asks to save if dirty)   view: drag/wheel/arrows",
 ];
 
 /// Which overlay (if any) the editor UI currently shows.
@@ -76,6 +78,31 @@ pub enum EditorOverlay {
 /// TEXTINPUT that opens its save overlay).
 pub fn consumes_text(overlay: EditorOverlay) -> bool {
     overlay == EditorOverlay::Save
+}
+
+/// Map name to save under: the text typed in the Save overlay (when it is
+/// open and not empty), else the current map name, else no name at all.
+pub fn resolve_save_name(
+    overlay: EditorOverlay,
+    input_text: &str,
+    map_name: Option<&str>,
+) -> Result<String, String> {
+    if overlay == EditorOverlay::Save && !input_text.trim().is_empty() {
+        Ok(input_text.trim().to_string())
+    } else if let Some(name) = map_name {
+        Ok(name.to_string())
+    } else {
+        Err("no map name".to_string())
+    }
+}
+
+/// Rewrite path separators in a map name so a save can never leave `maps/`.
+pub fn sanitize_map_name(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| if c == '/' || c == '\\' { '_' } else { c })
+        .collect();
+    safe.trim().to_string()
 }
 
 /// Stateful map editor: a board plus its buildings plus remembered defaults.
@@ -689,6 +716,40 @@ impl EditorState {
         *self = Self::new_board();
     }
 
+    /// Build a game from the edited board for the in-editor playtest (`r`).
+    ///
+    /// Players are derived from the placed buildings exactly like
+    /// [`crate::mapfile::load_game`] does for a saved map: ids `0..=highest
+    /// owner`, player 0 human, so the AI drives every other owner. The editor
+    /// keeps its own board — the returned game works on a copy, so a playtest
+    /// never modifies the map being edited.
+    pub fn playtest_game(&self) -> Game {
+        let mut owners: Vec<usize> = self.buildings.iter().filter_map(|b| b.owner).collect();
+        owners.sort_unstable();
+        owners.dedup();
+        let top = owners.last().copied().unwrap_or(0);
+        let players: Vec<Player> = (0..=top).map(|i| Player::new(i, i == 0)).collect();
+        let mut game = Game::new(
+            self.board.clone(),
+            players,
+            self.buildings.clone(),
+            self.playtest_seed(),
+        );
+        // A test run is a sandbox: the match never ends, so an unfinished map
+        // (no enemy base yet) can still be played and the AI keeps acting.
+        game.sandbox = true;
+        game
+    }
+
+    /// Deterministic AI seed of a playtest run: the map file name (like a
+    /// level seed), or 0 for a map that was never saved under a name.
+    pub fn playtest_seed(&self) -> u64 {
+        match &self.map_name {
+            Some(name) => crate::mapfile::level_seed(&crate::mapfile::save_path(name)),
+            None => 0,
+        }
+    }
+
     /// Load the map stored at `path`, padding small boards up to the standard
     /// new-map size.
     pub fn load_path(&mut self, path: &Path) -> Result<(), String> {
@@ -709,28 +770,30 @@ impl EditorState {
         Ok(())
     }
 
-    /// Save the map, trimming empty border rows/columns first.
+    /// Save the map into the maps directory, trimming empty border rows and
+    /// columns first. The name is the typed one (Save overlay) or the current
+    /// map name; path separators are rewritten so a save stays in `maps/`.
     pub fn save(&mut self) -> Result<PathBuf, String> {
-        let name = if self.overlay == EditorOverlay::Save && !self.input_text.trim().is_empty() {
-            self.input_text.trim().to_string()
-        } else if let Some(name) = &self.map_name {
-            name.clone()
-        } else {
-            return Err("no map name".to_string());
-        };
-        let safe: String = name
-            .chars()
-            .map(|c| if c == '/' || c == '\\' { '_' } else { c })
-            .collect();
-        let safe = safe.trim();
-        if safe.is_empty() {
+        let name = resolve_save_name(self.overlay, &self.input_text, self.map_name.as_deref())?;
+        let name = sanitize_map_name(&name);
+        self.save_into(&crate::constants::maps_dir(), &name)
+    }
+
+    /// Save the map into `dir` under the file name `name` (without the
+    /// extension), trimming empty border rows and columns first.
+    ///
+    /// Split from [`EditorState::save`] so tests can round-trip through a
+    /// temporary directory: the menu and the simulation tests read the real
+    /// `maps/` directory, and writing it from a test would race them.
+    pub fn save_into(&mut self, dir: &Path, name: &str) -> Result<PathBuf, String> {
+        if name.is_empty() {
             return Err("no map name".to_string());
         }
         self.commit_digits();
         let (board, buildings) = trim_map(&self.board, &self.buildings);
-        let path = mapfile::save_path(safe);
+        let path = dir.join(format!("{}{}", name, constants::MAP_EXTENSION));
         mapfile::save_map(&path, &board, &buildings).map_err(|e| e.to_string())?;
-        self.map_name = Some(safe.to_string());
+        self.map_name = Some(name.to_string());
         self.dirty = false;
         self.overlay = EditorOverlay::None;
         Ok(path)
@@ -1175,6 +1238,72 @@ mod tests {
     }
 
     #[test]
+    fn playtest_is_a_sandbox_that_never_touches_the_edited_map() {
+        // `r` starts a test run on a copy of the edited board: player 0 is
+        // human, other players come from the placed owners, and the match
+        // never ends, so an unfinished map (only a player base here) stays
+        // playable — without the sandbox flag check_elimination would end it
+        // on the first step.
+        let mut ed = EditorState::new_board();
+        ed.buildings.push(Building::new(
+            BuildingKind::BaseTank,
+            Some(0),
+            128,
+            128,
+            10.0,
+        ));
+        ed.map_name = Some("playtest_seed_src".to_string());
+        let mut game = ed.playtest_game();
+        assert!(game.sandbox);
+        assert_eq!(game.human_id, 0);
+        assert_eq!(game.players.len(), 1);
+        // The AI seed follows the map file name, like a level's does.
+        assert_eq!(
+            ed.playtest_seed(),
+            crate::mapfile::level_seed(&crate::mapfile::save_path("playtest_seed_src"))
+        );
+        let fp_before = ed.terrain_fingerprint();
+        let buildings_before = ed.buildings.len();
+        // Long enough for a base to produce its first units (three spawn
+        // intervals, rules.md section 3).
+        let steps = (3.0 * constants::BASE_SPAWN_INTERVAL / constants::SIM_DT) as usize;
+        for _ in 0..steps {
+            game.update(constants::SIM_DT);
+        }
+        assert!(!game.over, "a sandbox playtest must not end the match");
+        // The simulation ran on its own copy...
+        assert!(game.buildings.iter().any(|b| b.units > 10.0));
+        // ...while the edited map stays exactly as it was.
+        assert_eq!(ed.terrain_fingerprint(), fp_before);
+        assert_eq!(ed.buildings.len(), buildings_before);
+        assert!(!ed.playtest_game().over);
+    }
+
+    #[test]
+    fn save_name_resolves_and_stays_in_the_maps_directory() {
+        // Typed overlay text wins, else the current name, else no name;
+        // path separators can never escape the maps directory.
+        assert_eq!(
+            resolve_save_name(EditorOverlay::Save, " typed ", Some("old")).unwrap(),
+            "typed"
+        );
+        assert_eq!(
+            resolve_save_name(EditorOverlay::None, "typed", Some("old")).unwrap(),
+            "old"
+        );
+        assert_eq!(
+            resolve_save_name(EditorOverlay::Save, "  ", None),
+            Err("no map name".to_string())
+        );
+        assert_eq!(
+            resolve_save_name(EditorOverlay::Exit, "", None),
+            Err("no map name".to_string())
+        );
+        assert_eq!(sanitize_map_name("../evil"), ".._evil");
+        assert_eq!(sanitize_map_name("  plain "), "plain");
+    }
+
+    #[test]
     fn only_save_overlay_consumes_typed_text() {
         // The UI drains macroquad's char queue in every state except the
         // Save overlay, so keys pressed while editing never leak into the
@@ -1228,7 +1357,12 @@ mod tests {
             5.0,
         ));
         ed.map_name = Some("hexfront_editor_test_tmp".to_string());
-        let path = ed.save().expect("save");
+        // Save into a temporary directory: the real maps/ folder is read by
+        // other tests (menu list, full-sim) while the suite runs.
+        let tmp = std::env::temp_dir();
+        let path = ed
+            .save_into(&tmp, "hexfront_editor_test_tmp")
+            .expect("save");
         let data = std::fs::read(&path).unwrap();
         assert!(data.len() < 40000, "len={}", data.len());
         let mut ed2 = EditorState::new_board();

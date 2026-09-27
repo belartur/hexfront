@@ -52,6 +52,9 @@ pub struct Application {
     dragging: bool,
     /// Map editor state (entered from the menu via `add map` / RMB).
     editor: Option<EditorState>,
+    /// True while playing the edited level as a test (`r` in the editor):
+    /// Esc then returns to the editor instead of the level menu.
+    playtest: bool,
     /// Editor preview wrapped as a game so the shared renderer draws it.
     editor_game: Option<Game>,
     /// True when the editor terrain buffers match `editor_game`.
@@ -99,6 +102,7 @@ impl Application {
             editor_clean: true,
             editor_terrain_fp: 0,
             editor_tile: None,
+            playtest: false,
             capture: None,
             capture_frames: 0,
             slow_frames: Vec::new(),
@@ -255,6 +259,10 @@ impl Application {
             if is_key_pressed(KeyCode::Escape) {
                 if self.selection.is_some() {
                     self.set_selection(None);
+                } else if self.playtest {
+                    // A test run of the edited level always goes back to the
+                    // editor (specification_rust.md, "Edytor plansz").
+                    self.return_to_editor();
                 } else {
                     self.enter_menu();
                 }
@@ -320,6 +328,7 @@ impl Application {
         self.selection = None;
         self.editor = None;
         self.editor_game = None;
+        self.playtest = false;
     }
     fn set_selection(&mut self, src: Option<Tile>) {
         self.preview_tile = None;
@@ -422,6 +431,7 @@ impl Application {
                 self.terrain_board_key = Some((game.board.cols, game.board.rows));
                 self.game = Some(game);
                 self.ai = ai;
+                self.playtest = false;
                 self.paused = false;
                 self.selection = None;
                 self.preview_tile = None;
@@ -432,6 +442,61 @@ impl Application {
             }
             Err(e) => eprintln!("cannot load {}: {}", path.display(), e),
         }
+    }
+    /// Start a test run (`r` in the editor) of the map being edited.
+    ///
+    /// The playtest builds a fresh [`Game`] from a copy of the editor board
+    /// (players from the placed building owners, player 0 human, AI controls
+    /// the rest), keeps the current view and remembers that Esc must return
+    /// to the editor; the edited map itself is never touched by the run.
+    fn start_playtest(&mut self) {
+        // A pending units entry is accepted so the test plays the shown value.
+        if let Some(ed) = self.editor.as_mut() {
+            ed.commit_digits();
+        }
+        let Some(ed) = self.editor.as_ref() else {
+            return;
+        };
+        let game = ed.playtest_game();
+        let seed = ed.playtest_seed();
+        let mut ai = Vec::new();
+        for p in game.players.iter() {
+            if !p.is_human {
+                ai.push(AiController::new(
+                    p.id,
+                    *constants::ai_difficulty(constants::MAP_DEFAULT_AI_DIFFICULTY),
+                    seed.wrapping_add(p.id as u64),
+                ));
+            }
+        }
+        self.terrain = mesh::build_terrain(&game.board);
+        self.renderer.set_terrain(&self.terrain);
+        self.terrain_board_key = Some((game.board.cols, game.board.rows));
+        self.camera.limit_to_board(&game.board);
+        self.game = Some(game);
+        self.ai = ai;
+        self.playtest = true;
+        self.paused = false;
+        self.selection = None;
+        self.preview_tile = None;
+        self.preview_path = None;
+        self.load_timer = 0.0;
+        self.sim_acc = 0.0;
+        self.state = State::Playing;
+    }
+    /// Leave a playtest run and keep editing the same map (Esc in playtest).
+    fn return_to_editor(&mut self) {
+        self.game = None;
+        self.ai.clear();
+        self.playtest = false;
+        self.paused = false;
+        self.selection = None;
+        self.preview_tile = None;
+        self.preview_path = None;
+        self.state = State::Editor;
+        // Rebuild the editor preview from the (unchanged) edited board; the
+        // terrain fingerprint matches, so the static mesh is not rebuilt.
+        self.editor_clean = false;
     }
     fn update(&mut self, dt: f32) {
         if self.state == State::Loading {
@@ -699,9 +764,11 @@ impl Application {
         }
     }
     fn draw_hud(&self) {
-        let lines = [
-            "Drag/WASD/arrows/edge: pan   wheel/+/-: zoom   P: pause   Alt: flat pick   Esc: menu",
-        ];
+        let lines = [if self.playtest {
+            "TEST of the edited map   Esc: back to the editor   P: pause   wheel/+/-: zoom"
+        } else {
+            "Drag/WASD/arrows/edge: pan   wheel/+/-: zoom   P: pause   Alt: flat pick   Esc: menu"
+        }];
         for (i, line) in lines.iter().enumerate() {
             draw_text(
                 line,
@@ -1108,6 +1175,11 @@ impl Application {
             }
             return;
         }
+        // `r`: play the edited level as a test; Esc there returns to editing.
+        if is_key_pressed(KeyCode::R) {
+            self.start_playtest();
+            return;
+        }
         let tile = self.editor_hover();
         // Digit keys: Key0-Key9 + keypad.
         let mut digit: Option<char> = None;
@@ -1182,7 +1254,8 @@ impl Application {
             {
                 self.editor_clean = false;
             }
-        } else if is_key_pressed(KeyCode::R) {
+        } else if is_key_pressed(KeyCode::P) {
+            // Ramp placement/rotation (`p` for "podjazd"; `r` plays the level).
             if let Some(ed) = self.editor.as_mut()
                 && ed.press_r(tile)
             {

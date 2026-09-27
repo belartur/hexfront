@@ -77,6 +77,10 @@ pub struct Game {
     pub human_id: usize,
     /// Ids of eliminated players.
     pub eliminated: HashSet<usize>,
+    /// Sandbox flag used by the map editor's playtest (`r`): the match never
+    /// ends, so an unfinished map (e.g. without an enemy base) can still be
+    /// played. Real matches always keep it `false` (rules.md section 2).
+    pub sandbox: bool,
 }
 
 impl Game {
@@ -104,6 +108,7 @@ impl Game {
             winner: None,
             human_id,
             eliminated: HashSet::new(),
+            sandbox: false,
         }
     }
     #[allow(dead_code)]
@@ -799,7 +804,9 @@ impl Game {
         }
     }
     fn check_elimination(&mut self) {
-        if self.over {
+        if self.over || self.sandbox {
+            // A playtest run of the editor never ends (see `Game::sandbox`);
+            // the win/lose rules of rules.md section 2 stay real-match only.
             return;
         }
         for p in self.players.iter_mut() {
