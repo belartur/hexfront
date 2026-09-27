@@ -310,8 +310,7 @@ impl EditorState {
             self.board.ramps.remove(&tile);
             removed = true;
         }
-        if self.board.tiles.get(&tile).and_then(|t| t.bridge).is_some() {
-            self.remove_bridge(tile);
+        if self.clear_bridge_fragment(tile) {
             removed = true;
         }
         if let Some(t) = self.board.tiles.get_mut(&tile)
@@ -323,31 +322,20 @@ impl EditorState {
         removed
     }
 
-    /// Remove the whole bridge a deck fragment on `tile` belongs to.
-    fn remove_bridge(&mut self, tile: Tile) {
-        let idx = match self.board.tiles.get(&tile).and_then(|t| t.bridge) {
-            Some(i) => i,
-            None => return,
-        };
-        let fragments: Vec<Tile> = self
-            .board
-            .bridges
-            .get(idx)
-            .map(|b| b.fragments.clone())
-            .unwrap_or_default();
-        for f in fragments {
-            if let Some(t) = self.board.tiles.get_mut(&f) {
-                t.bridge = None;
-            }
+    /// Drop only the bridge fragment on `tile`, re-deriving every bridge from
+    /// the remaining fragment marks.
+    ///
+    /// Editing concerns a single field, so the other fragments of a
+    /// multi-field bridge keep their axis marks and the run is rebuilt around
+    /// the hole. Returns true when a fragment was actually there.
+    fn clear_bridge_fragment(&mut self, tile: Tile) -> bool {
+        if self.board.tiles.get(&tile).and_then(|t| t.bridge).is_none() {
+            return false;
         }
-        self.board.bridges.remove(idx);
-        for (i, b) in self.board.bridges.iter().enumerate() {
-            for f in b.fragments.iter() {
-                if let Some(t) = self.board.tiles.get_mut(f) {
-                    t.bridge = Some(i);
-                }
-            }
-        }
+        let mut marks = self.frag_marks();
+        marks.remove(&tile);
+        crate::mapfile::rebuild_bridges(&mut self.board, &marks, false);
+        true
     }
 
     /// Fragment axis marks kept across edits (deck tile -> axis 0-2).
@@ -363,40 +351,26 @@ impl EditorState {
         marks
     }
 
-    /// Place a remembered bridge fragment when the axis is known.
+    /// Place a bridge fragment of `axis` on `tile`, like the Python editor.
+    ///
+    /// Only this one field is edited: the axis marks of the other fragments
+    /// are kept, so a multi-field bridge survives an edit of a single field
+    /// (rotating one fragment used to swallow the rest of its run). The
+    /// terrain height is never touched -- the editor reports a fragment that
+    /// sits too high instead of flooding it, exactly like Python.
     fn put_bridge_fragment(&mut self, tile: Tile, axis: usize) -> bool {
         if !self.board.contains(tile) {
             return false;
         }
+        // Snapshot every mark *before* clearing, so the fragments of this and
+        // of every other bridge are rebuilt from the same set.
         let mut marks = self.frag_marks();
-        marks.insert(tile, axis % 3);
-        // Drop the old whole-bridge objects; rebuild_single_bridge keeps the
-        // neighbouring same-axis fragments (editor preview keeps invalid runs).
         self.board.bridges.clear();
         for t in self.board.tiles.values_mut() {
             t.bridge = None;
         }
-        // Lower the new deck tile first so it stays below the ends.
-        let mut w = 15;
-        for d in 0..6 {
-            let n = hexgrid::neighbor(tile.0, tile.1, d);
-            if self.board.contains(n) {
-                w = w.min(self.board.height(n));
-            }
-        }
-        if let Some(t) = self.board.tiles.get_mut(&tile) {
-            t.height = t.height.min(w.saturating_sub(3).max(0));
-        }
-        self.board.rebuild_single_bridge(tile, axis, &marks);
-        // Restore the marks of the other surviving runs (rebuild_single_bridge
-        // only rebuilds the run through `tile`).
-        let mut rest = marks.clone();
-        for f in self.board.bridges.iter().flat_map(|b| b.fragments.clone()) {
-            rest.remove(&f);
-        }
-        if !rest.is_empty() {
-            crate::mapfile::rebuild_bridges_keep(&mut self.board, &rest);
-        }
+        marks.insert(tile, axis % 3);
+        crate::mapfile::rebuild_bridges(&mut self.board, &marks, false);
         true
     }
 
@@ -549,6 +523,13 @@ impl EditorState {
     }
 
     /// `m`: place a bridge fragment or rotate it.
+    ///
+    /// An edit always concerns exactly one field: the object on `tile` is
+    /// cleared (the spec says placing overwrites whatever was there) and a
+    /// single fragment mark of the chosen axis is written back, then every
+    /// bridge is re-derived from the marks. The other fragments of a
+    /// multi-field bridge keep their marks, so rotating one field no longer
+    /// deletes the rest of the run.
     pub fn press_m(&mut self, tile: Option<Tile>) -> bool {
         let Some(tile) = tile else { return false };
         if !self.board.contains(tile) {
@@ -556,24 +537,20 @@ impl EditorState {
         }
         self.accept_digits(Some(tile));
         let existing = self.board.tiles.get(&tile).and_then(|t| t.bridge);
-        if let Some(i) = existing {
-            let axis = self
-                .board
+        let axis = if let Some(i) = existing {
+            self.board
                 .bridges
                 .get(i)
                 .map(|b| b.direction % 3)
-                .unwrap_or(0);
-            self.remove_bridge(tile);
-            let ok = self.put_bridge_fragment(tile, (axis + 1) % 3);
-            self.dirty = self.dirty || ok;
-            ok
+                .map(|a| (a + 1) % 3)
+                .unwrap_or_else(|| Self::bridge_axis(tile, &self.board))
         } else {
-            self.clear_tile(tile);
-            let axis = Self::bridge_axis(tile, &self.board);
-            let ok = self.put_bridge_fragment(tile, axis);
-            self.dirty = self.dirty || ok;
-            ok
-        }
+            Self::bridge_axis(tile, &self.board)
+        };
+        self.clear_tile(tile);
+        let ok = self.put_bridge_fragment(tile, axis);
+        self.dirty = self.dirty || ok;
+        ok
     }
 
     /// Preferred ramp axis for `tile`: the axis whose opposite neighbours
@@ -648,6 +625,7 @@ impl EditorState {
             t.height = nh;
         }
         self.board.refresh_ramps_around(tile);
+        self.board.refresh_bridges_around(tile);
         self.dirty = true;
         true
     }
@@ -1157,6 +1135,107 @@ mod tests {
         assert_eq!(ed.board.height((5, 5)), 2);
         assert!(ed.delete_at(Some((4, 4))));
         assert!(ed.board.tiles[&(4, 4)].ramp.is_none());
+    }
+
+    #[test]
+    fn placing_a_bridge_fragment_never_floods_the_field() {
+        // The editor only marks the field; it does not sink it to make the
+        // geometry valid -- an over-high fragment is reported instead
+        // (Python `_action_bridge` leaves the height alone).
+        let mut ed = test_state(10, 10);
+        let before = ed.board.height((5, 5));
+        assert!(ed.press_m(Some((5, 5))));
+        assert_eq!(
+            ed.board.height((5, 5)),
+            before,
+            "placing a fragment changed the terrain height"
+        );
+        // Same for a field that is water: it stays water, it is not raised.
+        let mut ed = test_state(10, 10);
+        ed.board.tiles.get_mut(&(6, 6)).unwrap().height = 0;
+        assert!(ed.press_m(Some((6, 6))));
+        assert_eq!(ed.board.height((6, 6)), 0);
+    }
+
+    #[test]
+    fn rotating_a_fragment_keeps_the_rest_of_the_bridge() {
+        // A bridge spanning three deck fields, seeded as one whole object: the
+        // editor edit concerns exactly one field, so rotating the middle
+        // fragment must not delete the other two (they used to disappear with
+        // the old "remove the whole bridge first" path).
+        let mut ed = test_state(12, 12);
+        for t in ed.board.tiles.values_mut() {
+            t.height = 3;
+        }
+        for t in [(5, 6), (5, 7)] {
+            ed.board.tiles.get_mut(&t).unwrap().height = 0;
+        }
+        assert!(ed.board.add_bridge((5, 5), (5, 8), 1).is_some());
+        let fragments = |ed: &EditorState| {
+            let mut v: Vec<Tile> = ed
+                .board
+                .tiles
+                .iter()
+                .filter(|(_, t)| t.bridge.is_some())
+                .map(|(k, _)| *k)
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(fragments(&ed), vec![(5, 6), (5, 7)]);
+        // Rotating the middle fragment: only this field changes.
+        assert!(ed.press_m(Some((5, 7))));
+        assert_eq!(
+            fragments(&ed),
+            vec![(5, 6), (5, 7)],
+            "rotating one field deleted the rest of the bridge"
+        );
+        // Any further rotation keeps the run: an edit is always one field.
+        for _ in 0..3 {
+            let before = fragments(&ed);
+            assert!(ed.press_m(Some((5, 7))));
+            assert_eq!(fragments(&ed), before, "the bridge shrank on rotation");
+        }
+        // Placing a fragment on a second, unrelated bridge keeps both.
+        for t in [(2, 2), (2, 3)] {
+            assert!(ed.press_m(Some(t)));
+        }
+        assert_eq!(
+            fragments(&ed).len(),
+            4,
+            "an edit on another field lost a fragment"
+        );
+        // Deleting a fragment of a run leaves the rest of it in place.
+        assert!(ed.delete_at(Some((5, 6))));
+        assert!(ed.board.tiles[&(5, 7)].bridge.is_some());
+    }
+
+    #[test]
+    fn changing_a_field_height_relevels_the_bridges_touching_it() {
+        // A bridge from (5,5) to (5,8) at height 3; raising its end must move
+        // the deck with it, otherwise the deck floats above the land it is
+        // built from.
+        let mut ed = test_state(12, 12);
+        for t in ed.board.tiles.values_mut() {
+            t.height = 3;
+        }
+        for t in [(5, 6), (5, 7)] {
+            ed.board.tiles.get_mut(&t).unwrap().height = 0;
+        }
+        assert!(ed.board.add_bridge((5, 5), (5, 8), 1).is_some());
+        assert_eq!(ed.board.bridges.len(), 1);
+        assert_eq!(ed.board.bridges[0].w, 3);
+        // Raise the land end the bridge is built on.
+        for _ in 0..2 {
+            assert!(ed.change_height(Some((5, 5)), 1));
+        }
+        assert_eq!(ed.board.bridges[0].w, 5, "the deck did not follow the land");
+        // Lowering it again lowers the deck.
+        assert!(ed.change_height(Some((5, 5)), -1));
+        assert_eq!(ed.board.bridges[0].w, 4);
+        // A field far away leaves the bridge alone.
+        assert!(ed.change_height(Some((1, 1)), 1));
+        assert_eq!(ed.board.bridges[0].w, 4);
     }
 
     #[test]

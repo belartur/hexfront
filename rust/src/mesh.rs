@@ -7,7 +7,7 @@
 //! camera ([`crate::iso`]) projects them and the hardware depth buffer
 //! resolves occlusion, so no per-pixel work happens on the CPU anymore.
 
-use crate::board::Board;
+use crate::board::{Board, Bridge};
 use crate::constants;
 use crate::game::Game;
 use crate::hexgrid::{self, Tile};
@@ -107,6 +107,10 @@ pub struct TerrainMesh {
 }
 
 /// World-space depth span of a board (for the GPU camera setup).
+///
+/// Bridge decks are included: they float [`constants::BRIDGE_DECK_LIFT`]
+/// above the nominal height of the bridge, so a board with a bridge has to
+/// cover that extra depth or the deck would be clipped by the far plane.
 pub fn depth_span(board: &Board) -> (f64, f64) {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
@@ -117,13 +121,29 @@ pub fn depth_span(board: &Board) -> (f64, f64) {
         lo = lo.min(d);
         hi = hi.max(d);
     }
+    for br in board.bridges.iter() {
+        let z = bridge_deck_z(br);
+        for frag in br.fragments.iter() {
+            let (cx, cy) = board.center_world(*frag);
+            let d = (cx + cy) * constants::ISO_SIN + z;
+            lo = lo.min(d);
+            hi = hi.max(d);
+        }
+    }
     if lo > hi { (0.0, 1.0) } else { (lo, hi) }
 }
 
-/// Highest rendered elevation of a board in px (view-culling padding).
+/// Highest rendered elevation of a board in px (view-culling padding and the
+/// fixed helicopter altitude). A deck can sit a [`BRIDGE_DECK_LIFT`] above a
+/// board's highest field, so the lift is added whenever a bridge exists.
 pub fn max_height(board: &Board) -> f64 {
     let h = board.tiles.values().map(|t| t.height).max().unwrap_or(0);
-    h as f64 * constants::ELEVATION_PX
+    let terrain = h as f64 * constants::ELEVATION_PX;
+    if board.bridges.is_empty() {
+        terrain
+    } else {
+        terrain + constants::BRIDGE_DECK_LIFT
+    }
 }
 
 /// World box `(x_min, y_min, x_max, y_max)` visible in `camera`.
@@ -270,6 +290,86 @@ fn push_range_rect(
     push_range_tri(soup, a, c, d);
 }
 
+/// Oriented rectangle of a helicopter shadow clipped to a bridge deck.
+///
+/// The deck is a narrow strip lying over water, and the silhouette is much
+/// wider, so without a clip the parts would hang in mid-air beside the bridge.
+/// The rectangle is cut against the four deck edges (Sutherland-Hodgman) and
+/// the surviving polygon is triangulated as a fan, which keeps the
+/// translucent plane flat (one alpha, no self-overlap) while the hardware
+/// depth test still trims it against nearer hulls and cliffs.
+#[allow(clippy::too_many_arguments)]
+fn push_range_rect_on_deck(
+    soup: &mut RangeSoup,
+    cx: f64,
+    cy: f64,
+    z: f64,
+    len: f64,
+    wid: f64,
+    fx: f64,
+    fy: f64,
+    color: [u8; 3],
+    alpha: u8,
+    deck: &DeckQuad,
+) {
+    let (px, py) = (-fy, fx);
+    let (hl, hw) = (len / 2.0, wid / 2.0);
+    let corner =
+        |along: f64, across: f64| (cx + fx * along + px * across, cy + fy * along + py * across);
+    let rect = [
+        corner(-hl, -hw),
+        corner(hl, -hw),
+        corner(hl, hw),
+        corner(-hl, hw),
+    ];
+    // Deck-local axes: along the bridge and across it.
+    let (ux, uy) = deck.axis;
+    let (vx, vy) = (-uy, ux);
+    let mut poly = rect.to_vec();
+    for (nx, ny, limit) in [
+        (ux, uy, deck.half_len),
+        (-ux, -uy, deck.half_len),
+        (vx, vy, deck.half_wid),
+        (-vx, -vy, deck.half_wid),
+    ] {
+        poly = clip_polygon_half_plane(&poly, deck.center, (nx, ny), limit);
+        if poly.len() < 3 {
+            return;
+        }
+    }
+    for k in 1..poly.len() - 1 {
+        let a = range_vert(poly[0].0, poly[0].1, z, color, alpha);
+        let b = range_vert(poly[k].0, poly[k].1, z, color, alpha);
+        let c = range_vert(poly[k + 1].0, poly[k + 1].1, z, color, alpha);
+        push_range_tri(soup, a, b, c);
+    }
+}
+
+/// Clip a convex polygon to the half-plane `dot(p - origin, normal) <= limit`
+/// (Sutherland-Hodgman, single pass over the edges).
+fn clip_polygon_half_plane(
+    poly: &[(f64, f64)],
+    origin: (f64, f64),
+    normal: (f64, f64),
+    limit: f64,
+) -> Vec<(f64, f64)> {
+    let side = |p: (f64, f64)| (p.0 - origin.0) * normal.0 + (p.1 - origin.1) * normal.1 - limit;
+    let mut out = Vec::with_capacity(poly.len() + 2);
+    for k in 0..poly.len() {
+        let a = poly[k];
+        let b = poly[(k + 1) % poly.len()];
+        let (da, db) = (side(a), side(b));
+        if da <= 0.0 {
+            out.push(a);
+        }
+        if (da < 0.0 && db > 0.0) || (da > 0.0 && db < 0.0) {
+            let t = da / (da - db);
+            out.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+        }
+    }
+    out
+}
+
 /// Base tile colour (checkerboard for land, blue for water).
 pub fn tile_color(tile: Tile, height: i32) -> [u8; 3] {
     if height == 0 {
@@ -287,6 +387,137 @@ pub fn tile_top_z(board: &Board, tile: Tile) -> f64 {
         return board.height(*a).min(board.height(*b)) as f64 * constants::ELEVATION_PX;
     }
     board.height(tile) as f64 * constants::ELEVATION_PX
+}
+
+/// Half-length of one deck segment along the bridge axis, as a fraction of
+/// the distance between neighbouring field centres: 0.52 makes consecutive
+/// fragments overlap slightly, so the deck runs from one field edge to the
+/// next as one continuous causeway.
+const BRIDGE_DECK_LEN_FRAC: f64 = 0.52;
+/// Half-width of a deck segment across the bridge axis, as a fraction of the
+/// hex side. Much narrower than a field, so the deck reads as a bridge with a
+/// visible direction instead of a second field glued onto the water.
+const BRIDGE_DECK_WID_FRAC: f64 = 0.34;
+
+/// Rendered elevation of the driveable surface of a bridge in px.
+///
+/// Rules.md section 8: travelling along a bridge happens on its deck, which
+/// floats [`constants::BRIDGE_DECK_LIFT`] above the nominal bridge height, so
+/// the deck hides vehicles passing underneath and leaves the ones driving on
+/// it visible.
+pub fn bridge_deck_z(br: &Bridge) -> f64 {
+    br.w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT
+}
+
+/// One bridge deck fragment in world space (rules.md section 8).
+///
+/// The deck is a narrow rectangle running edge to edge along
+/// [`Bridge::direction`], so a bridge reads as one straight causeway with a
+/// visible direction. A plain hexagon covering the whole field would look
+/// like land instead, and would hide both the water below and the way the
+/// vehicles travel over it.
+#[derive(Clone, Copy, Debug)]
+pub struct DeckQuad {
+    /// Four corners, wound around the rectangle (two per long edge).
+    pub corners: [(f64, f64); 4],
+    /// Centre of the fragment.
+    pub center: (f64, f64),
+    /// Unit vector along the bridge axis.
+    pub axis: (f64, f64),
+    /// Half length along [`DeckQuad::axis`].
+    pub half_len: f64,
+    /// Half width across [`DeckQuad::axis`].
+    pub half_wid: f64,
+    /// Rendered elevation of the deck surface in px.
+    pub z: f64,
+}
+
+/// World-space rectangle of one bridge deck fragment (the same frame as the
+/// Python renderer): the deck spans from one field edge towards the next, so
+/// consecutive fragments overlap slightly and the bridge has no gaps.
+pub fn bridge_deck_quad(board: &Board, br: &Bridge, frag: Tile) -> DeckQuad {
+    let (cx, cy) = board.center_world(frag);
+    let nxt = hexgrid::neighbor(frag.0, frag.1, br.direction);
+    let (nx, ny) = if board.contains(nxt) {
+        board.center_world(nxt)
+    } else {
+        board.center_world(br.b)
+    };
+    let (ax, ay) = (nx - cx, ny - cy);
+    let len = (ax * ax + ay * ay).sqrt().max(1e-6);
+    let (ux, uy) = (ax / len, ay / len);
+    let (px, py) = (-uy, ux);
+    let half_len = BRIDGE_DECK_LEN_FRAC * len;
+    let half_wid = BRIDGE_DECK_WID_FRAC * board.side;
+    DeckQuad {
+        corners: [
+            (
+                cx + ux * half_len + px * half_wid,
+                cy + uy * half_len + py * half_wid,
+            ),
+            (
+                cx + ux * half_len - px * half_wid,
+                cy + uy * half_len - py * half_wid,
+            ),
+            (
+                cx - ux * half_len - px * half_wid,
+                cy - uy * half_len - py * half_wid,
+            ),
+            (
+                cx - ux * half_len + px * half_wid,
+                cy - uy * half_len + py * half_wid,
+            ),
+        ],
+        center: (cx, cy),
+        axis: (ux, uy),
+        half_len,
+        half_wid,
+        z: bridge_deck_z(br),
+    }
+}
+
+/// Deck of one bridge fragment: a slab with a visible thickness, raised on
+/// pillars over the field below.
+///
+/// Rules.md section 8 lets vehicles pass *under* a bridge, so the deck must
+/// not be drawn as a solid block down to the ground: only the slab and a few
+/// thin pillars are built, leaving the space below open and readable. The
+/// narrow rectangle still shows which way the bridge runs.
+fn push_bridge_deck(board: &Board, soup: &mut TriangleSoup, br: &Bridge, frag: Tile) {
+    let deck = bridge_deck_quad(board, br, frag);
+    let ground = board.height(frag) as f64 * constants::ELEVATION_PX;
+    // Slab top plus a short side band of `BRIDGE_DECK_THICKNESS`, so the deck
+    // reads as a plate with an edge rather than a paper-thin sheet.
+    let slab_z = (deck.z - constants::BRIDGE_DECK_THICKNESS).max(ground);
+    let top = deck
+        .corners
+        .map(|(x, y)| vert(x, y, deck.z, constants::BRIDGE_DECK_COLOR));
+    push_quad(soup, top[0], top[1], top[2], top[3]);
+    for k in 0..4 {
+        let a = deck.corners[k];
+        let b = deck.corners[(k + 1) % 4];
+        let p0 = vert(a.0, a.1, deck.z, constants::BRIDGE_DECK_SIDE_COLOR);
+        let p1 = vert(b.0, b.1, deck.z, constants::BRIDGE_DECK_SIDE_COLOR);
+        let p2 = vert(b.0, b.1, slab_z, constants::BRIDGE_DECK_SIDE_COLOR);
+        let p3 = vert(a.0, a.1, slab_z, constants::BRIDGE_DECK_SIDE_COLOR);
+        push_quad(soup, p0, p1, p2, p3);
+    }
+    // Pillars at the four corners, dropped to the field below. They carry the
+    // deck visually while leaving the span open underneath.
+    if slab_z - ground > 0.0 {
+        for (x, y) in deck.corners.iter() {
+            push_box(
+                soup,
+                *x,
+                *y,
+                ground,
+                constants::BRIDGE_PILLAR_WID,
+                constants::BRIDGE_PILLAR_WID,
+                slab_z - ground,
+                constants::BRIDGE_PILLAR_COLOR,
+            );
+        }
+    }
 }
 
 /// Build the static terrain mesh of `board` (tops, skirts, ramps, decks).
@@ -323,22 +554,13 @@ pub fn build_terrain(board: &Board) -> TerrainMesh {
     }
     // Bridge decks sit on their own tiles, so every fragment lands in the
     // chunk of that tile (a bridge may span more than one chunk).
-    let mut bridges: Vec<usize> = (0..board.bridges.len()).collect();
-    bridges.sort_by_key(|i| board.bridges[*i].a);
-    for i in bridges {
-        let w = board.bridges[i].w;
-        for f in board.bridges[i].fragments.clone() {
+    for br in board.bridges.iter() {
+        for f in br.fragments.iter().copied() {
             let key = (f.0 / CHUNK_TILES, f.1 / CHUNK_TILES);
             let Some(idx) = groups.keys().position(|k| *k == key) else {
                 continue;
             };
-            let z = w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT;
-            let corners = hexgrid::hex_corners(f.0, f.1, board.side);
-            let c = corners.map(|(x, y)| vert(x, y, z, [150, 120, 90]));
-            let soup = &mut mesh.chunks[idx].soup;
-            for k in 1..5 {
-                push_tri(soup, c[0], c[k], c[k + 1]);
-            }
+            push_bridge_deck(board, &mut mesh.chunks[idx].soup, br, f);
         }
     }
     mesh
@@ -506,7 +728,11 @@ impl DynamicMesh {
     }
 }
 
-/// Ground elevation under a vehicle (bridge decks included).
+/// Ground elevation under a vehicle, ignoring bridges.
+///
+/// Ramps sit at the lower of the two heights they join. A vehicle driving
+/// *along* a bridge stands on the deck instead — see
+/// [`vehicle_surface_z`], which adds that case on top of this terrain lookup.
 pub fn vehicle_ground_z(game: &Game, x: f64, y: f64) -> f64 {
     if let Some(t) = game.board.world_to_tile(x, y) {
         if let Some((a, b)) = game.board.ramps.get(&t) {
@@ -516,6 +742,111 @@ pub fn vehicle_ground_z(game: &Game, x: f64, y: f64) -> f64 {
         return game.board.height(t) as f64 * constants::ELEVATION_PX;
     }
     0.0
+}
+
+/// Tiles before and after `v` on its route.
+///
+/// `prev` is the tile the vehicle comes from: the last visited waypoint, or
+/// the source tile stored on the vehicle right after departure. `next` is the
+/// waypoint it heads to (`None` when the route is empty or finished). The pair
+/// tells a vehicle travelling *along* a bridge deck from one crossing
+/// *under* it (rules.md section 8).
+pub fn route_endpoints(v: &crate::entities::Vehicle) -> (Option<Tile>, Option<Tile>) {
+    let mut prev = v.src_tile;
+    let mut next = None;
+    if !v.route.is_empty() {
+        if v.route_index > 0 && v.route_index <= v.route.len() {
+            prev = Some(v.route[v.route_index - 1]);
+        }
+        if v.route_index < v.route.len() {
+            next = Some(v.route[v.route_index]);
+        }
+    }
+    (prev, next)
+}
+
+/// Deck elevation of the bridge the segment `tile`-`prev`-`next` runs along.
+///
+/// Returns `None` when the route walks no deck pair at all, i.e. the vehicle
+/// is not on a bridge (it may be sailing under one). Same rule as the Python
+/// renderer: a waypoint counts as "on the deck" when one of its two route
+/// steps is a deck pair, which covers the very first leg from a source tile
+/// that is itself not a fragment.
+pub fn deck_z_at(
+    board: &Board,
+    tile: Option<Tile>,
+    prev: Option<Tile>,
+    next: Option<Tile>,
+) -> Option<f64> {
+    if prev.is_none() && next.is_none() {
+        return None;
+    }
+    for br in board.bridges.iter() {
+        if let (Some(p), Some(n)) = (prev, next)
+            && br.connects(p, n)
+        {
+            return Some(bridge_deck_z(br));
+        }
+        if let Some(t) = tile {
+            if let Some(p) = prev
+                && br.connects(p, t)
+            {
+                return Some(bridge_deck_z(br));
+            }
+            if let Some(n) = next
+                && br.connects(t, n)
+            {
+                return Some(bridge_deck_z(br));
+            }
+        }
+    }
+    None
+}
+
+/// Walkable-surface elevation under a ground vehicle, bridge deck included.
+///
+/// A vehicle travelling along a bridge stands on the deck (rules.md section
+/// 8), so it is drawn over the water and over anything crossing underneath;
+/// a vehicle crossing under a bridge stays on the terrain and is hidden by the
+/// deck, exactly as on the Python renderer.
+pub fn vehicle_surface_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
+    let tile = game.board.world_to_tile(v.x, v.y);
+    let (prev, next) = route_endpoints(v);
+    if let Some(z) = deck_z_at(&game.board, tile, prev, next) {
+        return z;
+    }
+    vehicle_ground_z(game, v.x, v.y)
+}
+
+/// Elevation of the route waypoint `seq[i]`, bridge deck included.
+///
+/// A waypoint sitting on a bridge fragment rides the deck only when a route
+/// step walks along it (rules.md section 8); crossing *under* a bridge keeps
+/// the terrain elevation. `on_deck` covers the first waypoint of a sequence
+/// whose previous step left the known sequence: when the vehicle itself drives
+/// on the deck, its next waypoint on a fragment stays on the deck too.
+pub fn waypoint_z(board: &Board, seq: &[Tile], i: usize, on_deck: bool) -> f64 {
+    let tile = seq[i];
+    if i > 0
+        && let Some(z) = deck_z_at(board, Some(tile), Some(seq[i - 1]), None)
+    {
+        return z;
+    }
+    if i + 1 < seq.len()
+        && let Some(z) = deck_z_at(board, Some(tile), None, Some(seq[i + 1]))
+    {
+        return z;
+    }
+    if on_deck
+        && let Some(br) = board
+            .tiles
+            .get(&tile)
+            .and_then(|t| t.bridge)
+            .map(|i| &board.bridges[i])
+    {
+        return bridge_deck_z(br);
+    }
+    tile_top_z(board, tile)
 }
 
 /// Flat ground disc (range indicators, landing pads, mines, traps).
@@ -1071,18 +1402,18 @@ fn push_obstacle(
 
 /// Rendered elevation of a vehicle in px.
 ///
-/// A ground vehicle stands on the walkable surface below it (deck and ramp
-/// aware, see [`vehicle_ground_z`]). A helicopter ignores the terrain
-/// (rules.md section 5.2), so it flies at a fixed altitude above the
-/// *highest* tile of the board ([`helicopter_altitude`]): the altitude is
-/// constant for the whole level instead of following every bump, and the
-/// shadow disc built by [`push_helicopter_shadow`] still tells which tile
-/// the helicopter is over.
+/// A ground vehicle stands on the walkable surface below it — the bridge deck
+/// when it drives along one, otherwise the terrain (ramps included; see
+/// [`vehicle_surface_z`]). A helicopter ignores the terrain (rules.md section
+/// 5.2), so it flies at a fixed altitude above the *highest* tile of the board
+/// ([`helicopter_altitude`]): the altitude is constant for the whole level
+/// instead of following every bump, and the shadow silhouette built by
+/// [`push_helicopter_shadow`] still tells which tile the helicopter is over.
 pub fn vehicle_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     if v.kind == constants::VehicleKind::Helicopter {
         helicopter_altitude(game)
     } else {
-        vehicle_ground_z(game, v.x, v.y)
+        vehicle_surface_z(game, v)
     }
 }
 
@@ -1396,19 +1727,40 @@ fn push_helicopter_oriented(
     );
 }
 
+/// Surface that receives the helicopter shadow at a world point, with the
+/// deck rectangle when the point lies on a bridge.
+///
+/// A deck fragment shields the water below it, so a helicopter crossing a
+/// bridge drops its shadow on the deck; everywhere else the shadow follows
+/// the terrain (ramps included, see [`vehicle_ground_z`]). The rectangle is
+/// returned alongside because the deck is narrow: the silhouette is wider
+/// than one deck fragment, so it has to be clipped to the deck instead of
+/// floating over the water around it.
+fn helicopter_shadow_surface(game: &Game, x: f64, y: f64) -> (f64, Option<DeckQuad>) {
+    if let Some(tile) = game.board.world_to_tile(x, y)
+        && let Some(br) = game
+            .board
+            .tiles
+            .get(&tile)
+            .and_then(|t| t.bridge)
+            .map(|i| &game.board.bridges[i])
+    {
+        return (
+            bridge_deck_z(br),
+            Some(bridge_deck_quad(&game.board, br, tile)),
+        );
+    }
+    (vehicle_ground_z(game, x, y), None)
+}
+
 /// Elevation in px of the surface that receives a helicopter shadow.
 ///
 /// A deck fragment of a bridge shields the water below it, so a helicopter
 /// crossing a bridge drops its shadow on the deck; everywhere else the
 /// shadow follows the terrain (ramps included, see [`vehicle_ground_z`]).
+#[cfg(test)]
 fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
-    if let Some(tile) = game.board.world_to_tile(x, y)
-        && let Some(bi) = game.board.tiles.get(&tile).and_then(|t| t.bridge)
-        && let Some(bridge) = game.board.bridges.get(bi)
-    {
-        return bridge.w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT;
-    }
-    vehicle_ground_z(game, x, y)
+    helicopter_shadow_surface(game, x, y).0
 }
 
 /// Detailed shadow of one helicopter, projected straight down.
@@ -1430,87 +1782,76 @@ fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
 /// win the depth race against the terrain (no flicker) yet low enough to
 /// read as lying on the ground. They go into the translucent pass: the GPU
 /// depth test keeps them from darkening the hull, other vehicles or nearer
-/// cliffs.
+/// cliffs. Over a bridge the parts are additionally clipped to the deck
+/// rectangle, so a shadow crossing the water never hangs beside the bridge.
 fn push_helicopter_shadow(
     game: &Game,
     v: &crate::entities::Vehicle,
     rotor_phase: f64,
     shadow: &mut RangeSoup,
 ) {
-    let z = helicopter_shadow_z(game, v.x, v.y) + constants::SHADOW_LIFT;
+    let (surface, deck) = helicopter_shadow_surface(game, v.x, v.y);
+    let z = surface + constants::SHADOW_LIFT;
     let (fx, fy) = vehicle_heading(game, v);
     let (px, py) = (-fy, fx);
     let black = constants::SHADOW_COLOR;
     let solid = constants::SHADOW_ALPHA;
+    // One silhouette part: on a bridge deck it is clipped to the deck strip,
+    // on open terrain it is the plain rectangle of the Python renderer.
+    let part =
+        |shadow: &mut RangeSoup, cx: f64, cy: f64, len: f64, wid: f64, fx: f64, fy: f64| match deck
+        {
+            Some(d) => {
+                push_range_rect_on_deck(shadow, cx, cy, z, len, wid, fx, fy, black, solid, &d)
+            }
+            None => push_range_rect(shadow, cx, cy, z, len, wid, fx, fy, black, solid),
+        };
     // The two main rotor blades, at the phase the airframe shows this frame.
     let (c, s) = (rotor_phase.cos(), rotor_phase.sin());
     for (bx, by) in [(c, s), (s, -c)] {
-        push_range_rect(
+        part(
             shadow,
             v.x,
             v.y,
-            z,
             2.0 * HELI_ROTOR_R,
             HELI_SHADOW_BLADE_WID,
             bx,
             by,
-            black,
-            solid,
         );
     }
     // Skid rails.
     for side in [-1.0, 1.0] {
-        push_range_rect(
+        part(
             shadow,
             v.x + px * side * HELI_SKID_OFFSET,
             v.y + py * side * HELI_SKID_OFFSET,
-            z,
             HELI_SKID_LEN,
             HELI_SKID_THICK,
             fx,
             fy,
-            black,
-            solid,
         );
     }
     // Tail boom with its end fin.
-    push_range_rect(
+    part(
         shadow,
         v.x + fx * HELI_TAIL_SHIFT,
         v.y + fy * HELI_TAIL_SHIFT,
-        z,
         HELI_TAIL_LEN,
         HELI_TAIL_WID,
         fx,
         fy,
-        black,
-        solid,
     );
-    push_range_rect(
+    part(
         shadow,
         v.x + fx * HELI_FIN_SHIFT,
         v.y + fy * HELI_FIN_SHIFT,
-        z,
         HELI_FIN_LEN,
         HELI_FIN_WID,
         fx,
         fy,
-        black,
-        solid,
     );
     // Hull (the widest part of the silhouette).
-    push_range_rect(
-        shadow,
-        v.x,
-        v.y,
-        z,
-        HELI_HULL_LEN,
-        HELI_HULL_WID,
-        fx,
-        fy,
-        black,
-        solid,
-    );
+    part(shadow, v.x, v.y, HELI_HULL_LEN, HELI_HULL_WID, fx, fy);
 }
 
 // ---------------------------------------------------------------------------
@@ -1906,12 +2247,22 @@ fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
             continue;
         }
         // The first leg starts at the vehicle itself (a helicopter above the
-        // terrain), the following waypoints sit on the terrain below them, so
-        // an airborne route descends to the ground instead of floating.
+        // terrain), the following waypoints sit on the surface below them, so
+        // an airborne route descends to the ground instead of floating. A
+        // route crossing a bridge rides its deck, not the field underneath.
+        let seq = &v.route[v.route_index.min(v.route.len())..];
+        let (prev_tile, next_tile) = route_endpoints(v);
+        let on_deck = deck_z_at(
+            &game.board,
+            game.board.world_to_tile(v.x, v.y),
+            prev_tile,
+            next_tile,
+        )
+        .is_some();
         let mut prev = (v.x, v.y, vehicle_z(game, v));
-        for t in v.route.iter().skip(v.route_index) {
-            let (wx, wy) = game.board.center_world(*t);
-            let wz = tile_top_z(&game.board, *t);
+        for i in 0..seq.len() {
+            let (wx, wy) = game.board.center_world(seq[i]);
+            let wz = waypoint_z(&game.board, seq, i, on_deck);
             lines.push((
                 line_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
                 line_vert(wx, wy, wz, [255, 255, 255], 255),
@@ -2168,11 +2519,12 @@ mod tests {
             "altitude follows the terrain instead of staying fixed"
         );
         // The shadow lands on the surface under the helicopter: on the low
-        // tile far below the hull, on the hill closer to it.
-        let low_shadow = helicopter_shadow_z(&game, lx, ly) + constants::OBSTACLE_LIFT;
-        let hill_shadow = helicopter_shadow_z(&game, hx, hy) + constants::OBSTACLE_LIFT;
-        assert!((low_shadow - (constants::ELEVATION_PX + constants::OBSTACLE_LIFT)).abs() < 1e-9);
-        assert!((hill_shadow - (hill_top + constants::OBSTACLE_LIFT)).abs() < 1e-9);
+        // tile far below the hull, on the hill closer to it, lifted
+        // SHADOW_LIFT above the receiving surface.
+        let low_shadow = helicopter_shadow_z(&game, lx, ly) + constants::SHADOW_LIFT;
+        let hill_shadow = helicopter_shadow_z(&game, hx, hy) + constants::SHADOW_LIFT;
+        assert!((low_shadow - (constants::ELEVATION_PX + constants::SHADOW_LIFT)).abs() < 1e-9);
+        assert!((hill_shadow - (hill_top + constants::SHADOW_LIFT)).abs() < 1e-9);
         assert!(
             low_shadow < alt && hill_shadow < alt,
             "shadow {low_shadow}/{hill_shadow} not below the hull {alt}"
@@ -2784,6 +3136,277 @@ mod tests {
         camera.center_on_world(6000.0, 1000.0, 0.0);
         let (nx0, _, nx1, _) = visible_world_bounds(&camera, 15.0 * constants::ELEVATION_PX, 36.0);
         assert!(nx0 > x0 && nx1 > x1, "box did not follow the pan");
+    }
+
+    /// Board with one bridge along column 5: land of height 3 with two water
+    /// fields in between, so the deck flies over water (rules.md section 8).
+    fn bridge_board() -> (Board, Tile, Tile, Vec<Tile>) {
+        let mut board = Board::new(14, 14);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 3;
+        }
+        for t in [(5, 6), (5, 7)] {
+            board.tiles.get_mut(&t).unwrap().height = 0;
+        }
+        let a = (5, 5);
+        let b = (5, 8);
+        let idx = board.add_bridge(a, b, 1).expect("bridge over water");
+        let frags = board.bridges[idx].fragments.clone();
+        (board, a, b, frags)
+    }
+
+    #[test]
+    fn bridge_deck_is_a_narrow_strip_oriented_along_the_bridge() {
+        let (board, _a, _b, frags) = bridge_board();
+        let br = &board.bridges[0];
+        for frag in frags.iter().copied() {
+            let deck = bridge_deck_quad(&board, br, frag);
+            let (cx, cy) = board.center_world(frag);
+            assert!((deck.center.0 - cx).abs() < 1e-9 && (deck.center.1 - cy).abs() < 1e-9);
+            // The axis points at the next field along the bridge...
+            let nxt = hexgrid::neighbor(frag.0, frag.1, br.direction);
+            let (nx, ny) = board.center_world(nxt);
+            let len = ((nx - cx).powi(2) + (ny - cy).powi(2)).sqrt();
+            assert!(
+                (deck.axis.0 * (nx - cx) + deck.axis.1 * (ny - cy) - len).abs() < 1e-6,
+                "axis does not follow the bridge direction"
+            );
+            // ...the strip spans the gap between the two field centres...
+            assert!(deck.half_len > len / 2.0, "deck is shorter than one step");
+            // ...but it is far narrower than a field, so it reads as a bridge
+            // and its direction is visible from above.
+            assert!(
+                deck.half_wid * 2.0 < board.side,
+                "deck {} px wide is not narrower than a field",
+                deck.half_wid * 2.0
+            );
+            for (x, y) in deck.corners.iter() {
+                let (dx, dy) = (x - cx, y - cy);
+                let along = dx * deck.axis.0 + dy * deck.axis.1;
+                let across = dx * -deck.axis.1 + dy * deck.axis.0;
+                assert!((along.abs() - deck.half_len).abs() < 1e-6);
+                assert!((across.abs() - deck.half_wid).abs() < 1e-6);
+            }
+            assert_eq!(
+                deck.z,
+                br.w as f64 * constants::ELEVATION_PX + constants::BRIDGE_DECK_LIFT
+            );
+        }
+        // The terrain mesh carries the deck strip, not a hexagon per fragment.
+        // Top face and the four-sided slab band sit at deck height; the space
+        // below the deck is carried by pillars only, because rules.md sec. 8
+        // lets vehicles pass under a bridge.
+        let mesh = build_terrain(&board);
+        let count_color = |color: [u8; 3]| {
+            mesh.chunks
+                .iter()
+                .flat_map(|c| c.soup.vertices.iter())
+                .filter(|v| v.color == color)
+                .count()
+        };
+        // Top face: one quad. Slab band: four quads.
+        assert_eq!(
+            count_color(constants::BRIDGE_DECK_COLOR),
+            frags.len() * 2 * 3
+        );
+        assert_eq!(
+            count_color(constants::BRIDGE_DECK_SIDE_COLOR),
+            frags.len() * 4 * 2 * 3
+        );
+        for frag in frags.iter().copied() {
+            let deck = bridge_deck_quad(&board, &board.bridges[0], frag);
+            // The middle of the span is empty: a solid block down to the field
+            // would put vertices there, while a deck on pillars leaves the
+            // passage under the bridge open (rules.md sec. 8). Only the pillar
+            // feet touch the field, and they sit at the deck corners.
+            let inside = |v: &GpuVertex, share: f64| {
+                let (dx, dy) = (
+                    f64::from(v.x) - deck.center.0,
+                    f64::from(v.y) - deck.center.1,
+                );
+                (dx * deck.axis.0 + dy * deck.axis.1).abs() < deck.half_len * share
+                    && (dx * -deck.axis.1 + dy * deck.axis.0).abs() < deck.half_wid * share
+            };
+            let low = |share: f64| {
+                mesh.chunks
+                    .iter()
+                    .flat_map(|c| c.soup.vertices.iter())
+                    .filter(|v| {
+                        inside(v, share) && f64::from(v.z) < constants::BRIDGE_DECK_THICKNESS
+                    })
+                    .count()
+            };
+            assert_eq!(
+                low(0.5),
+                0,
+                "the deck is filled down to the field, blocking the passage below"
+            );
+            // The pillars do reach the field, at the four deck corners.
+            for (cx, cy) in deck.corners.iter() {
+                let standing = mesh
+                    .chunks
+                    .iter()
+                    .flat_map(|c| c.soup.vertices.iter())
+                    .any(|v| {
+                        (f64::from(v.x) - cx).abs() <= constants::BRIDGE_PILLAR_WID
+                            && (f64::from(v.y) - cy).abs() <= constants::BRIDGE_PILLAR_WID
+                            && f64::from(v.z) < deck.z - constants::BRIDGE_DECK_THICKNESS
+                    });
+                assert!(standing, "no pillar carries the deck corner {cx},{cy}");
+            }
+        }
+    }
+
+    #[test]
+    fn vehicle_on_the_deck_stands_on_it_and_under_the_bridge_stays_on_the_water() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let (board, a, b, frags) = bridge_board();
+        let mid = frags[0];
+        let (mx, my) = board.center_world(mid);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        // Driving along the deck: the vehicle rides the bridge, high above the
+        // water it crosses (rules.md section 8).
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            30.0,
+            vec![frags[1], b],
+            (mx, my),
+            Some(a),
+        ));
+        let deck_z = vehicle_surface_z(&game, &game.vehicles[0]);
+        assert_eq!(deck_z, bridge_deck_z(&game.board.bridges[0]));
+        assert!(
+            deck_z > constants::ELEVATION_PX + 1.0,
+            "deck {deck_z} is not above the water"
+        );
+        // Crossing under the same bridge: the same field, but a route that
+        // walks across it instead of along it, so the vehicle stays on the
+        // water and the deck hides it.
+        let side = hexgrid::neighbor(mid.0, mid.1, 3);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Hovercraft,
+            0,
+            30.0,
+            vec![side],
+            (mx, my),
+            Some(mid),
+        ));
+        let under_z = vehicle_surface_z(&game, &game.vehicles[1]);
+        assert_eq!(under_z, 0.0, "crossing under the bridge used the deck");
+        assert!(
+            under_z < deck_z,
+            "under {under_z} is not below the deck {deck_z}"
+        );
+        // A helicopter above the bridge keeps its fixed altitude and only its
+        // shadow drops onto the deck.
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            Vec::new(),
+            (mx, my),
+            None,
+        ));
+        assert_eq!(
+            vehicle_z(&game, &game.vehicles[2]),
+            helicopter_altitude(&game)
+        );
+        assert_eq!(
+            helicopter_shadow_z(&game, mx, my),
+            bridge_deck_z(&game.board.bridges[0])
+        );
+    }
+
+    #[test]
+    fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
+        let (board, a, b, frags) = bridge_board();
+        let route = vec![a, frags[0], frags[1], b];
+        for i in 0..route.len() {
+            assert_eq!(
+                waypoint_z(&board, &route, i, false),
+                bridge_deck_z(&board.bridges[0]),
+                "waypoint {i} left the deck"
+            );
+        }
+        // A route crossing under the bridge walks the fragment field without
+        // ever stepping along a deck pair, so the waypoint keeps the water
+        // elevation and the deck hides whatever drives there.
+        let west = hexgrid::neighbor(frags[0].0, frags[0].1, 3);
+        let east = hexgrid::neighbor(frags[0].0, frags[0].1, 5);
+        let under = vec![west, frags[0], east];
+        assert_eq!(waypoint_z(&board, &under, 1, false), 0.0);
+    }
+
+    #[test]
+    fn helicopter_shadow_over_a_bridge_is_clipped_to_the_deck() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let (board, _a, _b, frags) = bridge_board();
+        let mid = frags[0];
+        let (mx, my) = board.center_world(mid);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            Vec::new(),
+            (mx, my),
+            None,
+        ));
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        let deck = bridge_deck_quad(&game.board, &game.board.bridges[0], mid);
+        assert!(
+            !dynamic.shadow.vertices.is_empty(),
+            "a helicopter over a bridge still casts a shadow"
+        );
+        // Every shadow vertex lies on the deck plane, inside the deck strip:
+        // the silhouette is much wider than the deck, so without a clip part
+        // of it would hang in mid-air over the water.
+        let z = deck.z + constants::SHADOW_LIFT;
+        for v in dynamic.shadow.vertices.iter() {
+            assert!(
+                (f64::from(v.z) - z).abs() < 1e-6,
+                "shadow left the deck plane"
+            );
+            let (dx, dy) = (
+                f64::from(v.x) - deck.center.0,
+                f64::from(v.y) - deck.center.1,
+            );
+            let along = dx * deck.axis.0 + dy * deck.axis.1;
+            let across = dx * -deck.axis.1 + dy * deck.axis.0;
+            assert!(
+                along.abs() <= deck.half_len + 1e-6,
+                "shadow {along} past the deck"
+            );
+            assert!(
+                across.abs() <= deck.half_wid + 1e-6,
+                "shadow {across} hangs beside the deck"
+            );
+        }
+        // Away from the bridge the silhouette is unclipped and much wider, so
+        // the clip is local to the deck it falls on.
+        let (gx, gy) = game.board.center_world((1, 1));
+        game.vehicles[0].x = gx;
+        game.vehicles[0].y = gy;
+        let mut open = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut open);
+        let span = |mesh: &DynamicMesh, (ox, oy): (f64, f64)| {
+            let mut widest: f64 = 0.0;
+            for v in mesh.shadow.vertices.iter() {
+                let d = (f64::from(v.x) - ox).hypot(f64::from(v.y) - oy);
+                widest = widest.max(d);
+            }
+            widest
+        };
+        assert!(
+            span(&open, (gx, gy)) > span(&dynamic, (mx, my)),
+            "the shadow was clipped off the bridge too"
+        );
     }
 
     #[test]

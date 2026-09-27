@@ -266,6 +266,19 @@ pub const LAND_COLOR: [u8; 3] = [152, 152, 152];
 pub const LAND_VARIANT: [u8; 3] = [140, 140, 140];
 /// Land edge colour.
 pub const LAND_EDGE: [u8; 3] = [110, 110, 110];
+/// Top face of a bridge deck (rendering only; rules.md section 8 fixes the
+/// deck geometry and elevation, never its colour).
+pub const BRIDGE_DECK_COLOR: [u8; 3] = [150, 120, 90];
+/// Edge band of the deck slab, below [`BRIDGE_DECK_COLOR`].
+pub const BRIDGE_DECK_SIDE_COLOR: [u8; 3] = [104, 84, 63];
+/// Thickness of the deck slab in px (rendering only). The deck is a plate on
+/// pillars, never a solid block: rules.md section 8 lets vehicles pass under a
+/// bridge, so the space below it must stay open.
+pub const BRIDGE_DECK_THICKNESS: f64 = 2.0 * UNIT_J_TO_PX;
+/// Footprint of one support pillar in px (rendering only).
+pub const BRIDGE_PILLAR_WID: f64 = 5.0 * UNIT_J_TO_PX;
+/// Colour of the support pillars holding the deck over the field below.
+pub const BRIDGE_PILLAR_COLOR: [u8; 3] = [84, 68, 52];
 /// One distinct colour per player, indexed by player id (max 4 players).
 pub const PLAYER_COLORS: [[u8; 3]; 4] = [
     [70, 135, 250],

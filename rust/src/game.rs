@@ -720,33 +720,6 @@ impl Game {
         }
         self.vehicles[idx].dead = true;
     }
-    /// Height of the bridge deck under a world point on a route segment.
-    #[allow(dead_code)]
-    pub fn bridge_deck_height_at(
-        &self,
-        x: f64,
-        y: f64,
-        prev: Option<Tile>,
-        next: Option<Tile>,
-        src: Option<Tile>,
-    ) -> Option<i32> {
-        if let Some(t) = self.board.world_to_tile(x, y)
-            && let Some(tile) = self.board.tiles.get(&t)
-            && let Some(bi) = tile.bridge
-            && let Some(br) = self.board.bridges.get(bi)
-        {
-            return Some(br.w);
-        }
-        let p = prev.or(src);
-        if let (Some(pp), Some(nn)) = (p, next) {
-            for br in self.board.bridges.iter() {
-                if br.connects(pp, nn) {
-                    return Some(br.w);
-                }
-            }
-        }
-        None
-    }
     fn update_projectiles(&mut self, dt: f64) {
         let mut impacts: Vec<Projectile> = Vec::new();
         let mut still: Vec<Projectile> = Vec::new();

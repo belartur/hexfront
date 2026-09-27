@@ -69,12 +69,12 @@ Każda implementacja listuje katalog `maps` dynamicznie — nazwa pliku jest wy�
 - `rust/src/main.rs` — tylko konfiguracja okna i `Application::run()`. Nic tu nie dopisuj.
 - `rust/src/constants.rs` — moduł stałych: `UNIT_J_TO_PX` dokładnie raz, `FPS`/`SIM_DT`, współczynniki rzutu, `maps_dir()`/`MAP_EXTENSION`, presety `AiDifficulty` / `AI_DIFFICULTIES`, stałe edytora `EDITOR_*`; każda stała z komentarzem wskazującym sekcję `rules.md`.
 - `rust/src/hexgrid.rs` — czysta geometria flat-top hex (odd-q) bez logiki gry.
-- `rust/src/board.rs` — plansza: `HexTile`, `Obstacle`/`ObstacleKind`, `Bridge`, `Board` (`passable()`, `find_path()` BFS, `reachable()`, `pick_tile()` / `snap_to_building()` z trybem płaskim na Alt, `set_ramp()` / `remove_ramp()` / `refresh_ramps_around()`, `add_bridge()` / `rebuild_single_bridge()`).
+- `rust/src/board.rs` — plansza: `HexTile`, `Obstacle`/`ObstacleKind`, `Bridge`, `Board` (`passable()`, `find_path()` BFS, `reachable()`, `pick_tile()` / `snap_to_building()` z trybem płaskim na Alt, `set_ramp()` / `remove_ramp()` / `refresh_ramps_around()`, `add_bridge()` / `refresh_bridges_around()`).
 - `rust/src/entities.rs` — dane: `BuildingKind`, `Player`, `Building`, `Vehicle`; helpery `is_base()`, `is_turret()`, `vehicle_kind_of()`, `turret_kind_of()`, `capacity_of()`. Logika w `game.rs`.
 - `rust/src/game.rs` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od macroquad; flaga `sandbox` wyłącza warunki zakończenia meczu dla gry testowej edytora.
 - `rust/src/ai.rs` — `AiController` (pętla decyzyjna z sekcji 13 `rules.md`). Determinystyczny dla danego seeda.
 - `rust/src/rng.rs` — własny deterministyczny PRNG (splitmix64 + Box-Muller) na szum AI, bez dodatkowych crate'ów.
-- `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `save_path()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()` / `rebuild_bridges_keep()`. Jedynie tu wolno ruszać format pliku.
+- `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `save_path()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
 - `rust/src/camera.rs` — rzut izometryczny i widok: `Camera` (`world_to_screen()`, `screen_to_world()`, `pan()`, `zoom_at()`, `center_on_world()`, `limit_to_board()`).
 - `rust/src/iso.rs` — ortograficzna kamera GPU odtwarzająca rzut 2D: `IsoCamera` (`from_camera()`, macierze view/proj, głębia z D wzdłuż osi Z).
 - `rust/src/mesh.rs` — budowa meshy GPU bez zależności od macroquad: `TerrainMesh` (`build_terrain()`, chunki na u16), `DynamicMesh` (`build_dynamic()`), `vehicle_z()` (stała wysokość lotu helikoptera nad najwyższym terenem), przezroczysty cień helikoptera (`DynamicMesh::shadow`), `depth_span()`, `tile_top_z()`.

@@ -377,39 +377,6 @@ pub fn list_maps(directory: Option<&Path>) -> Vec<PathBuf> {
     out
 }
 
-/// Append whole bridges from `frag_marks` without clearing existing ones.
-///
-/// The editor rebuilds one run at a time ([`crate::board::Board::rebuild_single_bridge`])
-/// and then re-adds the untouched runs with this helper, so neighbouring
-/// fragments survive a rotation.
-pub fn rebuild_bridges_keep(board: &mut Board, frag_marks: &HashMap<Tile, usize>) {
-    let mut remaining: HashMap<Tile, usize> = frag_marks.clone();
-    while !remaining.is_empty() {
-        let (tile, axis) = remaining.iter().next().map(|(k, v)| (*k, *v)).unwrap();
-        let back = (axis + 3) % 6;
-        let mut start = tile;
-        let mut prev = hexgrid::neighbor(start.0, start.1, back);
-        while remaining.get(&prev) == Some(&axis) {
-            start = prev;
-            prev = hexgrid::neighbor(start.0, start.1, back);
-        }
-        let mut run = vec![start];
-        let mut cur = hexgrid::neighbor(start.0, start.1, axis);
-        while remaining.get(&cur) == Some(&axis) {
-            run.push(cur);
-            cur = hexgrid::neighbor(cur.0, cur.1, axis);
-        }
-        for f in run.iter() {
-            remaining.remove(f);
-        }
-        let before = board.bridges.len();
-        board.rebuild_single_bridge(start, axis, &frag_marks.clone());
-        if board.bridges.len() == before {
-            break;
-        }
-    }
-}
-
 /// (Re)build whole bridges from per-tile fragment marks.
 ///
 /// `frag_marks` maps a deck tile to the geometric axis 0-2 of its bridge.

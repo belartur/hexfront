@@ -314,70 +314,33 @@ impl Board {
             }
         }
     }
-    /// Rebuild a single bridge fragment tile into a whole bridge object.
+    /// Repair the bookkeeping after an in-place height edit near a bridge.
     ///
-    /// The editor keeps geometry-invalid fragments for the preview (like the
-    /// Python editor): `frag_marks` holds the axis 0-2 per deck tile and the
-    /// maximal straight run through `tile` becomes one [`Bridge`] (validated
-    /// when possible via [`Board::add_bridge`], kept as-is otherwise, mirroring
-    /// [`crate::mapfile::rebuild_bridges`] with `validate = false`).
-    pub fn rebuild_single_bridge(
-        &mut self,
-        tile: Tile,
-        axis: usize,
-        frag_marks: &std::collections::HashMap<Tile, usize>,
-    ) {
+    /// A bridge spans from `a` to `b` at the shared height `w` (rules.md
+    /// section 8), so raising or lowering either of its land ends has to move
+    /// the deck with it -- otherwise the deck keeps the old height and floats
+    /// above (or sinks into) the terrain it is built from. Bridges whose
+    /// fragments touch `tile` are re-levelled to the new end height; which
+    /// tiles they join is left alone, and the editor still reports a run
+    /// whose ends no longer match.
+    pub fn refresh_bridges_around(&mut self, tile: Tile) {
         use crate::hexgrid;
-        let axis = axis % 3;
-        let back = (axis + 3) % 6;
-        let mut start = tile;
-        let mut prev = hexgrid::neighbor(start.0, start.1, back);
-        while frag_marks.get(&prev) == Some(&axis) {
-            start = prev;
-            prev = hexgrid::neighbor(start.0, start.1, back);
-        }
-        let mut run = vec![start];
-        let mut cur = hexgrid::neighbor(start.0, start.1, axis);
-        while frag_marks.get(&cur) == Some(&axis) {
-            run.push(cur);
-            cur = hexgrid::neighbor(cur.0, cur.1, axis);
-        }
-        let a = hexgrid::neighbor(start.0, start.1, back);
-        if self.contains(a) && self.contains(cur) {
-            if self.add_bridge(a, cur, axis).is_none() {
-                let mut w = self.height(a).max(self.height(cur));
-                for f in run.iter() {
-                    w = w.max(self.height(*f));
-                }
-                let idx = self.bridges.len();
-                let br = Bridge::new(a, cur, w, axis, run.clone());
-                for f in run.iter() {
-                    if let Some(t) = self.tiles.get_mut(f) {
-                        t.bridge = Some(idx);
-                    }
-                }
-                self.bridges.push(br);
-            }
-            return;
-        }
-        let mut w = 0;
-        for f in run.iter() {
-            w = w.max(self.height(*f));
-        }
-        if self.contains(a) {
-            w = w.max(self.height(a));
-        }
-        if self.contains(cur) {
-            w = w.max(self.height(cur));
-        }
-        let idx = self.bridges.len();
-        let br = Bridge::new(a, cur, w, axis, run.clone());
-        for f in run.iter() {
-            if let Some(t) = self.tiles.get_mut(f) {
-                t.bridge = Some(idx);
+        let mut neighbours = hexgrid::neighbors(tile.0, tile.1).to_vec();
+        neighbours.push(tile);
+        // End heights first, so the bridge list is not borrowed mutably while
+        // the (immutable) tile lookup runs.
+        let levels: Vec<i32> = self
+            .bridges
+            .iter()
+            .map(|br| self.height(br.a).max(self.height(br.b)))
+            .collect();
+        for (br, w) in self.bridges.iter_mut().zip(levels) {
+            let touches =
+                br.a == tile || br.b == tile || br.fragments.iter().any(|f| neighbours.contains(f));
+            if touches {
+                br.w = w;
             }
         }
-        self.bridges.push(br);
     }
     /// Try to build a bridge from `a` towards `b` in `direction`.
     /// Returns the new bridge index or `None` when the geometry does not
