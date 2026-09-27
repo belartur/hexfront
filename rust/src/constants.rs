@@ -60,9 +60,6 @@ pub const ISO_SIN: f64 = 0.5;
 pub const PROJECTILE_RADIUS: f32 = 3.0;
 /// Radius of a rocket projectile in screen px.
 pub const ROCKET_RADIUS: f32 = 5.0;
-#[allow(dead_code)]
-/// Outline width of projectiles in screen px.
-pub const PROJECTILE_OUTLINE_WIDTH: f32 = 1.0;
 /// Visual deck thickness; the bridge deck and shadows share one surface.
 pub const BRIDGE_DECK_LIFT: f64 = 5.0 * UNIT_J_TO_PX;
 /// Lift of flat ground markers (building bases, mine/trap discs) above the
@@ -78,17 +75,6 @@ pub const OBSTACLE_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
 /// disappears behind a hill. Its shadow disc (see [`SHADOW_RADIUS`]) marks
 /// the tile it flies over.
 pub const HELICOPTER_ALTITUDE_PX: f64 = 2.0 * ELEVATION_PX;
-/// Radius of a vehicle shadow decal in j (specification.md, section
-/// "Grafika i interfejs użytkownika"). The Rust implementation draws the
-/// helicopter silhouette instead of this disc (specification_rust.md,
-/// "Renderowanie"), so this is kept only as the documented contract value.
-#[allow(dead_code)]
-pub const SHADOW_RADIUS: f64 = 14.0 * UNIT_J_TO_PX;
-/// Outline segments of a shadow decal (specification.md). The Rust
-/// helicopter silhouette needs no disc tessellation, so this is kept only
-/// as the documented contract value (specification_rust.md, "Renderowanie").
-#[allow(dead_code)]
-pub const SHADOW_SEGMENTS: usize = 14;
 /// Colour of the translucent shadow decal (specification.md).
 pub const SHADOW_COLOR: [u8; 3] = [0, 0, 0];
 /// Alpha of the translucent shadow decal, 70/255 (specification.md).
@@ -97,7 +83,7 @@ pub const SHADOW_ALPHA: u8 = 70;
 /// px (rendering only; rules.md has no shadows). Just high enough that the
 /// decal never loses the depth race against the terrain (no flicker), low
 /// enough that it still reads as lying on the ground.
-pub const SHADOW_LIFT: f64 = 1.0 * UNIT_J_TO_PX;
+pub const SHADOW_LIFT: f64 = 0.25 * UNIT_J_TO_PX;
 /// Fixed simulation frame rate (specification_rust.md, "Determinism").
 pub const FPS: f64 = 60.0;
 /// Length of one simulation step in seconds.
