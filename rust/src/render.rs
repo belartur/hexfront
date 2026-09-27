@@ -32,6 +32,8 @@ pub struct Renderer {
 struct GpuTerrain {
     /// One draw batch per terrain chunk plus its world bounding box.
     chunks: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
+    /// Translucent bridge shadows, one batch per terrain chunk.
+    shadows: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
     /// Grid strokes of every chunk plus its world bounding box.
     grids: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
 }
@@ -50,6 +52,7 @@ impl Renderer {
     /// so the per-frame path never touches per-vertex conversion.
     pub fn set_terrain(&mut self, terrain: &crate::mesh::TerrainMesh) {
         let mut chunks = Vec::with_capacity(terrain.chunks.len());
+        let mut shadows = Vec::with_capacity(terrain.chunks.len());
         let mut grids = Vec::with_capacity(terrain.chunks.len());
         for chunk in terrain.chunks.iter() {
             let mut verts: Vec<macroquad::models::Vertex> =
@@ -62,6 +65,23 @@ impl Renderer {
                 macroquad::models::Mesh {
                     vertices: verts,
                     indices,
+                    texture: None,
+                },
+                chunk.bbox,
+            ));
+            // Bridge shadows are a translucent soup, so they go through the
+            // same per-vertex alpha path as the range fills and the helicopter
+            // shadows; chunks without a bridge contribute an empty batch.
+            let mut sverts: Vec<macroquad::models::Vertex> =
+                Vec::with_capacity(chunk.shadows.vertices.len());
+            for v in chunk.shadows.vertices.iter() {
+                sverts.push(mq_range_vertex(v));
+            }
+            let sidx: Vec<u16> = (0..sverts.len() as u16).collect();
+            shadows.push((
+                macroquad::models::Mesh {
+                    vertices: sverts,
+                    indices: sidx,
                     texture: None,
                 },
                 chunk.bbox,
@@ -85,7 +105,11 @@ impl Renderer {
                 chunk.bbox,
             ));
         }
-        self.terrain = Some(GpuTerrain { chunks, grids });
+        self.terrain = Some(GpuTerrain {
+            chunks,
+            shadows,
+            grids,
+        });
     }
     /// Render one frame of the running game.
     ///
@@ -127,6 +151,17 @@ impl Renderer {
                     continue;
                 }
                 mq::draw_mesh(mesh);
+            }
+            // Bridge shadows on the fields below the decks: translucent, right
+            // after the opaque terrain so the depth test trims them against
+            // nearer cliffs, and before the dynamic objects so a vehicle
+            // standing under the bridge is drawn on top of its own shadow
+            // (specification_rust.md pass order).
+            for (mesh, bbox) in terrain.shadows.iter() {
+                if !bbox_hits(bbox, &view_bounds) {
+                    continue;
+                }
+                draw_range_soup_mesh(mesh);
             }
             for (mesh, bbox) in terrain.grids.iter() {
                 if !bbox_hits(bbox, &view_bounds) {
@@ -253,6 +288,19 @@ fn mq_range_vertex(v: &crate::mesh::RangeVertex) -> macroquad::models::Vertex {
         color: [v.color[0], v.color[1], v.color[2], v.color[3]],
         normal: macroquad::prelude::glam::vec4(0.0, 0.0, 0.0, 0.0),
     }
+}
+
+/// Draw one pre-converted translucent soup (a static bridge-shadow batch).
+///
+/// A plain [`macroquad::prelude::draw_mesh`] call: the buffer already carries
+/// per-vertex RGBA, so no conversion and no batching is needed. An empty batch
+/// (a chunk without a bridge) simply draws nothing.
+fn draw_range_soup_mesh(mesh: &macroquad::models::Mesh) {
+    use macroquad::prelude as mq;
+    if mesh.indices.is_empty() {
+        return;
+    }
+    mq::draw_mesh(mesh);
 }
 
 /// Convert one 3D line endpoint (carries its own alpha).

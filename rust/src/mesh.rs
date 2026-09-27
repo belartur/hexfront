@@ -92,6 +92,8 @@ pub const CHUNK_TILES: i32 = 16;
 pub struct TerrainChunk {
     /// Opaque triangles (tops, skirts, ramps, decks).
     pub soup: TriangleSoup,
+    /// Translucent bridge shadows cast on the fields below the decks.
+    pub shadows: RangeSoup,
     /// Thin grid strokes over this chunk's hex tops.
     pub grid_lines: Vec<(GpuVertex, GpuVertex)>,
     /// World-space bounds `(x_min, y_min, x_max, y_max)` of the chunk,
@@ -520,6 +522,39 @@ fn push_bridge_deck(board: &Board, soup: &mut TriangleSoup, br: &Bridge, frag: T
     }
 }
 
+/// Shadow cast by one bridge fragment onto the field below it.
+///
+/// A raised deck darkens what stands under it: the same rectangle as the deck
+/// itself, projected straight down onto the surface that takes it (water or
+/// low land) and lifted by [`constants::SHADOW_LIFT`] so it never fights that
+/// surface for depth. Vertical projection matches the helicopter shadow
+/// ([`push_helicopter_shadow`]), so the light in the scene reads as coming
+/// from straight above; the colour and alpha are the shared shadow values of
+/// specification.md. The shadow is static like the deck, so it is built once
+/// with the terrain instead of every frame.
+fn push_bridge_shadow(board: &Board, shadows: &mut RangeSoup, br: &Bridge, frag: Tile) {
+    let deck = bridge_deck_quad(board, br, frag);
+    let ground = board.height(frag) as f64 * constants::ELEVATION_PX;
+    let z = ground + constants::SHADOW_LIFT;
+    // Only an elevated deck shades the ground; a deck flush with the field
+    // (or one over water level zero that would sit inside the surface) has
+    // nothing to darken.
+    if deck.z - ground > constants::SHADOW_LIFT {
+        push_range_rect(
+            shadows,
+            deck.center.0,
+            deck.center.1,
+            z,
+            2.0 * deck.half_len,
+            2.0 * deck.half_wid,
+            deck.axis.0,
+            deck.axis.1,
+            constants::SHADOW_COLOR,
+            constants::SHADOW_ALPHA,
+        );
+    }
+}
+
 /// Build the static terrain mesh of `board` (tops, skirts, ramps, decks).
 pub fn build_terrain(board: &Board) -> TerrainMesh {
     use std::collections::BTreeMap;
@@ -553,7 +588,8 @@ pub fn build_terrain(board: &Board) -> TerrainMesh {
         mesh.chunks.push(chunk);
     }
     // Bridge decks sit on their own tiles, so every fragment lands in the
-    // chunk of that tile (a bridge may span more than one chunk).
+    // chunk of that tile (a bridge may span more than one chunk). The shadow
+    // it casts on the field below goes into the same chunk.
     for br in board.bridges.iter() {
         for f in br.fragments.iter().copied() {
             let key = (f.0 / CHUNK_TILES, f.1 / CHUNK_TILES);
@@ -561,8 +597,15 @@ pub fn build_terrain(board: &Board) -> TerrainMesh {
                 continue;
             };
             push_bridge_deck(board, &mut mesh.chunks[idx].soup, br, f);
+            push_bridge_shadow(board, &mut mesh.chunks[idx].shadows, br, f);
         }
     }
+    debug_assert!(
+        mesh.chunks
+            .iter()
+            .all(|c| c.shadows.vertices.len() <= CHUNK_VERTICES),
+        "bridge shadows exceed the u16 draw batch"
+    );
     mesh
 }
 
@@ -3153,6 +3196,89 @@ mod tests {
         let idx = board.add_bridge(a, b, 1).expect("bridge over water");
         let frags = board.bridges[idx].fragments.clone();
         (board, a, b, frags)
+    }
+
+    #[test]
+    fn bridge_shadows_lie_on_the_field_below_the_deck() {
+        let (board, _a, _b, frags) = bridge_board();
+        let br = &board.bridges[0];
+        let mesh = build_terrain(&board);
+        // One rectangle per fragment: two triangles, six vertices, all on the
+        // water surface lifted by SHADOW_LIFT.
+        let shadow_vertices: usize = mesh.chunks.iter().map(|c| c.shadows.vertices.len()).sum();
+        assert_eq!(shadow_vertices, frags.len() * 2 * 3);
+        let water = 0.0; // the fragment fields of the test board are water
+        let expected_z = water + constants::SHADOW_LIFT;
+        for v in mesh.chunks.iter().flat_map(|c| c.shadows.vertices.iter()) {
+            assert_eq!(&v.color[..3], &constants::SHADOW_COLOR[..]);
+            assert_eq!(v.color[3], constants::SHADOW_ALPHA);
+            assert!(
+                (f64::from(v.z) - expected_z).abs() < 1e-6,
+                "shadow at z={} instead of {expected_z}",
+                f64::from(v.z)
+            );
+        }
+        // The shadow covers exactly the deck footprint, dropped straight down.
+        for frag in frags.iter().copied() {
+            let deck = bridge_deck_quad(&board, br, frag);
+            let near = mesh
+                .chunks
+                .iter()
+                .flat_map(|c| c.shadows.vertices.iter())
+                .any(|v| {
+                    let (dx, dy) = (
+                        f64::from(v.x) - deck.center.0,
+                        f64::from(v.y) - deck.center.1,
+                    );
+                    let along = dx * deck.axis.0 + dy * deck.axis.1;
+                    let across = dx * -deck.axis.1 + dy * deck.axis.0;
+                    (along - deck.half_len).abs() < 1e-3 && (across - deck.half_wid).abs() < 1e-3
+                });
+            assert!(near, "no shadow corner at the deck corner of {frag:?}");
+        }
+        // The shadow never lands on the deck itself, so the deck stays lit.
+        assert!(
+            (expected_z - bridge_deck_z(br)).abs() > constants::SHADOW_LIFT,
+            "the shadow was drawn on the deck"
+        );
+    }
+
+    #[test]
+    fn a_board_without_bridges_has_no_shadows() {
+        let board = Board::new(8, 8);
+        let mesh = build_terrain(&board);
+        assert!(
+            mesh.chunks.iter().all(|c| c.shadows.vertices.is_empty()),
+            "a board without bridges still produced shadows"
+        );
+    }
+
+    #[test]
+    fn bridge_shadow_follows_the_field_below_even_over_land() {
+        // The same bridge, but its fragments span low land instead of water:
+        // the shadow must sit on that land, not hover at the water level.
+        let mut board = Board::new(14, 14);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 5;
+        }
+        for t in [(5, 6), (5, 7)] {
+            board.tiles.get_mut(&t).unwrap().height = 1;
+        }
+        assert!(board.add_bridge((5, 5), (5, 8), 1).is_some());
+        let mesh = build_terrain(&board);
+        let land = 1.0 * constants::ELEVATION_PX;
+        let expected = land + constants::SHADOW_LIFT;
+        for v in mesh.chunks.iter().flat_map(|c| c.shadows.vertices.iter()) {
+            assert!(
+                (f64::from(v.z) - expected).abs() < 1e-6,
+                "shadow at z={} instead of {expected}",
+                f64::from(v.z)
+            );
+        }
+        assert!(
+            mesh.chunks.iter().any(|c| !c.shadows.vertices.is_empty()),
+            "a bridge over land cast no shadow"
+        );
     }
 
     #[test]
