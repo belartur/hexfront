@@ -275,9 +275,9 @@ pub const PLAYER_COLORS: [[u8; 3]; 4] = [
 /// Colour of objects that belong to no player.
 pub const NEUTRAL_COLOR: [u8; 3] = [165, 165, 165];
 /// Alpha of a white turret range fill on the GPU path (specification.md,
-/// graphics: ranges are mostly transparent; matches the Python fill).
+/// graphics: ranges are mostly transparent).
 pub const RANGE_TURRET_FILL_ALPHA: u8 = 42;
-/// Alpha of a light-green heal range fill (matches the Python fill).
+/// Alpha of a light-green heal range fill.
 pub const RANGE_HEAL_FILL_ALPHA: u8 = 46;
 /// Alpha of range outlines (same hue as the fill but clearly less
 /// transparent, so an outline stays readable over other fills).
@@ -316,9 +316,8 @@ pub const MENU_SCROLL_STEP: f32 = 48.0;
 // Map files (specification.md "Plansze")
 /// AI difficulty used for maps loaded from files (rules.md section 13.8).
 pub const MAP_DEFAULT_AI_DIFFICULTY: &str = "normal";
-// Board editor (specification_rust.md, section "Edytor plansz": copies the
-// behaviour of specification_of_map_editor.md; rules.md section 1 for the
-// 0..15 heights and player bases).
+// Board editor (specification_rust.md, section "Edytor plansz"; rules.md
+// section 1 for the 0..15 heights and player bases).
 /// Seconds after which an unfinished 1- or 2-digit units entry commits.
 pub const EDITOR_DIGIT_COMMIT_DELAY: f64 = 1.0;
 /// Columns of a newly created editor board (mostly water).

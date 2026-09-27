@@ -209,8 +209,8 @@ pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>), String> {
     let mut pos = 2 + need;
     while pos < data.len() {
         if pos + 3 > data.len() {
-            // Trailing garbage byte(s): warn and stop (matches Python reader
-            // which would fail unpack; be lenient: report error).
+            // Trailing garbage byte(s): the record is incomplete, so stop
+            // reading and report it as an error.
             return Err(format!("{}: truncated object record", path.display()));
         }
         let (q, r, typ) = (data[pos] as i32, data[pos + 1] as i32, data[pos + 2]);
@@ -330,7 +330,7 @@ pub fn load_game(path: &Path) -> Result<Game, String> {
 }
 
 /// Deterministic AI seed of a level, derived from its file name.
-/// Uses CRC-32 (IEEE) like Python `zlib.crc32` of the base file name.
+/// Uses CRC-32 (IEEE) of the base file name.
 pub fn level_seed(path: &Path) -> u64 {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     crc32(name.as_bytes()) as u64
@@ -466,8 +466,8 @@ mod tests {
     }
     #[test]
     fn save_load_roundtrip() {
-        // A board exercising every feature of the map format (mirrors the
-        // Python `sample_board`/`sample_buildings` in test_mapfile.py).
+        // A board exercising every feature of the map format: ramps,
+        // bridges over water, obstacles and buildings.
         let mut board = Board::new(8, 6);
         for t in board.tiles.clone().keys().copied().collect::<Vec<_>>() {
             board.tiles.get_mut(&t).unwrap().height = 2;

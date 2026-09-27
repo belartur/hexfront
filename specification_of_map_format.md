@@ -1,7 +1,7 @@
 # Hexfront — format pliku planszy
 
 ## Wstęp
-Ten plik opisuje binarny format pliku planszy (poziomu). Format jest wspólny dla wszystkich implementacji gry: zasady gry znajdują się w [rules.md](rules.md), część wspólna specyfikacji implementacji w [specification.md](specification.md), specyfikacje poszczególnych implementacji w [specification_python.md](specification_python.md) (Python) i [specification_rust.md](specification_rust.md) (Rust, implementacja planowana), a zachowanie edytora plansz w [specification_of_map_editor.md](specification_of_map_editor.md).
+Ten plik opisuje binarny format pliku planszy (poziomu). Format jest wspólny dla wszystkich implementacji gry: zasady gry znajdują się w [rules.md](rules.md), część wspólna specyfikacji implementacji w [specification.md](specification.md), specyfikacja implementacji w [specification_rust.md](specification_rust.md) (Rust), która opisuje też zachowanie edytora plansz.
 
 Jedna plansza zapisywana jest w jednym pliku o rozszerzeniu `.map`; wyświetlaną nazwą poziomu jest nazwa pliku bez rozszerzenia. Plik nie zawiera bajtów identyfikujących (magic) ani sumy kontrolnej — pierwsze dwa bajty to już wymiary planszy. Wszystkie liczby wielobajtowe zapisane są little-endian (młodszy bajt jako pierwszy w pliku, młodsza wartość na młodszych bitach).
 
@@ -51,7 +51,7 @@ Rodzaje budynków opisuje [rules.md](rules.md), sekcja 3. Po typie zapisywane s�
 * **jednostki** — 10 młodszych bitów (bity 9–0): początkowa liczba jednostek w budynku. Zakres przewidziany dla mapy to 0–999; 10 bitów mieści fizycznie 0–1023, więc wartości 1000–1023 są przy odczycie sprowadzane z ostrzeżeniem do 999.
 
 ### Mosty (typy 20–22)
-`typ − 20` to oś geometryczna mostu. Cały most zapisywany jest jako jeden rekord na każdy fragment pokładu; same końce mostu (pola, które łączy) nie mają osobnych rekordów. Przy odczycie fragmenty o tej samej osi, leżące kolejno na polach sąsiadujących wzdłuż tej osi, składają się w jeden most; jego końcami są pola sąsiadujące z pierwszym i ostatnim fragmentem ciągu od strony zewnętrznej. Most jest poprawny tylko wtedy, gdy spełnia reguły z [rules.md](rules.md), sekcja 8 (m.in. oba końce leżą na tej samej wysokości); ciągi niepoprawne są przy odczycie pomijane (implementacja edytora może zachować je do podglądu — patrz [specification_of_map_editor.md](specification_of_map_editor.md)).
+`typ − 20` to oś geometryczna mostu. Cały most zapisywany jest jako jeden rekord na każdy fragment pokładu; same końce mostu (pola, które łączy) nie mają osobnych rekordów. Przy odczycie fragmenty o tej samej osi, leżące kolejno na polach sąsiadujących wzdłuż tej osi, składają się w jeden most; jego końcami są pola sąsiadujące z pierwszym i ostatnim fragmentem ciągu od strony zewnętrznej. Most jest poprawny tylko wtedy, gdy spełnia reguły z [rules.md](rules.md), sekcja 8 (m.in. oba końce leżą na tej samej wysokości); ciągi niepoprawne są przy odczycie pomijane (implementacja edytora może zachować je do podglądu — patrz [specification_rust.md](specification_rust.md), sekcja „Edytor plansz”).
 
 ### Podjazdy (typy 23–25)
 `typ − 23` to oś pary łączonych przeciwległych sąsiadów. Podjazd na polu `p` łączy pole `a` — sąsiada w kierunku `oś` — z polem `b` — sąsiadem w kierunku `oś+3` ([rules.md](rules.md), sekcja 7). Rekord, którego końce wypadają poza planszę, jest przy odczycie pomijany z ostrzeżeniem.
@@ -82,6 +82,4 @@ Czytnik:
 ## Zobacz też
 * [rules.md](rules.md) — zasady gry (mapa, budynki, podjazdy, mosty),
 * [specification.md](specification.md) — wspólna część specyfikacji implementacji,
-* [specification_python.md](specification_python.md) — implementacja w Pythonie,
-* [specification_rust.md](specification_rust.md) — implementacja w Rust (szkielet planu),
-* [specification_of_map_editor.md](specification_of_map_editor.md) — edytor plansz (m.in. usuwanie i dopełnianie pustych skrajnych wierszy i kolumn).
+* [specification_rust.md](specification_rust.md) — implementacja w Rust, w tym edytor plansz (m.in. usuwanie i dopełnianie pustych skrajnych wierszy i kolumn).

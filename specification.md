@@ -3,22 +3,20 @@
 ## Wstęp
 Hexfront to gra komputerowa o zasadach opisanych w [rules.md](rules.md). Ten dokument opisuje część wspólną wszystkich implementacji: wymagania wspólne dla każdej z nich (wygląd, sterowanie, parametry, obsługa plansz).
 
-Specyfikacje poszczególnych implementacji:
-* [specification_python.md](specification_python.md) — implementacja w Pythonie (PyGame i NumPy), kod w katalogu `python/`;
+Specyfikacja implementacji:
 * [specification_rust.md](specification_rust.md) — implementacja w Rust (stabilny toolchain rustc/cargo i biblioteka macroquad), kod w katalogu `rust/`.
 
 Dokumenty wspólne dla wszystkich implementacji:
 * [rules.md](rules.md) — zasady gry (jedyne źródło liczb i reguł gry),
 * [specification_of_map_format.md](specification_of_map_format.md) — binarny format pliku planszy,
-* [specification_of_map_editor.md](specification_of_map_editor.md) — edytor plansz (na razie tylko w implementacji Pythonowej),
 * ten dokument — część wspólna specyfikacji implementacji.
 
 Liczb i reguł nie kopiuje się między dokumentami: wartości liczbowe gry opisuje wyłącznie [rules.md](rules.md) w jednostkach odległości (j), format pliku planszy wyłącznie [specification_of_map_format.md](specification_of_map_format.md), a szczegóły danego języka wyłącznie specyfikacja tego języka.
 
 ## Struktura repozytorium
-Pliki niezależne od języka implementacji leżą w katalogu głównym repozytorium: reguły ([rules.md](rules.md)), specyfikacje ([specification.md](specification.md), [specification_python.md](specification_python.md), [specification_rust.md](specification_rust.md), [specification_of_map_format.md](specification_of_map_format.md), [specification_of_map_editor.md](specification_of_map_editor.md)) oraz katalog `maps` z planszami (format opisany w tym ostatnim pliku). Kod każdej implementacji języka ma osobny katalog — `python/` i `rust/`.
+Pliki niezależne od języka implementacji leżą w katalogu głównym repozytorium: reguły ([rules.md](rules.md)), specyfikacje ([specification.md](specification.md), [specification_rust.md](specification_rust.md), [specification_of_map_format.md](specification_of_map_format.md)) oraz katalog `maps` z planszami (format opisany w tym ostatnim pliku). Kod implementacji języka ma osobny katalog — obecnie `rust/`.
 
-Ścieżka katalogu `maps` wyznaczana jest w kodzie względem katalogu głównego repozytorium, a nie względem katalogu roboczego, dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu. Kolejne implementacje dostają własne katalogi obok `python/` i `rust/` i nie zmieniają dokumentów ani katalogu `maps`.
+Ścieżka katalogu `maps` wyznaczana jest w kodzie względem katalogu głównego repozytorium, a nie względem katalogu roboczego, dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu. Kolejne implementacje dostałyby własne katalogi obok `rust/` i nie zmieniałyby dokumentów ani katalogu `maps`.
 
 ## Kod
 Kod jest przejrzysty i dobrze udokumentowany, w języku angielskim.
@@ -80,11 +78,11 @@ Prędkość klatki (FPS) nie jest częścią kontraktu — jest decyzją każdej
 ## Plansze
 Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Każda implementacja listuje katalog `maps` dynamicznie, a nazwa pliku jest wyświetlaną nazwą poziomu w menu — lista poziomów nie jest hardkodowana.
 
-Edytor plansz istnieje w implementacji Pythonowej ([specification_python.md](specification_python.md)) o specyfikacji opisanej w [specification_of_map_editor.md](specification_of_map_editor.md); edytor Rustowy jest planowany jako integralna część gry (bez osobnej aplikacji), opisana w [specification_rust.md](specification_rust.md) (sekcja „Edytor plansz”).
+Edytor plansz jest integralną częścią tej samej aplikacji (bez osobnego programu) i opisany jest w [specification_rust.md](specification_rust.md) (sekcja „Edytor plansz”).
 
 ## Format pliku planszy
 Format pliku planszy jest wspólny dla wszystkich implementacji i opisany jest w [specification_of_map_format.md](specification_of_map_format.md).
 
 ## Zgodność implementacji
-Wszystkie implementacje realizują te same zasady ([rules.md](rules.md)) i ten sam format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą ich wspólny kontrakt — obowiązuje on każdą implementację niezależnie od języka. Poza nim implementacje są wobec siebie niezależne: mogą różnić się podziałem modułów, nazwami, wydajnością i rozwiązaniami technicznymi, a żadna z nich nie jest wzorcem dla pozostałych.
+Implementacja realizuje zasady ([rules.md](rules.md)) i format pliku planszy ([specification_of_map_format.md](specification_of_map_format.md)), a wygląd, sterowanie i parametry opisane w tym dokumencie tworzą jej kontrakt. Poza nim implementacja jest niezależna wewnętrznie: może różnić się podziałem modułów, nazwami, wydajnością i rozwiązaniami technicznymi. Kolejne implementacje powstające w repozytorium są wobec siebie niezależne i nie są dla siebie wzorcem — wiąże je wyłącznie ten wspólny kontrakt, `rules.md` i format planszy.
 

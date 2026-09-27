@@ -655,7 +655,7 @@ impl Application {
             if crate::entities::is_base(b.kind) && b.owner.is_some() && b.units < b.capacity {
                 // Spawn progress ring (specification.md graphics): a base
                 // shows a thin white arc completing one full circle over
-                // the spawn interval, exactly like the Python badge.
+                // the spawn interval.
                 let frac = (b.production_timer / constants::BASE_SPAWN_INTERVAL).clamp(0.0, 1.0);
                 if frac > 0.0 {
                     let segs = ((frac * 24.0).ceil() as u8).max(1);
@@ -1255,7 +1255,7 @@ impl Application {
                 self.editor_clean = false;
             }
         } else if is_key_pressed(KeyCode::R) {
-            // Ramp placement/rotation (`r`, the Python editor's key too).
+            // Ramp placement/rotation (`r`).
             if let Some(ed) = self.editor.as_mut()
                 && ed.press_r(tile)
             {

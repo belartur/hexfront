@@ -1,7 +1,7 @@
 //! In-game board editor: headless editing model plus macroquad UI state.
 //!
-//! The editor copies the behaviour of the Python editor described in
-//! specification_of_map_editor.md (keys, validation, trim/pad), but it is a
+//! The editor implements the behaviour described in specification_rust.md,
+//! section "Edytor plansz" (keys, validation, trim/pad); it is a
 //! state of the same application rather than a separate program (see
 //! specification_rust.md, section "Edytor plansz").
 //!
@@ -74,8 +74,7 @@ pub enum EditorOverlay {
 /// macroquad queues one char per pressed key and never drops it on its own,
 /// so every other state must drain that queue — otherwise keys pressed while
 /// playing or editing pile up and spill into the map name when Save opens
-/// (the Python editor solves the same problem by swallowing the `s`
-/// TEXTINPUT that opens its save overlay).
+/// (in particular the `s` that opens the save overlay is swallowed too).
 pub fn consumes_text(overlay: EditorOverlay) -> bool {
     overlay == EditorOverlay::Save
 }
@@ -351,13 +350,13 @@ impl EditorState {
         marks
     }
 
-    /// Place a bridge fragment of `axis` on `tile`, like the Python editor.
+    /// Place a bridge fragment of `axis` on `tile`.
     ///
     /// Only this one field is edited: the axis marks of the other fragments
     /// are kept, so a multi-field bridge survives an edit of a single field
     /// (rotating one fragment used to swallow the rest of its run). The
     /// terrain height is never touched -- the editor reports a fragment that
-    /// sits too high instead of flooding it, exactly like Python.
+    /// sits too high instead of flooding it.
     fn put_bridge_fragment(&mut self, tile: Tile, axis: usize) -> bool {
         if !self.board.contains(tile) {
             return false;
@@ -579,7 +578,7 @@ impl EditorState {
         0
     }
 
-    /// Place a ramp of `axis` on `tile`, like the Python editor does.
+    /// Place a ramp of `axis` on `tile`.
     fn put_ramp(&mut self, tile: Tile, axis: usize) {
         let a = hexgrid::neighbor(tile.0, tile.1, axis);
         let b = hexgrid::neighbor(tile.0, tile.1, axis + 3);
@@ -1047,8 +1046,8 @@ mod tests {
         }
     }
 
-    /// The legend documents the play/ramp keys: `r` places a ramp (the key
-    /// the Python editor uses too) and `p` starts the playtest.
+    /// The legend documents the play/ramp keys: `r` places a ramp and `p`
+    /// starts the playtest.
     #[test]
     fn legend_documents_the_ramp_and_play_keys() {
         assert!(
@@ -1141,7 +1140,7 @@ mod tests {
     fn placing_a_bridge_fragment_never_floods_the_field() {
         // The editor only marks the field; it does not sink it to make the
         // geometry valid -- an over-high fragment is reported instead
-        // (Python `_action_bridge` leaves the height alone).
+        // (placing a fragment never leaves the height alone).
         let mut ed = test_state(10, 10);
         let before = ed.board.height((5, 5));
         assert!(ed.press_m(Some((5, 5))));

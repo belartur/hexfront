@@ -43,7 +43,7 @@ impl Obstacle {
         Self { kind, hp }
     }
     #[allow(dead_code)]
-    /// String name of the kind (matches the Python implementation).
+    /// String name of the kind.
     pub fn kind_str(&self) -> &'static str {
         match self.kind {
             ObstacleKind::Wall => "wall",
@@ -339,8 +339,8 @@ impl Board {
     /// Repair the bookkeeping after an in-place height edit of a ramp tile.
     ///
     /// [`Board::set_ramp`] normally sets the ramp height itself, but the map
-    /// editor edits heights directly (Python `editor.py`: ramps follow the
-    /// lower end); this re-applies `min(height(a), height(b))` to every ramp
+    /// editor edits heights directly (ramps follow the lower end); this
+    /// re-applies `min(height(a), height(b))` to every ramp
     /// touching `tile` without changing which tiles are joined.
     pub fn refresh_ramps_around(&mut self, tile: Tile) {
         use crate::hexgrid;

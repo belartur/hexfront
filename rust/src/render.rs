@@ -345,7 +345,7 @@ fn draw_soup(vertices: &[crate::mesh::GpuVertex], indices: &[u16]) {
 /// Draw one range soup with its own per-vertex alpha.
 ///
 /// Turret fills and heal fills use separate draw calls (white vs.
-/// light-green transparency from the Python version); inside one kind
+/// light-green transparency); inside one kind
 /// every disc sits at a deterministic index-based lift, so coplanar
 /// blends no longer flicker while panning. Lines of one call always
 /// share one depth value, which keeps macroquad's draw batching from

@@ -28,8 +28,8 @@ pub struct GpuVertex {
 /// One translucent range vertex: world position plus RGBA colour.
 ///
 /// Range fills (and only they) carry their own alpha, so white turret
-/// fills and light-green heal fills keep the distinct transparencies
-/// from the Python version instead of sharing one value.
+/// fills and light-green heal fills keep distinct transparencies instead
+/// of sharing one value.
 #[derive(Clone, Copy, Debug)]
 pub struct RangeVertex {
     /// World x in distance units (j).
@@ -434,8 +434,8 @@ pub struct DeckQuad {
     pub z: f64,
 }
 
-/// World-space rectangle of one bridge deck fragment (the same frame as the
-/// Python renderer): the deck spans from one field edge towards the next, so
+/// World-space rectangle of one bridge deck fragment: the deck spans from
+/// one field edge towards the next, so
 /// consecutive fragments overlap slightly and the bridge has no gaps.
 pub fn bridge_deck_quad(board: &Board, br: &Bridge, frag: Tile) -> DeckQuad {
     let (cx, cy) = board.center_world(frag);
@@ -664,8 +664,7 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
         Some(v) => *v,
         None => return,
     };
-    // Same frame as the Python renderer (`_ramp_frame`/`_draw_ramp`): the
-    // strip runs edge to edge, its short edges lying on the midpoints of
+    // The strip runs edge to edge, its short edges lying on the midpoints of
     // the hex edges facing the two joined neighbours, tilted by their
     // height difference.
     let corners = hexgrid::hex_corners(tile.0, tile.1, board.side);
@@ -695,8 +694,8 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
     let (dx, dy) = (edge_b.0 - edge_a.0, edge_b.1 - edge_a.1);
     let len = (dx * dx + dy * dy).sqrt().max(1e-6);
     let (ux, uy) = (dx / len, dy / len);
-    // Strip half-width like the Python renderer: just under half the hex
-    // side, so the strip runs edge to edge without spilling past the hex.
+    // Strip half-width: just under half the hex side, so the strip runs
+    // edge to edge without spilling past the hex.
     let hw = board.side * 0.45;
     let (px, py) = (-uy, ux);
     let z_lo = ha.min(hb);
@@ -874,8 +873,8 @@ pub fn vehicle_crossing(game: &Game, v: &crate::entities::Vehicle) -> Crossing {
 ///
 /// A vehicle travelling along a bridge stands on the deck (rules.md section
 /// 8), so it is drawn over the water and over anything crossing underneath;
-/// a vehicle crossing under a bridge stays on the terrain and is hidden by the
-/// deck, exactly as on the Python renderer.
+/// a vehicle crossing under a bridge stays on the terrain and is hidden by
+/// the deck.
 pub fn vehicle_surface_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     let tile = game.board.world_to_tile(v.x, v.y);
     if vehicle_crossing(game, v) == Crossing::Deck
@@ -1392,8 +1391,8 @@ fn push_obstacle(
             // disc loses the depth race against the terrain and flickers.
             let dz = z + constants::OBSTACLE_LIFT;
             push_disc(mesh, cx, cy, dz, 8.0, 10, [40, 40, 40]);
-            // Distinct centre colour (Python draws a small red disc here):
-            // both diagonals of a small cross, so the marker reads at
+            // Distinct centre colour: both diagonals of a small cross,
+            // so the marker reads at
             // every zoom. Lines draw after the opaque pass, so they stay
             // visible over the base disc.
             let r = 3.5;
@@ -1421,13 +1420,13 @@ fn push_obstacle(
         ObstacleKind::TrapFire => {
             let dz = z + constants::OBSTACLE_LIFT;
             push_disc(mesh, cx, cy, dz, 12.0, 12, [230, 120, 60]);
-            // Flame stub above the centre (Python draws a vertical line).
+            // Flame stub above the centre (a vertical line).
             push_beam(lines, cx, cy, dz, cx, cy, dz + 10.0, [250, 170, 60]);
         }
         ObstacleKind::TrapIce => {
             let dz = z + constants::OBSTACLE_LIFT;
             push_disc(mesh, cx, cy, dz, 12.0, 12, [150, 210, 250]);
-            // Two pale slashes across the disc (Python draws two lines).
+            // Two pale slashes across the disc (two lines).
             push_beam(
                 lines,
                 cx - 8.0,
@@ -1519,8 +1518,8 @@ fn push_vehicle(
 /// boom trails behind it, so the tail always stays at the back of the
 /// flight direction. The body stays an opaque box stack (depth-tested like
 /// every other vehicle), while the thin rotor blades and skid struts are 3D
-/// line strokes: they need no depth fighting on the GPU path and match the
-/// Python renderer, which draws the rotor as lines above the body.
+/// line strokes: they need no depth fighting on the GPU path, and drawing
+/// the rotor as lines above the body keeps it readable in every frame.
 /// `rotor_phase` rotates the main blades around the mast, so consecutive
 /// frames built with an advancing phase show the spin.
 #[allow(clippy::too_many_lines)]
@@ -1729,8 +1728,7 @@ fn push_helicopter_oriented(
         darker,
     );
     // Main rotor: two opposite blades rotating with `rotor_phase`, drawn as
-    // bright strokes like in the Python version (`_draw_vehicle`); the disc
-    // sits one px above the mast top.
+    // bright strokes; the disc sits one px above the mast top.
     let rz = z + HELI_MAST_BASE + HELI_MAST_H + 1.0;
     let (c, s) = (rotor_phase.cos(), rotor_phase.sin());
     let r = HELI_ROTOR_R;
@@ -1849,7 +1847,7 @@ fn push_helicopter_shadow(
     let black = constants::SHADOW_COLOR;
     let solid = constants::SHADOW_ALPHA;
     // One silhouette part: on a bridge deck it is clipped to the deck strip,
-    // on open terrain it is the plain rectangle of the Python renderer.
+    // on open terrain it is a plain rectangle.
     let part =
         |shadow: &mut RangeSoup, cx: f64, cy: f64, len: f64, wid: f64, fx: f64, fy: f64| match deck
         {
@@ -2943,8 +2941,8 @@ mod tests {
         build_dynamic(&game, 0.0, &mut dynamic);
         assert_eq!(dynamic.range_turret.vertices.len(), 2 * 40 * 3);
         assert!(!dynamic.range_heal.vertices.is_empty());
-        // Turret fills are subtler than before (Python parity), heal fills
-        // keep their own light-green transparency.
+        // Turret fills are subtler than before, heal fills keep their own
+        // light-green transparency.
         for v in dynamic.range_turret.vertices.iter() {
             assert_eq!(v.color[3], constants::RANGE_TURRET_FILL_ALPHA);
             assert_eq!(&v.color[..3], &[255, 255, 255]);
