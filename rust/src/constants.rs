@@ -93,6 +93,11 @@ pub const SHADOW_SEGMENTS: usize = 14;
 pub const SHADOW_COLOR: [u8; 3] = [0, 0, 0];
 /// Alpha of the translucent shadow decal, 70/255 (specification.md).
 pub const SHADOW_ALPHA: u8 = 70;
+/// Alpha of a bridge shadow (rendering only), deliberately lower than
+/// [`SHADOW_ALPHA`]: a bridge shadow is drawn as a late pass *over* whatever
+/// stands under the deck, so it has to tint a vehicle crossing below instead
+/// of hiding it.
+pub const BRIDGE_SHADOW_ALPHA: u8 = 45;
 /// Lift of the helicopter shadow silhouette above the receiving surface in
 /// px (rendering only; rules.md has no shadows). Just high enough that the
 /// decal never loses the depth race against the terrain (no flicker), low

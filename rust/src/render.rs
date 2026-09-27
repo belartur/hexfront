@@ -115,8 +115,10 @@ impl Renderer {
     ///
     /// Pass order: opaque terrain chunks -> terrain grid lines -> opaque
     /// dynamic objects -> translucent helicopter shadows -> translucent range
-    /// discs -> 3D strokes -> 2D overlays. Unit badges and floating texts are
-    /// drawn by [`crate::app`] on top, never occluded. Terrain chunks outside
+    /// discs -> 3D strokes -> translucent bridge shadows -> 2D overlays. Unit
+    /// badges and floating texts are drawn by [`crate::app`] on top, never
+    /// occluded. Bridge shadows come last on purpose: they tint the vehicles
+    /// crossing under a bridge instead of covering them. Terrain chunks outside
     /// the viewport are culled before they are submitted (their world boxes
     /// are tested against the visible world box), which keeps huge boards
     /// bounded by the view size.
@@ -151,17 +153,6 @@ impl Renderer {
                     continue;
                 }
                 mq::draw_mesh(mesh);
-            }
-            // Bridge shadows on the fields below the decks: translucent, right
-            // after the opaque terrain so the depth test trims them against
-            // nearer cliffs, and before the dynamic objects so a vehicle
-            // standing under the bridge is drawn on top of its own shadow
-            // (specification_rust.md pass order).
-            for (mesh, bbox) in terrain.shadows.iter() {
-                if !bbox_hits(bbox, &view_bounds) {
-                    continue;
-                }
-                draw_range_soup_mesh(mesh);
             }
             for (mesh, bbox) in terrain.grids.iter() {
                 if !bbox_hits(bbox, &view_bounds) {
@@ -198,6 +189,23 @@ impl Renderer {
                 idx.push(base + 1);
             }
             chunked_lines(&verts, &idx);
+        }
+        // Bridge shadows on the fields below the decks: the *last* 3D pass
+        // (specification_rust.md pass order). Drawn this late because a vehicle
+        // crossing under a bridge is part of the surface this shadow falls on,
+        // so the shadow must tint it rather than hide it -- drawn earlier it
+        // would write its depth first and drop the lower half of the hull, and
+        // the lower alpha alone would not read as "in the shade". The depth
+        // test stays on, so pillars, the deck edge and nearer cliffs still trim
+        // the shadow; parts standing *below* the shadow plane are the ones it
+        // deliberately tints.
+        if let Some(terrain) = self.terrain.as_ref() {
+            for (mesh, bbox) in terrain.shadows.iter() {
+                if !bbox_hits(bbox, &view_bounds) {
+                    continue;
+                }
+                draw_range_soup_mesh(mesh);
+            }
         }
         // Selection outline + hovered route preview as 2D overlays.
         mq::set_default_camera();

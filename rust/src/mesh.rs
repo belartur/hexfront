@@ -529,15 +529,19 @@ fn push_bridge_deck(board: &Board, soup: &mut TriangleSoup, br: &Bridge, frag: T
 /// low land) and lifted by [`constants::SHADOW_LIFT`] so it never fights that
 /// surface for depth. Vertical projection matches the helicopter shadow
 /// ([`push_helicopter_shadow`]), so the light in the scene reads as coming
-/// from straight above; the colour and alpha are the shared shadow values of
-/// specification.md. The shadow is static like the deck, so it is built once
-/// with the terrain instead of every frame.
+/// from straight above; the colour is the shared shadow colour of
+/// specification.md.
+///
+/// The alpha is [`constants::BRIDGE_SHADOW_ALPHA`], lower than the helicopter
+/// one, and [`crate::render`] draws this soup as the *last* 3D pass: a vehicle
+/// crossing under the bridge is a part of the scene this shadow falls on, so
+/// the shadow has to tint it rather than cover it. Keeping the geometry here
+/// and only the pass order in the renderer is what makes that work.
 fn push_bridge_shadow(board: &Board, shadows: &mut RangeSoup, br: &Bridge, frag: Tile) {
     let deck = bridge_deck_quad(board, br, frag);
     let ground = board.height(frag) as f64 * constants::ELEVATION_PX;
     let z = ground + constants::SHADOW_LIFT;
-    // Only an elevated deck shades the ground; a deck flush with the field
-    // (or one over water level zero that would sit inside the surface) has
+    // Only an elevated deck shades the ground; a deck level with the field has
     // nothing to darken.
     if deck.z - ground > constants::SHADOW_LIFT {
         push_range_rect(
@@ -550,7 +554,7 @@ fn push_bridge_shadow(board: &Board, shadows: &mut RangeSoup, br: &Bridge, frag:
             deck.axis.0,
             deck.axis.1,
             constants::SHADOW_COLOR,
-            constants::SHADOW_ALPHA,
+            constants::BRIDGE_SHADOW_ALPHA,
         );
     }
 }
@@ -3207,11 +3211,15 @@ mod tests {
         // water surface lifted by SHADOW_LIFT.
         let shadow_vertices: usize = mesh.chunks.iter().map(|c| c.shadows.vertices.len()).sum();
         assert_eq!(shadow_vertices, frags.len() * 2 * 3);
+        // Lighter than a helicopter shadow: this one is drawn as the last 3D
+        // pass, so it tints a vehicle crossing below instead of hiding it
+        // (see `Renderer::draw_gpu` pass order).
+        const _: () = assert!(constants::BRIDGE_SHADOW_ALPHA < constants::SHADOW_ALPHA);
         let water = 0.0; // the fragment fields of the test board are water
         let expected_z = water + constants::SHADOW_LIFT;
         for v in mesh.chunks.iter().flat_map(|c| c.shadows.vertices.iter()) {
             assert_eq!(&v.color[..3], &constants::SHADOW_COLOR[..]);
-            assert_eq!(v.color[3], constants::SHADOW_ALPHA);
+            assert_eq!(v.color[3], constants::BRIDGE_SHADOW_ALPHA);
             assert!(
                 (f64::from(v.z) - expected_z).abs() < 1e-6,
                 "shadow at z={} instead of {expected_z}",
