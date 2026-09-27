@@ -183,6 +183,22 @@ impl EditorState {
             mix(b.direction as u64);
             mix(b.fragments.len() as u64);
         }
+        // Ramp rotation keeps the tile height but changes which neighbours
+        // are joined, so the (a, b) ends must be hashed too — otherwise the
+        // UI would skip the mesh rebuild and the rotated ramp would only
+        // appear after an unrelated terrain edit.
+        let mut ramp_keys: Vec<Tile> = self.board.ramps.keys().copied().collect();
+        ramp_keys.sort();
+        mix(ramp_keys.len() as u64);
+        for k in ramp_keys {
+            let (a, b) = self.board.ramps[&k];
+            mix(k.0 as u64);
+            mix(k.1 as u64);
+            mix(a.0 as u64);
+            mix(a.1 as u64);
+            mix(b.0 as u64);
+            mix(b.1 as u64);
+        }
         h
     }
 
@@ -1100,6 +1116,12 @@ mod tests {
         let after_height = ed.terrain_fingerprint();
         assert!(ed.press_r(Some((129, 128))));
         assert_ne!(ed.terrain_fingerprint(), after_height);
+        // Rotating an existing ramp keeps the height but changes the (a, b)
+        // ends, which must also change the fingerprint (regression test: the
+        // rotated ramp used to appear only after an unrelated terrain edit).
+        let after_place = ed.terrain_fingerprint();
+        assert!(ed.press_r(Some((129, 128))));
+        assert_ne!(ed.terrain_fingerprint(), after_place);
         let after_ramp = ed.terrain_fingerprint();
         assert!(ed.press_m(Some((130, 128))));
         assert_ne!(ed.terrain_fingerprint(), after_ramp);
