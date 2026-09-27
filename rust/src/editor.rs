@@ -47,10 +47,10 @@ pub const OBSTACLE_ORDER: [ObstacleKind; 5] = [
 pub const LEGEND: [&str; 7] = [
     "b: building (again: cycle kind)    digits: units 0-999",
     "o: cycle owner                     t: obstacle (again: cycle kind)",
-    "m: bridge (again: rotate)          p: ramp (again: rotate)",
+    "m: bridge (again: rotate)          r: ramp (again: rotate)",
     "[/]: lower/raise terrain           Del/RMB: delete object",
     "l: load   s: save   ctrl+s: quick save   ctrl+n: new map",
-    "r: play the level (Esc there: back to editing)",
+    "p: play the level (Esc there: back to editing)",
     "Esc: menu (asks to save if dirty)   view: drag/wheel/arrows",
 ];
 
@@ -716,7 +716,7 @@ impl EditorState {
         *self = Self::new_board();
     }
 
-    /// Build a game from the edited board for the in-editor playtest (`r`).
+    /// Build a game from the edited board for the in-editor playtest (`p`).
     ///
     /// Players are derived from the placed buildings exactly like
     /// [`crate::mapfile::load_game`] does for a saved map: ids `0..=highest
@@ -1069,6 +1069,20 @@ mod tests {
         }
     }
 
+    /// The legend documents the play/ramp keys: `r` places a ramp (the key
+    /// the Python editor uses too) and `p` starts the playtest.
+    #[test]
+    fn legend_documents_the_ramp_and_play_keys() {
+        assert!(
+            LEGEND.iter().any(|l| l.contains("r: ramp")),
+            "legend must advertise `r` for the ramp"
+        );
+        assert!(
+            LEGEND.iter().any(|l| l.contains("p: play")),
+            "legend must advertise `p` for the playtest"
+        );
+    }
+
     #[test]
     fn place_and_cycle_building() {
         let mut ed = test_state(8, 8);
@@ -1239,7 +1253,7 @@ mod tests {
 
     #[test]
     fn playtest_is_a_sandbox_that_never_touches_the_edited_map() {
-        // `r` starts a test run on a copy of the edited board: player 0 is
+        // `p` starts a test run on a copy of the edited board: player 0 is
         // human, other players come from the placed owners, and the match
         // never ends, so an unfinished map (only a player base here) stays
         // playable — without the sandbox flag check_elimination would end it

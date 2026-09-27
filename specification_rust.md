@@ -71,7 +71,7 @@ Gra i edytor współdzielą renderer (`render.rs`, `mesh.rs`: `TerrainMesh`/`Dyn
 * `o` cyklicznie zmienia właściciela budynku (bez działania, jeśli na polu nie ma budynku).
 * `t` wstawia utrudnienie lub cyklicznie zmienia jego rodzaj.
 * `m` wstawia most lub cyklicznie go obraca (jeśli na polu sąsiadującym jest most skierowany w stronę bieżącego pola, wstawiany most dostaje ten sam kierunek; w przeciwnym razie obrót tak, by łączył dwóch przeciwległych sąsiadów o tej samej wysokości, możliwie najwyższych).
-* `p` (podjazd) wstawia podjazd (o kierunku między dwoma przeciwległymi sąsiadami o różnych wysokościach, jeśli istnieją) lub cyklicznie go obraca. W implementacji Pythonowej ten sam klawisz to `r`, ale tutaj `r` uruchamia grę testową (sekcja niżej).
+* `r` wstawia podjazd (o kierunku między dwoma przeciwległymi sąsiadami o różnych wysokościach, jeśli istnieją) lub cyklicznie go obraca — tak jak w implementacji Pythonowej; gra testowa używa `p` (sekcja niżej), więc `r` jest tu wolny.
 * `[` zmniejsza wysokość terenu o 1 (nic przy wysokości 0); `]` zwiększa wysokość terenu o 1 (nic przy wysokości 15).
 * `Del` lub prawy przycisk myszy kasuje obiekt.
 * Wstawienie obiektu nadpisuje obiekt, który znajdował się na polu wcześniej.
@@ -80,7 +80,7 @@ Gra i edytor współdzielą renderer (`render.rs`, `mesh.rs`: `TerrainMesh`/`Dyn
 * Pierwszy wstawiony budynek jest początkowo neutralną bazą czołgową z zerem jednostek; zmiana własności budynków (typy, kolory, liczby jednostek) jest zapamiętywana i nadawana nowo wstawianym budynkom. Analogicznie zapamiętywany jest rodzaj ostatnio wybranego utrudnienia.
 
 ### Gra testowa na edytowanym poziomie
-* `r` uruchamia grę na edytowanym poziomie. Budowana jest z kopii edytowanej planszy i budynków, więc test nigdy nie zmienia edytowanej mapy: gracze wynikają z postawionych właścicieli (właściciel 0 jest graczem sterowanym ręcznie, pozostali sterowani są przez AI), a seed AI wyznaczany jest od nazwy pliku mapy tak jak dla poziomu (bez nazwy — seed 0). Widok nie jest resetowany, więc gra zaczyna się tam, gdzie użytkownik patrzył w edytorze.
+* `p` uruchamia grę na edytowanym poziomie (`r` jest zarezerwowane dla podjazdu). Budowana jest z kopii edytowanej planszy i budynków, więc test nigdy nie zmienia edytowanej mapy: gracze wynikają z postawionych właścicieli (właściciel 0 jest graczem sterowanym ręcznie, pozostali sterowani są przez AI), a seed AI wyznaczany jest od nazwy pliku mapy tak jak dla poziomu (bez nazwy — seed 0). Widok nie jest resetowany, więc gra zaczyna się tam, gdzie użytkownik patrzył w edytorze.
 * Gra testowa jest piaskownicą: mecz nigdy się nie kończy (warunki zwycięstwa i eliminacji z sekcji 2 [rules.md](rules.md) nie obowiązują), więc można testować mapy bez bazy przeciwnika; AI działa normalnie.
 * Esc w grze testowej wraca do edytora (najpierw anuluje zaznaczenie — tak jak w normalnej grze): stan edytora, mapa i kamera zostają nienaruszone (przed startem oczekujące wpisanie liczby jednostek jest zatwierdzane, żeby test grał pokazaną wartość), więc dalsza edycja działa od razu. Wyjście do menu głównego z gry testowej jest niemożliwe — w HUD-gry testowej widać stosowną podpowiedź, a mapa zostaje tam, gdzie była (Esc w edytorze znów pyta o zapis, jeśli jest niezapisana).
 * Zwykła gra z menu głównego (`l`/klik) zachowuje dotychczasowe wyjście do menu (Esc).

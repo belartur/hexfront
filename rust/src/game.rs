@@ -77,7 +77,7 @@ pub struct Game {
     pub human_id: usize,
     /// Ids of eliminated players.
     pub eliminated: HashSet<usize>,
-    /// Sandbox flag used by the map editor's playtest (`r`): the match never
+    /// Sandbox flag used by the map editor's playtest (`p`): the match never
     /// ends, so an unfinished map (e.g. without an enemy base) can still be
     /// played. Real matches always keep it `false` (rules.md section 2).
     pub sandbox: bool,

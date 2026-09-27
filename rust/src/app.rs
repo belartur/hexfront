@@ -52,7 +52,7 @@ pub struct Application {
     dragging: bool,
     /// Map editor state (entered from the menu via `add map` / RMB).
     editor: Option<EditorState>,
-    /// True while playing the edited level as a test (`r` in the editor):
+    /// True while playing the edited level as a test (`p` in the editor):
     /// Esc then returns to the editor instead of the level menu.
     playtest: bool,
     /// Editor preview wrapped as a game so the shared renderer draws it.
@@ -443,7 +443,7 @@ impl Application {
             Err(e) => eprintln!("cannot load {}: {}", path.display(), e),
         }
     }
-    /// Start a test run (`r` in the editor) of the map being edited.
+    /// Start a test run (`p` in the editor) of the map being edited.
     ///
     /// The playtest builds a fresh [`Game`] from a copy of the editor board
     /// (players from the placed building owners, player 0 human, AI controls
@@ -1175,8 +1175,8 @@ impl Application {
             }
             return;
         }
-        // `r`: play the edited level as a test; Esc there returns to editing.
-        if is_key_pressed(KeyCode::R) {
+        // `p`: play the edited level as a test; Esc there returns to editing.
+        if is_key_pressed(KeyCode::P) {
             self.start_playtest();
             return;
         }
@@ -1227,7 +1227,7 @@ impl Application {
             }
             return;
         }
-        // Typed letters arrive via chars too, but B/O/T/M/R/L/S brackets are
+        // Typed letters arrive via chars too, but B/O/T/M/P/R/L/S brackets are
         // physical keys; check them explicitly (layout-independent enough for
         // the Latin keys the spec names).
         if is_key_pressed(KeyCode::B) {
@@ -1254,8 +1254,8 @@ impl Application {
             {
                 self.editor_clean = false;
             }
-        } else if is_key_pressed(KeyCode::P) {
-            // Ramp placement/rotation (`p` for "podjazd"; `r` plays the level).
+        } else if is_key_pressed(KeyCode::R) {
+            // Ramp placement/rotation (`r`, the Python editor's key too).
             if let Some(ed) = self.editor.as_mut()
                 && ed.press_r(tile)
             {
