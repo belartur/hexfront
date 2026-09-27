@@ -32,6 +32,8 @@ pub struct Renderer {
 struct GpuTerrain {
     /// One draw batch per terrain chunk plus its world bounding box.
     chunks: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
+    /// Bridge decks, one batch per terrain chunk (drawn after the shadows).
+    decks: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
     /// Translucent bridge shadows, one batch per terrain chunk.
     shadows: Vec<(macroquad::models::Mesh, (f64, f64, f64, f64))>,
     /// Grid strokes of every chunk plus its world bounding box.
@@ -52,6 +54,7 @@ impl Renderer {
     /// so the per-frame path never touches per-vertex conversion.
     pub fn set_terrain(&mut self, terrain: &crate::mesh::TerrainMesh) {
         let mut chunks = Vec::with_capacity(terrain.chunks.len());
+        let mut decks = Vec::with_capacity(terrain.chunks.len());
         let mut shadows = Vec::with_capacity(terrain.chunks.len());
         let mut grids = Vec::with_capacity(terrain.chunks.len());
         for chunk in terrain.chunks.iter() {
@@ -65,6 +68,21 @@ impl Renderer {
                 macroquad::models::Mesh {
                     vertices: verts,
                     indices,
+                    texture: None,
+                },
+                chunk.bbox,
+            ));
+            // Opaque decks, submitted after the bridge shadows.
+            let mut dverts: Vec<macroquad::models::Vertex> =
+                Vec::with_capacity(chunk.decks.vertices.len());
+            for v in chunk.decks.vertices.iter() {
+                dverts.push(mq_vertex(v));
+            }
+            let didx: Vec<u16> = (0..dverts.len() as u16).collect();
+            decks.push((
+                macroquad::models::Mesh {
+                    vertices: dverts,
+                    indices: didx,
                     texture: None,
                 },
                 chunk.bbox,
@@ -107,6 +125,7 @@ impl Renderer {
         }
         self.terrain = Some(GpuTerrain {
             chunks,
+            decks,
             shadows,
             grids,
         });
@@ -145,6 +164,7 @@ impl Renderer {
         let proj = mq::glam::Mat4::from_cols_array_2d(&iso.proj);
         let cam3d = GpuIsoCamera {
             matrix: proj * view,
+            depth: true,
         };
         mq::set_camera(&cam3d);
         if let Some(terrain) = self.terrain.as_ref() {
@@ -190,22 +210,51 @@ impl Renderer {
             }
             chunked_lines(&verts, &idx);
         }
-        // Bridge shadows on the fields below the decks: the *last* 3D pass
-        // (specification_rust.md pass order). Drawn this late because a vehicle
-        // crossing under a bridge is part of the surface this shadow falls on,
-        // so the shadow must tint it rather than hide it -- drawn earlier it
-        // would write its depth first and drop the lower half of the hull, and
-        // the lower alpha alone would not read as "in the shade". The depth
-        // test stays on, so pillars, the deck edge and nearer cliffs still trim
-        // the shadow; parts standing *below* the shadow plane are the ones it
-        // deliberately tints.
+        // Bridge shadows on the fields below the decks. Two properties make
+        // this pass work, and both are deliberate:
+        //
+        // * the depth test is OFF, so a shadow lying on the field tints a hull
+        //   that rises *above* it -- the whole vehicle crossing under the
+        //   bridge, not only the sliver below the shadow plane. With the test
+        //   on, everything standing above one pixel of shadow height would be
+        //   rejected, which is what hid the hovercraft;
+        // * the pass runs late, after every opaque ground object, so it lands
+        //   on top of them.
+        //
+        // The two passes that follow put back what the shadow must not touch:
+        // the decks (opaque, depth-tested -- the bridge is never tinted) and
+        // the air buffer (helicopters fly at a fixed altitude well above the
+        // board, so a shadow belonging to a field below can never darken one).
         if let Some(terrain) = self.terrain.as_ref() {
+            mq::set_camera(&cam3d.without_depth_test());
             for (mesh, bbox) in terrain.shadows.iter() {
                 if !bbox_hits(bbox, &view_bounds) {
                     continue;
                 }
                 draw_range_soup_mesh(mesh);
             }
+            mq::set_camera(&cam3d);
+            for (mesh, bbox) in terrain.decks.iter() {
+                if !bbox_hits(bbox, &view_bounds) {
+                    continue;
+                }
+                mq::draw_mesh(mesh);
+            }
+        }
+        // Helicopters and their rotor strokes, on top of the bridge shadows.
+        draw_soup(&dynamic.air.vertices, &dynamic.air.indices);
+        if !dynamic.air_lines.is_empty() {
+            let mut verts: Vec<macroquad::models::Vertex> =
+                Vec::with_capacity(dynamic.air_lines.len() * 2);
+            let mut idx: Vec<u16> = Vec::with_capacity(dynamic.air_lines.len() * 2);
+            for (a, b) in dynamic.air_lines.iter() {
+                let base = verts.len() as u16;
+                verts.push(mq_line_vertex(a));
+                verts.push(mq_line_vertex(b));
+                idx.push(base);
+                idx.push(base + 1);
+            }
+            chunked_lines(&verts, &idx);
         }
         // Selection outline + hovered route preview as 2D overlays.
         mq::set_default_camera();
@@ -239,6 +288,23 @@ impl Renderer {
 struct GpuIsoCamera {
     /// Combined projection * view matrix.
     matrix: macroquad::prelude::glam::Mat4,
+    /// Whether the depth test is applied while this camera is bound.
+    ///
+    /// The bridge-shadow pass needs it off: the shadows lie on the field and
+    /// must tint whatever stands there -- including a hull rising above the
+    /// shadow plane -- so they cannot be depth-rejected against it. The next
+    /// pass (decks, then the air buffer) binds a camera with the test back on.
+    depth: bool,
+}
+
+impl GpuIsoCamera {
+    /// The same view, with the depth test disabled.
+    fn without_depth_test(&self) -> Self {
+        Self {
+            matrix: self.matrix,
+            depth: false,
+        }
+    }
 }
 
 impl macroquad::camera::Camera for GpuIsoCamera {
@@ -246,7 +312,7 @@ impl macroquad::camera::Camera for GpuIsoCamera {
         self.matrix
     }
     fn depth_enabled(&self) -> bool {
-        true
+        self.depth
     }
     fn render_pass(&self) -> Option<macroquad::prelude::RenderPass> {
         None

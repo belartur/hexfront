@@ -90,8 +90,15 @@ pub const CHUNK_TILES: i32 = 16;
 /// One spatially bounded terrain chunk; the renderer culls it by `bbox`.
 #[derive(Clone, Debug, Default)]
 pub struct TerrainChunk {
-    /// Opaque triangles (tops, skirts, ramps, decks).
+    /// Opaque triangles (tops, skirts, ramps).
     pub soup: TriangleSoup,
+    /// Opaque bridge decks and their pillars.
+    ///
+    /// Kept apart from [`TerrainChunk::soup`] because the deck is drawn *after*
+    /// the shadows that fall on the field below it: the shadows paint over any
+    /// vehicle crossing under the bridge, and the deck is what puts an opaque
+    /// surface back on top so the bridge itself is never tinted.
+    pub decks: TriangleSoup,
     /// Translucent bridge shadows cast on the fields below the decks.
     pub shadows: RangeSoup,
     /// Thin grid strokes over this chunk's hex tops.
@@ -600,7 +607,7 @@ pub fn build_terrain(board: &Board) -> TerrainMesh {
             let Some(idx) = groups.keys().position(|k| *k == key) else {
                 continue;
             };
-            push_bridge_deck(board, &mut mesh.chunks[idx].soup, br, f);
+            push_bridge_deck(board, &mut mesh.chunks[idx].decks, br, f);
             push_bridge_shadow(board, &mut mesh.chunks[idx].shadows, br, f);
         }
     }
@@ -741,6 +748,13 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
 pub struct DynamicMesh {
     /// Opaque boxes/discs (depth-tested, depth-writing).
     pub opaque: TriangleSoup,
+    /// Opaque geometry of the flying vehicles (helicopters).
+    ///
+    /// Separate from [`DynamicMesh::opaque`] so the renderer can submit it
+    /// *after* the bridge shadows: a helicopter flies at a fixed altitude well
+    /// above the board (rules.md section 5.2) and must never be darkened by a
+    /// shadow that belongs to the field below a bridge.
+    pub air: TriangleSoup,
     /// Flat translucent vehicle shadow decals (no depth write, drawn after
     /// the opaque pass and before the range fills; see
     /// [`push_helicopter_shadow`]).
@@ -749,13 +763,11 @@ pub struct DynamicMesh {
     pub range_turret: RangeSoup,
     /// Flat translucent light-green heal range discs (no depth write).
     pub range_heal: RangeSoup,
-    /// Flat translucent range discs (no depth write, drawn after opaque).
-    ///
-    /// Kept so older callers keep compiling; new code fills
-    /// [`DynamicMesh::range_turret`] and [`DynamicMesh::range_heal`].
-    pub translucent: TriangleSoup,
     /// 3D line segments (grid already in terrain; ranges/routes here).
     pub lines: Vec<(LineVertex, LineVertex)>,
+    /// 3D line segments of the flying vehicles, submitted with
+    /// [`DynamicMesh::air`] so the rotor strokes stay with their airframe.
+    pub air_lines: Vec<(LineVertex, LineVertex)>,
 }
 
 impl DynamicMesh {
@@ -763,15 +775,16 @@ impl DynamicMesh {
     pub fn clear(&mut self) {
         self.opaque.vertices.clear();
         self.opaque.indices.clear();
+        self.air.vertices.clear();
+        self.air.indices.clear();
         self.shadow.vertices.clear();
         self.shadow.indices.clear();
         self.range_turret.vertices.clear();
         self.range_turret.indices.clear();
         self.range_heal.vertices.clear();
         self.range_heal.indices.clear();
-        self.translucent.vertices.clear();
-        self.translucent.indices.clear();
         self.lines.clear();
+        self.air_lines.clear();
     }
 }
 
@@ -1222,8 +1235,17 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
         if v.dead {
             continue;
         }
-        push_vehicle(game, v, rotor_phase, &mut out.opaque, &mut out.lines);
-        if v.kind == constants::VehicleKind::Helicopter {
+        // Helicopters go to the air buffers so the renderer can submit them
+        // after the bridge shadows; everything else rides the ground and is
+        // meant to be tinted by them.
+        let flying = v.kind == constants::VehicleKind::Helicopter;
+        let (soup, lines) = if flying {
+            (&mut out.air, &mut out.air_lines)
+        } else {
+            (&mut out.opaque, &mut out.lines)
+        };
+        push_vehicle(game, v, rotor_phase, soup, lines);
+        if flying {
             push_helicopter_shadow(game, v, rotor_phase, &mut out.shadow);
         }
     }
@@ -2369,16 +2391,16 @@ mod tests {
         // Opaque hull + canopy + tail boom + fin + skid rails + mast: clearly
         // more than the old single flat disc (12 triangles = 36 vertices).
         assert!(
-            first.opaque.vertices.len() > 36,
+            first.air.vertices.len() > 36,
             "helicopter body has no details: {} vertices",
-            first.opaque.vertices.len()
+            first.air.vertices.len()
         );
         // Four skid struts + two main-rotor strokes + tail-rotor stroke.
         assert_eq!(
-            first.lines.len(),
+            first.air_lines.len(),
             7,
             "rotor/tail lines: {:?}",
-            first.lines.len()
+            first.air_lines.len()
         );
         // Slender hull: the airframe is much longer along the heading (east
         // for a parked helicopter) than it is wide across it.
@@ -2388,7 +2410,7 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
         );
-        for vert in first.opaque.vertices.iter() {
+        for vert in first.air.vertices.iter() {
             lo_x = lo_x.min(f64::from(vert.x));
             hi_x = hi_x.max(f64::from(vert.x));
             lo_y = lo_y.min(f64::from(vert.y));
@@ -2400,11 +2422,11 @@ mod tests {
         // rotor diameter and their midpoint is the mast above the hull.
         let blades = |mesh: &DynamicMesh| -> Vec<(LineVertex, LineVertex)> {
             let top = mesh
-                .lines
+                .air_lines
                 .iter()
                 .map(|(a, _)| f64::from(a.z))
                 .fold(f64::NEG_INFINITY, f64::max);
-            mesh.lines
+            mesh.air_lines
                 .iter()
                 .filter(|(a, b)| {
                     (f64::from(a.z) - top).abs() < 1e-6 && (f64::from(b.z) - top).abs() < 1e-6
@@ -2429,7 +2451,7 @@ mod tests {
         // Advancing the phase rotates the main blades.
         let mut second = DynamicMesh::default();
         build_dynamic(&game, 0.7, &mut second);
-        assert_eq!(second.lines.len(), 7);
+        assert_eq!(second.air_lines.len(), 7);
         let endpoints = |mesh: &DynamicMesh| -> Vec<(f32, f32, f32, f32)> {
             blades(mesh)
                 .iter()
@@ -2485,7 +2507,7 @@ mod tests {
         };
         // The tail rotor is the rearmost stroke: it trails the hull.
         let tail = dynamic
-            .lines
+            .air_lines
             .iter()
             .min_by(|a, b| along(a).partial_cmp(&along(b)).unwrap())
             .expect("tail rotor stroke");
@@ -2497,7 +2519,7 @@ mod tests {
         // The glazed cockpit (identified by its fixed tint) sits ahead and on
         // top of the hull instead of sticking out as a white box.
         let canopy: Vec<&GpuVertex> = dynamic
-            .opaque
+            .air
             .vertices
             .iter()
             .filter(|vert| vert.color == HELI_CANOPY_COLOR)
@@ -2523,6 +2545,68 @@ mod tests {
             ccz > hull_top - HELI_HULL_H && ccz < hull_top + HELI_CANOPY_H,
             "canopy {ccz} is not on the hull top {hull_top}"
         );
+    }
+
+    #[test]
+    fn helicopters_are_built_into_the_air_buffers_not_the_ground_ones() {
+        // The renderer submits `air` after the bridge shadows, so a helicopter
+        // must never end up in `opaque`/`lines` -- it flies at a fixed
+        // altitude well above the board and a shadow belonging to the field
+        // below a bridge must not darken it.
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let mut board = Board::new(8, 8);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let (sx, sy) = hexgrid::hex_to_world(3, 3, board.side);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            Vec::new(),
+            (sx, sy),
+            None,
+        ));
+        // A ground vehicle of each drivable kind, on the same field.
+        for kind in [
+            VehicleKind::Tank,
+            VehicleKind::Hovercraft,
+            VehicleKind::Buffer,
+        ] {
+            game.vehicles.push(Vehicle::new(
+                kind,
+                0,
+                10.0,
+                Vec::new(),
+                (sx + 40.0, sy),
+                None,
+            ));
+        }
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        // The airframe and its rotor strokes are in the air buffers.
+        assert!(
+            !dynamic.air.vertices.is_empty(),
+            "helicopter body is missing"
+        );
+        assert!(
+            !dynamic.air_lines.is_empty(),
+            "helicopter rotor strokes are missing"
+        );
+        // Ground vehicles are still there, and nothing that rides the ground
+        // reaches the helicopter's fixed altitude.
+        let heli_z = vehicle_z(&game, &game.vehicles[0]);
+        assert!(heli_z > max_height(&game.board));
+        for v in dynamic.opaque.vertices.iter() {
+            assert!(
+                f64::from(v.z) < heli_z,
+                "a ground vertex at z={} reached the helicopter altitude {heli_z}",
+                f64::from(v.z)
+            );
+        }
     }
 
     #[test]
@@ -2664,12 +2748,12 @@ mod tests {
             let mut dynamic = DynamicMesh::default();
             build_dynamic(&game, phase, &mut dynamic);
             let top = dynamic
-                .lines
+                .air_lines
                 .iter()
                 .map(|(a, _)| f64::from(a.z))
                 .fold(f64::NEG_INFINITY, f64::max);
             let blades: Vec<_> = dynamic
-                .lines
+                .air_lines
                 .iter()
                 .filter(|(a, b)| {
                     (f64::from(a.z) - top).abs() < 1e-6 && (f64::from(b.z) - top).abs() < 1e-6
@@ -3334,7 +3418,7 @@ mod tests {
         let count_color = |color: [u8; 3]| {
             mesh.chunks
                 .iter()
-                .flat_map(|c| c.soup.vertices.iter())
+                .flat_map(|c| c.decks.vertices.iter())
                 .filter(|v| v.color == color)
                 .count()
         };
@@ -3364,7 +3448,7 @@ mod tests {
             let low = |share: f64| {
                 mesh.chunks
                     .iter()
-                    .flat_map(|c| c.soup.vertices.iter())
+                    .flat_map(|c| c.decks.vertices.iter())
                     .filter(|v| {
                         inside(v, share) && f64::from(v.z) < constants::BRIDGE_DECK_THICKNESS
                     })
@@ -3380,7 +3464,7 @@ mod tests {
                 let standing = mesh
                     .chunks
                     .iter()
-                    .flat_map(|c| c.soup.vertices.iter())
+                    .flat_map(|c| c.decks.vertices.iter())
                     .any(|v| {
                         (f64::from(v.x) - cx).abs() <= constants::BRIDGE_PILLAR_WID
                             && (f64::from(v.y) - cy).abs() <= constants::BRIDGE_PILLAR_WID
