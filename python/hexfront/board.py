@@ -1,15 +1,30 @@
 """The game board: tiles, obstacles, ramps, bridges and path-finding.
 
-Ground-movement rules implemented in :meth:`Board.passable` follow
+Ground-movement rules implemented in :meth:`Board.step` follow
 rules.md sections 4, 5, 7 (ramps) and 8 (bridges).
 """
 
 from collections import deque
+from enum import Enum
 import math
 
 from . import constants as C
 from . import hexgrid
 from .constants import VehicleKind
+
+
+class Crossing(Enum):
+    """How a ground vehicle crosses a field carrying a bridge fragment
+    (rules.md sec. 8).
+
+    A bridge is crossed either *on* its deck (along the bridge) or *under*
+    it (by the normal terrain rules) -- never one way and then the other:
+    the mode a vehicle enters a bridge with is kept until it leaves the
+    bridge again, so a deck is never entered from the side.
+    """
+
+    GROUND = "ground"    # on the terrain; a fragment field is crossed below
+    DECK = "deck"        # on the deck of a bridge, travelling along it
 
 
 class Obstacle:
@@ -60,6 +75,86 @@ class Bridge:
         seq = [a] + fragments + [b]
         for u, v in zip(seq, seq[1:]):
             self.pairs.add(frozenset((u, v)))
+
+    def is_end(self, tile: tuple) -> bool:
+        """True when ``tile`` is one of the two land ends of the bridge.
+
+        The deck can only be stepped on from an end, i.e. by driving *along*
+        the bridge (rules.md sec. 8); no other field touches the deck
+        drivably.
+        """
+        return tile == self.a or tile == self.b
+
+
+def _walk_path(prev: dict, start: tuple, last: tuple) -> list:
+    """Rebuild the tile route of a breadth-first search from its parent
+    links, leaving out the source field."""
+    path = [last[0]]
+    cur = last
+    while cur != start:
+        cur = prev[cur]
+        path.append(cur[0])
+    path.reverse()
+    return path[1:]                     # drop the source field
+
+
+def _next_crossing(board, kind: VehicleKind, frm, to: tuple,
+                   mode: Crossing) -> Crossing:
+    """Crossing mode after one more hop of a route.
+
+    A route never mixes the two ways across a bridge (rules.md sec. 8), so
+    this replays the very rule the simulation drives by and a renderer ends
+    up on the deck exactly when the vehicle is.  A hop that starts without a
+    known field, or that no vehicle of ``kind`` could make, counts as
+    ground.
+    """
+    step = None if frm is None else board.step(frm, to, kind, mode)
+    return Crossing.GROUND if step is None else step
+
+
+def route_crossings(board, kind: VehicleKind, src, route: list) -> list:
+    """Crossing mode at every field of a route, starting from ``src``.
+
+    Index 0 is the mode at ``src`` (always :attr:`Crossing.GROUND`: no
+    building stands on a bridge fragment, so a route never starts on a
+    deck), index ``i + 1`` the mode reached after the hop to ``route[i]``.
+    """
+    modes = [Crossing.GROUND]
+    cur, mode = src, Crossing.GROUND
+    for tile in route:
+        mode = _next_crossing(board, kind, cur, tile, mode)
+        modes.append(mode)
+        cur = tile
+    return modes
+
+
+def route_prev(vehicle):
+    """Field a vehicle comes from: the last visited waypoint, or the source
+    field stored on it right after departure (``None`` without a route)."""
+    route = vehicle.route
+    if 0 < vehicle.route_index <= len(route):
+        return route[vehicle.route_index - 1]
+    return getattr(vehicle, "src_tile", None)
+
+
+def vehicle_crossing(board, vehicle) -> Crossing:
+    """Crossing mode a vehicle drives in at its current position.
+
+    The vehicle is between the field it came from and the waypoint it drives
+    towards, and that hop already decided which of the two ways across a
+    bridge it takes, so the unfinished hop counts too.  Once the route is
+    finished the mode of the last driven hop is kept, which the deck lookup
+    then ignores on the field where the vehicle came off the bridge.
+    """
+    route = vehicle.route
+    done = min(vehicle.route_index, len(route))
+    cur, mode = getattr(vehicle, "src_tile", None), Crossing.GROUND
+    for tile in route[:done]:
+        mode = _next_crossing(board, vehicle.kind, cur, tile, mode)
+        cur = tile
+    if done < len(route):
+        mode = _next_crossing(board, vehicle.kind, cur, route[done], mode)
+    return mode
 
 
 class Board:
@@ -216,8 +311,25 @@ class Board:
     # ------------------------------------------------------------------
     # Movement rules
     # ------------------------------------------------------------------
-    def passable(self, u: tuple, v: tuple, kind: VehicleKind) -> bool:
-        """True when a vehicle of ``kind`` may drive directly u -> v."""
+    def bridge_between(self, u: tuple, v: tuple):
+        """The bridge whose deck connects ``u`` with ``v``, or ``None``.
+
+        Only a step *along* the bridge counts, i.e. end-to-end hops of its
+        straight run; a hop across the bridge from a field beside it is not
+        a deck step (rules.md sec. 8).
+        """
+        br = self.tiles[u].bridge or self.tiles[v].bridge
+        if br is None or frozenset((u, v)) not in br.pairs:
+            return None
+        return br
+
+    def ground_step(self, u: tuple, v: tuple, kind: VehicleKind) -> bool:
+        """Terrain-only movement rules (rules.md sec. 4, 5, 7).
+
+        Bridge decks are ignored, so a field carrying a fragment is driven
+        on as the plain field below it -- that is the *under the bridge*
+        crossing of rules.md sec. 8.
+        """
         if u == v:
             return False
         if kind == VehicleKind.HELICOPTER:
@@ -233,12 +345,6 @@ class Board:
                 return self._drivable(u, kind)
             return False                     # off-axis move onto a ramp
 
-        # Bridge decks (sec. 8): travelling along the bridge ignores
-        # terrain heights; crossing under follows the normal rules.
-        br = tu.bridge or tv.bridge
-        if br is not None and frozenset((u, v)) in br.pairs:
-            return True
-
         hu, hv = tu.height, tv.height
         if kind == VehicleKind.HOVERCRAFT:   # sec. 5.3
             if hu == hv:
@@ -247,6 +353,45 @@ class Board:
             return lo == 0 and hi == 1       # shore crossing only at h=1
         # Tank / buffer (sec. 5.1, 5.4): equal-height land only.
         return hu == hv and hu > 0
+
+    def step(self, u: tuple, v: tuple, kind: VehicleKind, mode: Crossing):
+        """The step ``u -> v`` for a vehicle crossing in ``mode``, and the
+        mode it continues in, or ``None`` when the step is not allowed.
+
+        A deck is only stepped on from one of the two land ends, i.e. by
+        driving *along* the bridge, and a vehicle that drove under a bridge
+        stays under it: no step from the side ever puts anybody on a deck.
+        Leaving the deck is the way down to the field below, which
+        rules.md sec. 8 leaves open -- unlike a ramp, which may only be
+        left at its ends (sec. 7).  A helicopter flies over everything and
+        keeps no crossing mode (sec. 5.2).
+        """
+        if u == v:
+            return None
+        if kind == VehicleKind.HELICOPTER:
+            return Crossing.GROUND
+        deck = self.bridge_between(u, v)
+        if mode == Crossing.DECK:
+            if deck is not None:
+                return Crossing.DECK
+            if self.ground_step(u, v, kind):
+                return Crossing.GROUND          # drove off the deck
+            return None
+        if deck is not None and deck.is_end(u):
+            return Crossing.DECK
+        if self.ground_step(u, v, kind):
+            return Crossing.GROUND
+        return None
+
+    def passable(self, u: tuple, v: tuple, kind: VehicleKind) -> bool:
+        """True when a vehicle of ``kind`` may drive directly u -> v.
+
+        A single step of the movement graph, ignoring which way the vehicle
+        entered the bridge: rules.md sec. 8 keeps that mode for the whole
+        crossing, which is what :meth:`step` and the route search do.
+        """
+        return (self.step(u, v, kind, Crossing.GROUND) is not None
+                or self.step(u, v, kind, Crossing.DECK) is not None)
 
     def _drivable(self, tile: tuple, kind: VehicleKind) -> bool:
         """Terrain check ignoring heights (used for ramp ends)."""
@@ -271,37 +416,56 @@ class Board:
         destination, or ``None`` when no road exists.  Mines, traps and
         walls are deliberately ignored (sec. 6); ramps and bridges are
         respected because they change the road graph itself.
+
+        The search runs over ``(field, crossing mode)`` states, because
+        rules.md sec. 8 keeps a vehicle either on a deck or under it for a
+        whole crossing: a field beside a bridge is reachable both on the
+        ground and on the deck, and only the route's own history decides
+        which of the two is drivable.
         """
         if src == dst or not self.contains(src) or not self.contains(dst):
             return None
-        prev = {src: None}
-        queue = deque((src,))
+        start = (src, Crossing.GROUND)
+        prev = {start: None}
+        queue = deque((start,))
         while queue:
-            cur = queue.popleft()
+            cur, mode = queue.popleft()
             for n in self.neighbors(cur):
-                if n in prev or not self.passable(cur, n, kind):
+                step = self.step(cur, n, kind, mode)
+                if step is None:
                     continue
-                prev[n] = cur
+                nxt = (n, step)
+                if nxt in prev:
+                    continue
+                prev[nxt] = (cur, mode)
                 if n == dst:
-                    path = [n]
-                    while prev[path[-1]] is not None:
-                        path.append(prev[path[-1]])
-                    path.reverse()
-                    return path[1:]          # drop the source tile
-                queue.append(n)
+                    return _walk_path(prev, start, nxt)
+                queue.append(nxt)
         return None
 
     def reachable(self, src: tuple, kind: VehicleKind) -> set:
-        """Set of tiles reachable from ``src`` by vehicle ``kind``."""
-        seen = {src}
-        queue = deque((src,))
+        """Set of tiles reachable from ``src`` by vehicle ``kind``.
+
+        Like :meth:`find_path`, a bridge is crossed either on its deck or
+        under it, never both; the returned set is the union of the fields
+        reachable in either mode.
+        """
+        start = (src, Crossing.GROUND)
+        seen = {start}
+        tiles = {src}
+        queue = deque((start,))
         while queue:
-            cur = queue.popleft()
+            cur, mode = queue.popleft()
             for n in self.neighbors(cur):
-                if n not in seen and self.passable(cur, n, kind):
-                    seen.add(n)
-                    queue.append(n)
-        return seen
+                step = self.step(cur, n, kind, mode)
+                if step is None:
+                    continue
+                nxt = (n, step)
+                if nxt not in seen:
+                    seen.add(nxt)
+                    tiles.add(n)
+                    queue.append(nxt)
+        return tiles
 
     def path_world_length(self, path: list, start: tuple = None) -> float:
         """World-space length of a tile path (for travel-time estimates).

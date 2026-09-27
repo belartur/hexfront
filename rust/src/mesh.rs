@@ -7,7 +7,7 @@
 //! camera ([`crate::iso`]) projects them and the hardware depth buffer
 //! resolves occlusion, so no per-pixel work happens on the CPU anymore.
 
-use crate::board::{Board, Bridge};
+use crate::board::{Board, Bridge, Crossing};
 use crate::constants;
 use crate::game::Game;
 use crate::hexgrid::{self, Tile};
@@ -787,63 +787,87 @@ pub fn vehicle_ground_z(game: &Game, x: f64, y: f64) -> f64 {
     0.0
 }
 
-/// Tiles before and after `v` on its route.
-///
-/// `prev` is the tile the vehicle comes from: the last visited waypoint, or
-/// the source tile stored on the vehicle right after departure. `next` is the
-/// waypoint it heads to (`None` when the route is empty or finished). The pair
-/// tells a vehicle travelling *along* a bridge deck from one crossing
-/// *under* it (rules.md section 8).
-pub fn route_endpoints(v: &crate::entities::Vehicle) -> (Option<Tile>, Option<Tile>) {
-    let mut prev = v.src_tile;
-    let mut next = None;
-    if !v.route.is_empty() {
-        if v.route_index > 0 && v.route_index <= v.route.len() {
-            prev = Some(v.route[v.route_index - 1]);
-        }
-        if v.route_index < v.route.len() {
-            next = Some(v.route[v.route_index]);
-        }
+/// Tile a vehicle comes from: the last visited waypoint, or the source
+/// field stored on the vehicle right after departure (`None` when the
+/// vehicle has no route at all).
+fn route_prev(v: &crate::entities::Vehicle) -> Option<Tile> {
+    if v.route_index > 0 && v.route_index <= v.route.len() {
+        Some(v.route[v.route_index - 1])
+    } else {
+        v.src_tile
     }
-    (prev, next)
 }
 
-/// Deck elevation of the bridge the segment `tile`-`prev`-`next` runs along.
+/// Deck elevation of the bridge flying over `tile`, if any.
+pub fn deck_z_of(board: &Board, tile: Option<Tile>) -> Option<f64> {
+    let tile = tile?;
+    board
+        .tiles
+        .get(&tile)
+        .and_then(|t| t.bridge)
+        .map(|i| bridge_deck_z(&board.bridges[i]))
+}
+
+/// Crossing mode after one more hop of a route.
 ///
-/// Returns `None` when the route walks no deck pair at all, i.e. the vehicle
-/// is not on a bridge (it may be sailing under one). Same rule as the Python
-/// renderer: a waypoint counts as "on the deck" when one of its two route
-/// steps is a deck pair, which covers the very first leg from a source tile
-/// that is itself not a fragment.
-pub fn deck_z_at(
+/// A route never mixes the two ways across a bridge (rules.md section 8), so
+/// this replays the very rule the simulation drives by and the renderer ends
+/// up on the deck exactly when the vehicle is. A hop that starts without a
+/// known field, or that no vehicle of `kind` could make, counts as ground.
+fn next_crossing(
     board: &Board,
-    tile: Option<Tile>,
-    prev: Option<Tile>,
-    next: Option<Tile>,
-) -> Option<f64> {
-    if prev.is_none() && next.is_none() {
-        return None;
+    kind: constants::VehicleKind,
+    from: Option<Tile>,
+    to: Tile,
+    mode: Crossing,
+) -> Crossing {
+    from.and_then(|u| board.step(u, to, kind, mode))
+        .unwrap_or(Crossing::Ground)
+}
+
+/// Crossing mode at every field of a route, starting from `src`.
+///
+/// Index 0 is the mode at `src` (always [`Crossing::Ground`]: no building
+/// stands on a bridge fragment, so a route never starts on a deck), index
+/// `i + 1` the mode reached after the hop to `route[i]`.
+pub fn route_crossings(
+    board: &Board,
+    kind: constants::VehicleKind,
+    src: Option<Tile>,
+    route: &[Tile],
+) -> Vec<Crossing> {
+    let mut modes = Vec::with_capacity(route.len() + 1);
+    modes.push(Crossing::Ground);
+    let mut cur = src;
+    let mut mode = Crossing::Ground;
+    for t in route {
+        mode = next_crossing(board, kind, cur, *t, mode);
+        modes.push(mode);
+        cur = Some(*t);
     }
-    for br in board.bridges.iter() {
-        if let (Some(p), Some(n)) = (prev, next)
-            && br.connects(p, n)
-        {
-            return Some(bridge_deck_z(br));
-        }
-        if let Some(t) = tile {
-            if let Some(p) = prev
-                && br.connects(p, t)
-            {
-                return Some(bridge_deck_z(br));
-            }
-            if let Some(n) = next
-                && br.connects(t, n)
-            {
-                return Some(bridge_deck_z(br));
-            }
-        }
+    modes
+}
+
+/// Crossing mode a vehicle drives in at its current position.
+///
+/// The vehicle is between the field it came from and the waypoint it drives
+/// towards, and that hop already decided which of the two ways across a
+/// bridge it takes, so the unfinished hop counts too. Once the route is
+/// finished the mode of the last driven hop is kept, which the deck lookup
+/// then ignores on the field where the vehicle came off the bridge.
+pub fn vehicle_crossing(game: &Game, v: &crate::entities::Vehicle) -> Crossing {
+    let board = &game.board;
+    let done = v.route_index.min(v.route.len());
+    let mut cur = v.src_tile;
+    let mut mode = Crossing::Ground;
+    for t in v.route[..done].iter() {
+        mode = next_crossing(board, v.kind, cur, *t, mode);
+        cur = Some(*t);
     }
-    None
+    if done < v.route.len() {
+        mode = next_crossing(board, v.kind, cur, v.route[done], mode);
+    }
+    mode
 }
 
 /// Walkable-surface elevation under a ground vehicle, bridge deck included.
@@ -854,8 +878,9 @@ pub fn deck_z_at(
 /// deck, exactly as on the Python renderer.
 pub fn vehicle_surface_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     let tile = game.board.world_to_tile(v.x, v.y);
-    let (prev, next) = route_endpoints(v);
-    if let Some(z) = deck_z_at(&game.board, tile, prev, next) {
+    if vehicle_crossing(game, v) == Crossing::Deck
+        && let Some(z) = deck_z_of(&game.board, tile)
+    {
         return z;
     }
     vehicle_ground_z(game, v.x, v.y)
@@ -863,31 +888,15 @@ pub fn vehicle_surface_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
 
 /// Elevation of the route waypoint `seq[i]`, bridge deck included.
 ///
-/// A waypoint sitting on a bridge fragment rides the deck only when a route
-/// step walks along it (rules.md section 8); crossing *under* a bridge keeps
-/// the terrain elevation. `on_deck` covers the first waypoint of a sequence
-/// whose previous step left the known sequence: when the vehicle itself drives
-/// on the deck, its next waypoint on a fragment stays on the deck too.
-pub fn waypoint_z(board: &Board, seq: &[Tile], i: usize, on_deck: bool) -> f64 {
+/// `mode` is the crossing mode the vehicle reaches `seq[i]` in, as computed
+/// by [`route_crossings`]: on a deck the waypoint rides it, a vehicle
+/// crossing *under* a bridge keeps the terrain elevation.
+pub fn waypoint_z(board: &Board, seq: &[Tile], i: usize, mode: Crossing) -> f64 {
     let tile = seq[i];
-    if i > 0
-        && let Some(z) = deck_z_at(board, Some(tile), Some(seq[i - 1]), None)
+    if mode == Crossing::Deck
+        && let Some(z) = deck_z_of(board, Some(tile))
     {
         return z;
-    }
-    if i + 1 < seq.len()
-        && let Some(z) = deck_z_at(board, Some(tile), None, Some(seq[i + 1]))
-    {
-        return z;
-    }
-    if on_deck
-        && let Some(br) = board
-            .tiles
-            .get(&tile)
-            .and_then(|t| t.bridge)
-            .map(|i| &board.bridges[i])
-    {
-        return bridge_deck_z(br);
     }
     tile_top_z(board, tile)
 }
@@ -2292,20 +2301,14 @@ fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
         // The first leg starts at the vehicle itself (a helicopter above the
         // terrain), the following waypoints sit on the surface below them, so
         // an airborne route descends to the ground instead of floating. A
-        // route crossing a bridge rides its deck, not the field underneath.
+        // route crossing a bridge rides its deck, the fields of a route
+        // crossing under one keep the terrain below (rules.md section 8).
         let seq = &v.route[v.route_index.min(v.route.len())..];
-        let (prev_tile, next_tile) = route_endpoints(v);
-        let on_deck = deck_z_at(
-            &game.board,
-            game.board.world_to_tile(v.x, v.y),
-            prev_tile,
-            next_tile,
-        )
-        .is_some();
+        let modes = route_crossings(&game.board, v.kind, route_prev(v), seq);
         let mut prev = (v.x, v.y, vehicle_z(game, v));
         for i in 0..seq.len() {
             let (wx, wy) = game.board.center_world(seq[i]);
-            let wz = waypoint_z(&game.board, seq, i, on_deck);
+            let wz = waypoint_z(&game.board, seq, i, modes[i + 1]);
             lines.push((
                 line_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
                 line_vert(wx, wy, wz, [255, 255, 255], 255),
@@ -3398,7 +3401,7 @@ mod tests {
             VehicleKind::Tank,
             0,
             30.0,
-            vec![frags[1], b],
+            vec![mid, frags[1], b],
             (mx, my),
             Some(a),
         ));
@@ -3410,15 +3413,17 @@ mod tests {
         );
         // Crossing under the same bridge: the same field, but a route that
         // walks across it instead of along it, so the vehicle stays on the
-        // water and the deck hides it.
+        // water and the deck hides it. It entered the fragment from the
+        // field beside the bridge, so rules.md section 8 keeps it under the
+        // deck even though the next hop runs along the bridge.
         let side = hexgrid::neighbor(mid.0, mid.1, 3);
         game.vehicles.push(Vehicle::new(
             VehicleKind::Hovercraft,
             0,
             30.0,
-            vec![side],
+            vec![frags[1]],
             (mx, my),
-            Some(mid),
+            Some(side),
         ));
         let under_z = vehicle_surface_z(&game, &game.vehicles[1]);
         assert_eq!(under_z, 0.0, "crossing under the bridge used the deck");
@@ -3448,22 +3453,47 @@ mod tests {
 
     #[test]
     fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
+        use crate::constants::VehicleKind;
         let (board, a, b, frags) = bridge_board();
-        let route = vec![a, frags[0], frags[1], b];
-        for i in 0..route.len() {
+        let route = vec![frags[0], frags[1], b];
+        let modes = route_crossings(&board, VehicleKind::Tank, Some(a), &route);
+        for i in 0..route.len() - 1 {
             assert_eq!(
-                waypoint_z(&board, &route, i, false),
+                waypoint_z(&board, &route, i, modes[i + 1]),
                 bridge_deck_z(&board.bridges[0]),
                 "waypoint {i} left the deck"
             );
         }
-        // A route crossing under the bridge walks the fragment field without
-        // ever stepping along a deck pair, so the waypoint keeps the water
-        // elevation and the deck hides whatever drives there.
+        // The far end is land again, so the vehicle has already left the deck.
+        assert_eq!(modes[route.len()], Crossing::Deck);
+        assert_eq!(
+            waypoint_z(&board, &route, route.len() - 1, modes[route.len()]),
+            tile_top_z(&board, b)
+        );
+        // A route crossing under the bridge enters its fragment from the
+        // field beside it, so every waypoint keeps the water elevation and
+        // the deck hides whatever drives there -- even where the route runs
+        // along the bridge (rules.md section 8).
+        let (mut board, _a, _b, frags) = bridge_board();
         let west = hexgrid::neighbor(frags[0].0, frags[0].1, 3);
-        let east = hexgrid::neighbor(frags[0].0, frags[0].1, 5);
-        let under = vec![west, frags[0], east];
-        assert_eq!(waypoint_z(&board, &under, 1, false), 0.0);
+        let east = hexgrid::neighbor(frags[1].0, frags[1].1, 5);
+        for t in [west, east] {
+            board.tiles.get_mut(&t).unwrap().height = 0;
+        }
+        let under = vec![frags[0], frags[1], east];
+        let modes = route_crossings(&board, VehicleKind::Hovercraft, Some(west), &under);
+        assert_eq!(
+            modes[1],
+            Crossing::Ground,
+            "the route went under the bridge"
+        );
+        for i in 0..under.len() {
+            assert_eq!(
+                waypoint_z(&board, &under, i, modes[i + 1]),
+                0.0,
+                "waypoint {i} climbed"
+            );
+        }
     }
 
     #[test]

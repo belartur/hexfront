@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from hexfront import constants as C                     # noqa: E402
-from hexfront.board import Board, Obstacle              # noqa: E402
+from hexfront.board import (Board, Crossing, Obstacle,        # noqa: E402
+                            route_crossings)
 from hexfront.constants import VehicleKind              # noqa: E402
 from hexfront.entities import (Building, BuildingKind, Player,  # noqa: E402
                                   Vehicle)
@@ -95,6 +96,97 @@ def test_movement_rules():
     b3.tiles[(7, 10)].height = 0
     b3.tiles[(7, 11)].height = 2
     assert b3.add_bridge((7, 9), (7, 11), 1) is None
+
+
+def bridge_board(ground: int) -> Board:
+    """Board with one bridge along column 5: the two land ends stand at
+    height 4, the fields the deck flies over at ``ground``."""
+    b = Board(14, 14)
+    for t in b.tiles.values():
+        t.height = ground
+    for t in [(5, 5), (5, 8)]:
+        b.tiles[t].height = 4
+    assert b.add_bridge((5, 5), (5, 8), 1) is not None
+    return b
+
+
+def route_modes(board, kind, src, path):
+    """Crossing mode after every hop of ``path`` (index 0 = ``src``)."""
+    return route_crossings(board, kind, src, path)
+
+
+def assert_route_rules(board, kind, src, path) -> None:
+    """Every hop of the route is legal, and the deck is only ever entered
+    from one of the two land ends of the bridge (rules.md sec. 8)."""
+    seq = [src] + list(path)
+    modes = route_modes(board, kind, src, path)
+    for i in range(1, len(seq)):
+        frm, to = seq[i - 1], seq[i]
+        assert board.step(frm, to, kind, modes[i - 1]) is not None, \
+            f"{frm} -> {to} is not a legal step of the route {seq}"
+        if modes[i] == Crossing.DECK and modes[i - 1] == Crossing.GROUND:
+            br = board.bridge_between(frm, to)
+            assert br is not None and br.is_end(frm), \
+                f"{frm} -> {to} drives onto a deck from the side"
+
+
+def test_bridge_crossing_modes():
+    """A bridge is crossed on its deck or under it, never side ways
+    (rules.md sec. 8)."""
+    b = bridge_board(0)
+    (a, b_end), (f1, f2) = ((5, 5), (5, 8)), ((5, 6), (5, 7))
+    side = hexgrid.neighbor(f1[0], f1[1], 3)
+    # Along the bridge: the ends step onto the deck and keep driving it.
+    assert b.step(a, f1, VehicleKind.TANK, Crossing.GROUND) == Crossing.DECK
+    assert b.step(f1, f2, VehicleKind.TANK, Crossing.DECK) == Crossing.DECK
+    assert b.step(f2, b_end, VehicleKind.TANK, Crossing.DECK) == Crossing.DECK
+    # The deck leads nowhere else: leaving it is the way down, and only
+    # where the terrain below allows it (unlike a ramp, sec. 7).
+    assert b.step(f1, side, VehicleKind.TANK, Crossing.DECK) is None
+    land = bridge_board(1)
+    assert land.step(a, f1, VehicleKind.TANK, Crossing.GROUND) == Crossing.DECK
+    assert land.step(f1, side, VehicleKind.TANK, Crossing.DECK) == Crossing.GROUND
+    # ...and a vehicle that came down stays under the deck from there, even
+    # where the route runs along the bridge.
+    assert land.step(side, f1, VehicleKind.TANK, Crossing.GROUND) \
+        == Crossing.GROUND
+    assert land.step(f1, f2, VehicleKind.TANK, Crossing.GROUND) \
+        == Crossing.GROUND
+    # A field beside a bridge is driven *under* the deck, and a vehicle
+    # that went under stays there: a tank cannot use the water below.
+    assert b.step(side, f1, VehicleKind.TANK, Crossing.GROUND) is None
+    assert b.step(f1, f2, VehicleKind.TANK, Crossing.GROUND) is None
+    # A hovercraft may cross under the bridge and keeps to the ground; it
+    # also cannot climb out of the water under the deck onto the height-4
+    # end, so it never gets on a deck at all.
+    assert b.step(side, f1, VehicleKind.HOVERCRAFT, Crossing.GROUND) \
+        == Crossing.GROUND
+    assert b.step(f1, f2, VehicleKind.HOVERCRAFT, Crossing.GROUND) \
+        == Crossing.GROUND
+    assert b.step(f2, b_end, VehicleKind.HOVERCRAFT, Crossing.GROUND) is None
+    # Helicopters fly over everything and keep no mode (sec. 5.2).
+    assert b.step(side, f1, VehicleKind.HELICOPTER, Crossing.DECK) \
+        == Crossing.GROUND
+    # A route between the ends rides the whole bridge, never the side.
+    path = b.find_path(a, b_end, VehicleKind.TANK)
+    assert path == [f1, f2, b_end]
+    assert_route_rules(b, VehicleKind.TANK, a, path)
+    assert all(m == Crossing.DECK for m in route_modes(b, VehicleKind.TANK,
+                                                       a, path)[1:])
+    # A route across the bridge stays under it: the hovercraft enters the
+    # fragment from the field beside the bridge, so it never climbs up.
+    b2 = bridge_board(0)
+    shore = hexgrid.neighbor(f2[0], f2[1], 5)
+    b2.tiles[shore].height = 1
+    path = b2.find_path(side, shore, VehicleKind.HOVERCRAFT)
+    assert path is not None and path[-1] == shore, path
+    assert_route_rules(b2, VehicleKind.HOVERCRAFT, side, path)
+    assert all(m == Crossing.GROUND for m in route_modes(b2, VehicleKind.HOVERCRAFT,
+                                                         side, path)), path
+    # passable() still reports a single step someone can make.
+    assert b.passable(a, f1, VehicleKind.TANK)
+    assert b.passable(f1, f2, VehicleKind.TANK)
+    assert not b.passable(side, f1, VehicleKind.TANK)
 
 
 def test_production_and_capture():
@@ -353,11 +445,11 @@ def test_full_sims():
             assert v.units > 0, "dead vehicle still in the list"
 
 
-TESTS = [test_hex_math, test_movement_rules, test_production_and_capture,
-         test_repelled_attack, test_combat, test_joiner_no_retaliation,
-         test_turrets, test_heal_tower_and_buffer, test_wall_mine_traps,
-         test_ice_trap_stays, test_elimination_and_victory,
-         test_ai_sends_units, test_full_sims]
+TESTS = [test_hex_math, test_movement_rules, test_bridge_crossing_modes,
+         test_production_and_capture, test_repelled_attack, test_combat,
+         test_joiner_no_retaliation, test_turrets, test_heal_tower_and_buffer,
+         test_wall_mine_traps, test_ice_trap_stays,
+         test_elimination_and_victory, test_ai_sends_units, test_full_sims]
 
 if __name__ == "__main__":
     failures = 0

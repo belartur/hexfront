@@ -17,7 +17,7 @@ python/tests/        testy headless (dummy video driver)
 Moduły pakietu `python/hexfront/`:
 * `constants.py` — wszystkie stałe możliwe do zmiany, każda z komentarzem wskazującym regułę z [rules.md](rules.md): `UNIT_J_TO_PX` jako jedyne miejsce przelicznika j → px, stałe symulacji (`FPS` = 60 i `SIM_DT` = 1/`FPS` — prędkość klatki jest decyzją tej implementacji), stałe rzutu izometrycznego, `REPO_ROOT`, `MAPS_DIR`, `MAP_EXTENSION`;
 * `hexgrid.py` — geometria sześciokątów flat-top (odd-q) bez logiki gry: sąsiedzi, przeliczenia heks ↔ świat, odległości, rogi, numeracja krawędzi;
-* `board.py` — plansza: pola, utrudnienia (ściany, miny, pułapki), podjazdy, mosty, wyszukiwanie drogi, wskazywanie pola kursorem (tryb „płaski” z klawiszem Alt);
+* `board.py` — plansza: pola, utrudnienia (ściany, miny, pułapki), podjazdy, mosty, tryb przejazdu przez most, wyszukiwanie drogi, wskazywanie pola kursorem (tryb „płaski” z klawiszem Alt);
 * `entities.py` — dane gry: rodzaje budynków, gracze, budynki, pojazdy i ich pojemności;
 * `game.py` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od PyGame: produkcja baz, przeludnienie, działka, wieże, aura bufora, ruch, walka, miny, pułapki, ściany, przejęcia budynków, eliminacja i zwycięstwo;
 * `ai.py` — sterowanie przeciwnikami według sekcji 13 [rules.md](rules.md); deterministyczne dla danego seeda;
@@ -25,7 +25,7 @@ Moduły pakietu `python/hexfront/`:
 * `mapfile.py` — zapis i odczyt formatu z [specification_of_map_format.md](specification_of_map_format.md) oraz lista poziomów dla menu;
 * `camera.py` — rzut izometryczny i widok: przesuwanie, zoom, ograniczanie do planszy;
 * `depth.py` — programowy bufor głębokości: rasteryzacja powierzchni i linii, zbiorczy test głębokości, przezroczyste cienie;
-* `render.py` — rysowanie z kodu, bez assetów rastrowych, z cache nieruchomego terenu;
+* `render.py` — rysowanie z kodu, bez assetów rastrowych, z cache nieruchomego terenu; wysokość pojazdu i jego punktów trasy bierze tryb przejazdu z `board.vehicle_crossing()` / `board.route_crossings()`, więc pokład rysuje pojazdy jadące po moście, a przejeżdżające pod nim zostaje na gruncie;
 * `app.py` — okno, menu poziomów, obsługa wejścia i HUD.
 
 ## Uruchamianie i testy

@@ -125,6 +125,47 @@ impl Bridge {
         let key = if u <= v { (u, v) } else { (v, u) };
         self.pairs.contains(&key)
     }
+    /// True when `t` is one of the two land ends of the bridge.
+    ///
+    /// The deck can only be stepped on from an end, i.e. by driving *along*
+    /// the bridge (rules.md section 8); no other field touches the deck
+    /// drivably.
+    pub fn is_end(&self, t: Tile) -> bool {
+        self.a == t || self.b == t
+    }
+}
+
+/// How a ground vehicle crosses a field carrying a bridge fragment
+/// (rules.md section 8).
+///
+/// A bridge is crossed either *on* its deck (along the bridge) or *under*
+/// it (by the normal terrain rules) — never one way and then the other:
+/// the mode a vehicle enters a bridge with is kept until it leaves the
+/// bridge again, so a deck is never entered from the side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Crossing {
+    /// On the terrain; a field carrying a fragment is crossed under the deck.
+    Ground,
+    /// On the deck of a bridge, travelling along it.
+    Deck,
+}
+
+/// Rebuild the tile route of a breadth-first search from its parent links,
+/// leaving out the source field.
+fn walk_path(
+    prev: &HashMap<(Tile, Crossing), (Tile, Crossing)>,
+    start: (Tile, Crossing),
+    last: (Tile, Crossing),
+) -> Vec<Tile> {
+    let mut path = vec![last.0];
+    let mut cur = last;
+    while cur != start {
+        cur = prev[&cur];
+        path.push(cur.0);
+    }
+    path.reverse();
+    path.remove(0); // drop the source field
+    path
 }
 
 /// Rectangular (odd-q) board of hexagonal tiles.
@@ -388,8 +429,25 @@ impl Board {
         self.bridges.push(bridge);
         Some(idx)
     }
-    /// True when a vehicle of `kind` may drive directly u -> v.
-    pub fn passable(&self, u: Tile, v: Tile, kind: VehicleKind) -> bool {
+    /// The bridge whose deck connects `u` with `v`, if any.
+    ///
+    /// Only a step *along* the bridge counts, i.e. end-to-end hops of its
+    /// straight run; a hop across the bridge from a field beside it is not
+    /// a deck step (rules.md section 8).
+    pub fn bridge_between(&self, u: Tile, v: Tile) -> Option<&Bridge> {
+        let idx = self
+            .tiles
+            .get(&u)
+            .and_then(|t| t.bridge)
+            .or_else(|| self.tiles.get(&v).and_then(|t| t.bridge))?;
+        self.bridges.get(idx).filter(|br| br.connects(u, v))
+    }
+    /// Terrain-only movement rules (rules.md sections 4, 5 and 7).
+    ///
+    /// Bridge decks are ignored, so a field carrying a fragment is driven
+    /// on as the plain field below it — that is the *under the bridge*
+    /// crossing of rules.md section 8.
+    pub fn ground_step(&self, u: Tile, v: Tile, kind: VehicleKind) -> bool {
         if u == v {
             return false;
         }
@@ -419,15 +477,6 @@ impl Board {
             }
             return false; // off-axis move onto a ramp
         }
-        // Bridge decks (sec. 8): travelling along the bridge ignores
-        // terrain heights; crossing under follows the normal rules.
-        let br = tu.bridge.or(tv.bridge);
-        if let Some(bi) = br
-            && let Some(br) = self.bridges.get(bi)
-            && br.connects(u, v)
-        {
-            return true;
-        }
         let (hu, hv) = (tu.height, tv.height);
         if kind == VehicleKind::Hovercraft {
             if hu == hv {
@@ -438,6 +487,54 @@ impl Board {
         }
         // Tank / buffer (sec. 5.1, 5.4): equal-height land only.
         hu == hv && hu > 0
+    }
+    /// The step `u -> v` for a vehicle of `kind` crossing in `mode`, and
+    /// the mode it continues in.
+    ///
+    /// Returns `None` when the step is not allowed. A deck is only stepped
+    /// on from one of the two land ends, i.e. by driving *along* the
+    /// bridge, and a vehicle that drove under a bridge stays under it: no
+    /// step from the side ever puts anybody on a deck. Leaving the deck is
+    /// the way down to the field below, which rules.md section 8 leaves
+    /// open -- unlike a ramp, which may only be left at its ends (sec. 7).
+    /// A helicopter flies over everything and keeps no crossing mode
+    /// (sec. 5.2).
+    pub fn step(&self, u: Tile, v: Tile, kind: VehicleKind, mode: Crossing) -> Option<Crossing> {
+        if u == v {
+            return None;
+        }
+        if kind == VehicleKind::Helicopter {
+            return Some(Crossing::Ground);
+        }
+        let deck = self.bridge_between(u, v);
+        if mode == Crossing::Deck {
+            if deck.is_some() {
+                return Some(Crossing::Deck);
+            }
+            if self.ground_step(u, v, kind) {
+                return Some(Crossing::Ground);
+            }
+            return None;
+        }
+        if let Some(br) = deck
+            && br.is_end(u)
+        {
+            return Some(Crossing::Deck);
+        }
+        if self.ground_step(u, v, kind) {
+            return Some(Crossing::Ground);
+        }
+        None
+    }
+    #[allow(dead_code)]
+    /// True when a vehicle of `kind` may drive directly u -> v.
+    ///
+    /// A single step of the movement graph, ignoring which way the vehicle
+    /// entered the bridge: rules.md section 8 keeps that mode for the whole
+    /// crossing, which is what [`Board::step`] and the route search do.
+    pub fn passable(&self, u: Tile, v: Tile, kind: VehicleKind) -> bool {
+        self.step(u, v, kind, Crossing::Ground).is_some()
+            || self.step(u, v, kind, Crossing::Deck).is_some()
     }
     fn drivable(&self, tile: Tile, kind: VehicleKind) -> bool {
         let t = match self.tiles.get(&tile) {
@@ -458,54 +555,60 @@ impl Board {
     /// destination, or `None` when no road exists. Mines, traps and walls
     /// are deliberately ignored (section 6); ramps and bridges are
     /// respected because they change the road graph itself.
+    ///
+    /// The search runs over `(field, crossing mode)` states, because
+    /// rules.md section 8 keeps a vehicle either on a deck or under it for
+    /// a whole crossing: a field beside a bridge is reachable both on the
+    /// ground and on the deck, and only the route's own history decides
+    /// which of the two is drivable.
     pub fn find_path(&self, src: Tile, dst: Tile, kind: VehicleKind) -> Option<Vec<Tile>> {
         if src == dst || !self.contains(src) || !self.contains(dst) {
             return None;
         }
-        let mut prev: HashMap<Tile, Option<Tile>> = HashMap::new();
-        prev.insert(src, None);
-        let mut queue: VecDeque<Tile> = VecDeque::from([src]);
+        let start = (src, Crossing::Ground);
+        let mut prev: HashMap<(Tile, Crossing), (Tile, Crossing)> = HashMap::new();
+        let mut queue: VecDeque<(Tile, Crossing)> = VecDeque::from([start]);
         while let Some(cur) = queue.pop_front() {
-            for n in self.neighbors(cur) {
-                if prev.contains_key(&n) || !self.passable(cur, n, kind) {
+            for n in self.neighbors(cur.0) {
+                let Some(mode) = self.step(cur.0, n, kind, cur.1) else {
+                    continue;
+                };
+                let next = (n, mode);
+                if prev.contains_key(&next) {
                     continue;
                 }
-                prev.insert(n, Some(cur));
+                prev.insert(next, cur);
                 if n == dst {
-                    let mut path = vec![n];
-                    while let Some(Some(p)) = prev.get(path.last().copied().as_ref().unwrap_or(&n))
-                    {
-                        path.push(*p);
-                        if *p == src {
-                            break;
-                        }
-                    }
-                    path.reverse();
-                    // Drop the source tile.
-                    if !path.is_empty() && path[0] == src {
-                        path.remove(0);
-                    }
-                    return Some(path);
+                    return Some(walk_path(&prev, start, next));
                 }
-                queue.push_back(n);
+                queue.push_back(next);
             }
         }
         None
     }
     #[allow(dead_code)]
     /// Set of tiles reachable from `src` by vehicle `kind`.
+    ///
+    /// Like [`Board::find_path`], a bridge is crossed either on its deck or
+    /// under it, never both; the returned set is the union of the fields
+    /// reachable in either mode.
     pub fn reachable(&self, src: Tile, kind: VehicleKind) -> HashSet<Tile> {
-        let mut seen: HashSet<Tile> = HashSet::from([src]);
-        let mut queue: VecDeque<Tile> = VecDeque::from([src]);
+        let start = (src, Crossing::Ground);
+        let mut seen: HashSet<(Tile, Crossing)> = HashSet::from([start]);
+        let mut queue: VecDeque<(Tile, Crossing)> = VecDeque::from([start]);
+        let mut tiles: HashSet<Tile> = HashSet::from([src]);
         while let Some(cur) = queue.pop_front() {
-            for n in self.neighbors(cur) {
-                if !seen.contains(&n) && self.passable(cur, n, kind) {
-                    seen.insert(n);
-                    queue.push_back(n);
+            for n in self.neighbors(cur.0) {
+                let Some(mode) = self.step(cur.0, n, kind, cur.1) else {
+                    continue;
+                };
+                if seen.insert((n, mode)) {
+                    tiles.insert(n);
+                    queue.push_back((n, mode));
                 }
             }
         }
-        seen
+        tiles
     }
     /// World-space length of a tile path (for travel-time estimates).
     /// When `start` is given, the hop from `start` to `path[0]` is included.
@@ -537,6 +640,180 @@ mod tests {
             board.tiles.get_mut(&t).unwrap().height = 1;
         }
         board
+    }
+
+    /// Board with one bridge along column 5: the two land ends stand at
+    /// height 4, the fields the deck flies over at `ground`.
+    fn bridge_board(ground: i32) -> Board {
+        let mut board = Board::new(14, 14);
+        let tiles: Vec<Tile> = board.tiles.keys().copied().collect();
+        for t in tiles {
+            board.tiles.get_mut(&t).unwrap().height = ground;
+        }
+        for t in [(5, 5), (5, 8)] {
+            board.tiles.get_mut(&t).unwrap().height = 4;
+        }
+        assert!(board.add_bridge((5, 5), (5, 8), 1).is_some());
+        board
+    }
+
+    /// Crossing mode after every hop of `path` (index 0 = `src`).
+    fn route_modes(board: &Board, kind: VehicleKind, src: Tile, path: &[Tile]) -> Vec<Crossing> {
+        let mut modes = vec![Crossing::Ground];
+        let mut cur = src;
+        for t in path {
+            let mode = board
+                .step(cur, *t, kind, *modes.last().unwrap())
+                .unwrap_or(Crossing::Ground);
+            modes.push(mode);
+            cur = *t;
+        }
+        modes
+    }
+
+    /// Every hop of the route is legal, and the deck is only ever entered
+    /// from one of the two land ends of the bridge (rules.md section 8).
+    fn assert_route_rules(board: &Board, kind: VehicleKind, src: Tile, path: &[Tile]) {
+        let mut seq = vec![src];
+        seq.extend_from_slice(path);
+        let modes = route_modes(board, kind, src, path);
+        for i in 1..seq.len() {
+            let (from, to) = (seq[i - 1], seq[i]);
+            assert!(
+                board.step(from, to, kind, modes[i - 1]).is_some(),
+                "{from:?} -> {to:?} is not a legal step of the route {seq:?}"
+            );
+            if modes[i] == Crossing::Deck && modes[i - 1] == Crossing::Ground {
+                let br = board
+                    .bridge_between(from, to)
+                    .expect("a deck step runs along a bridge");
+                assert!(
+                    br.is_end(from),
+                    "{from:?} -> {to:?} drives onto a deck from the side"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_deck_is_only_entered_from_the_ends_of_the_bridge() {
+        let board = bridge_board(0);
+        let (a, b) = ((5, 5), (5, 8));
+        let (f1, f2) = ((5, 6), (5, 7));
+        // Along the bridge: the ends step onto the deck and keep driving it.
+        assert_eq!(
+            board.step(a, f1, VehicleKind::Tank, Crossing::Ground),
+            Some(Crossing::Deck)
+        );
+        assert_eq!(
+            board.step(f1, f2, VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Deck)
+        );
+        assert_eq!(
+            board.step(f2, b, VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Deck)
+        );
+        // The deck leads nowhere else: leaving it is the way down, and only
+        // where the terrain below allows it (unlike a ramp, sec. 7).
+        let side = hexgrid::neighbor(f1.0, f1.1, 3);
+        assert_eq!(
+            board.step(f1, side, VehicleKind::Tank, Crossing::Deck),
+            None
+        );
+        let land = bridge_board(1);
+        let side = hexgrid::neighbor(f1.0, f1.1, 3);
+        assert_eq!(
+            land.step(a, f1, VehicleKind::Tank, Crossing::Ground),
+            Some(Crossing::Deck)
+        );
+        assert_eq!(
+            land.step(f1, side, VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Ground)
+        );
+        // ...and a vehicle that came down stays under the deck from there,
+        // even where the route runs along the bridge.
+        assert_eq!(
+            land.step(side, f1, VehicleKind::Tank, Crossing::Ground),
+            Some(Crossing::Ground)
+        );
+        assert_eq!(
+            land.step(f1, f2, VehicleKind::Tank, Crossing::Ground),
+            Some(Crossing::Ground)
+        );
+        // A field beside a bridge is driven *under* the deck, and a vehicle
+        // that went under stays there: a tank cannot use the water below.
+        assert_eq!(
+            board.step(side, f1, VehicleKind::Tank, Crossing::Ground),
+            None
+        );
+        assert_eq!(
+            board.step(f1, f2, VehicleKind::Tank, Crossing::Ground),
+            None
+        );
+        // A hovercraft may cross under the bridge and keeps to the ground;
+        // it also cannot climb out of the water under the deck onto the
+        // height-4 end, so it never gets on a deck at all.
+        assert_eq!(
+            board.step(side, f1, VehicleKind::Hovercraft, Crossing::Ground),
+            Some(Crossing::Ground)
+        );
+        assert_eq!(
+            board.step(f1, f2, VehicleKind::Hovercraft, Crossing::Ground),
+            Some(Crossing::Ground)
+        );
+        assert_eq!(
+            board.step(f2, b, VehicleKind::Hovercraft, Crossing::Ground),
+            None
+        );
+        // Helicopters fly over everything and keep no mode (sec. 5.2).
+        assert_eq!(
+            board.step(side, f1, VehicleKind::Helicopter, Crossing::Deck),
+            Some(Crossing::Ground)
+        );
+    }
+
+    #[test]
+    fn a_route_between_the_ends_rides_the_whole_bridge() {
+        let board = bridge_board(0);
+        let (a, b) = ((5, 5), (5, 8));
+        let path = board
+            .find_path(a, b, VehicleKind::Tank)
+            .expect("deck route");
+        assert_eq!(path, vec![(5, 6), (5, 7), b]);
+        assert_route_rules(&board, VehicleKind::Tank, a, &path);
+        // The whole crossing is on the deck, entered at `a`.
+        let modes = route_modes(&board, VehicleKind::Tank, a, &path);
+        assert!(modes[1..].iter().all(|m| *m == Crossing::Deck));
+    }
+
+    #[test]
+    fn a_route_across_a_bridge_stays_under_it() {
+        let mut board = bridge_board(0);
+        // The only shore reachable for a hovercraft stands on the far side
+        // of the bridge, so its route runs across the fields below the deck.
+        let shore = hexgrid::neighbor(5, 7, 5);
+        board.tiles.get_mut(&shore).unwrap().height = 1;
+        let side = hexgrid::neighbor(5, 6, 3);
+        let path = board
+            .find_path(side, shore, VehicleKind::Hovercraft)
+            .expect("route under the bridge");
+        assert_route_rules(&board, VehicleKind::Hovercraft, side, &path);
+        let modes = route_modes(&board, VehicleKind::Hovercraft, side, &path);
+        assert!(
+            modes.iter().all(|m| *m == Crossing::Ground),
+            "a hovercraft that entered from the side must not climb the deck: {path:?}"
+        );
+    }
+
+    #[test]
+    fn passable_reports_a_single_possible_step() {
+        let board = bridge_board(0);
+        // Both hops of the deck and the hop along it are single steps
+        // someone can make; rules.md section 8 only constrains the sequence.
+        assert!(board.passable((5, 5), (5, 6), VehicleKind::Tank));
+        assert!(board.passable((5, 6), (5, 7), VehicleKind::Tank));
+        assert!(board.passable((5, 7), (5, 8), VehicleKind::Tank));
+        assert!(!board.passable((4, 6), (5, 6), VehicleKind::Tank));
     }
 
     #[test]

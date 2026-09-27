@@ -38,10 +38,6 @@ pub struct Projectile {
     pub to: (f64, f64),
     /// Tile under the target.
     pub to_tile: Option<Tile>,
-    /// Previous route tile (for drawing height).
-    pub to_prev: Option<Tile>,
-    /// Next route tile (for drawing height).
-    pub to_next: Option<Tile>,
     /// Damage frozen at launch.
     pub dmg: f64,
     /// Turret kind (rocket splash when Rocket).
@@ -286,21 +282,6 @@ impl Game {
                 Some(v) => v.pos(),
                 None => continue,
             };
-            let (to_prev, to_next) = match self.vehicles.iter().find(|v| v.id == s.target) {
-                Some(v) => (
-                    if !v.route.is_empty() && v.route_index > 0 && v.route_index <= v.route.len() {
-                        Some(v.route[v.route_index - 1])
-                    } else {
-                        v.src_tile
-                    },
-                    if v.route_index < v.route.len() {
-                        Some(v.route[v.route_index])
-                    } else {
-                        None
-                    },
-                ),
-                None => (None, None),
-            };
             self.projectiles.push(Projectile {
                 from: s.from,
                 from_pos: s.from_pos,
@@ -308,8 +289,6 @@ impl Game {
                 target: s.target,
                 to: target_pos,
                 to_tile: self.board.world_to_tile(target_pos.0, target_pos.1),
-                to_prev,
-                to_next,
                 dmg: s.dmg,
                 kind: s.kind,
                 t: 0.0,
@@ -728,17 +707,6 @@ impl Game {
             if let Some(t) = self.vehicles.iter().find(|v| v.id == p.target && !v.dead) {
                 p.to = t.pos();
                 p.to_tile = self.board.world_to_tile(t.x, t.y);
-                p.to_prev =
-                    if !t.route.is_empty() && t.route_index > 0 && t.route_index <= t.route.len() {
-                        Some(t.route[t.route_index - 1])
-                    } else {
-                        t.src_tile
-                    };
-                p.to_next = if t.route_index < t.route.len() {
-                    Some(t.route[t.route_index])
-                } else {
-                    None
-                };
             }
             if p.t >= p.dur {
                 impacts.push(p);

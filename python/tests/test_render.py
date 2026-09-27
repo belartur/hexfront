@@ -211,6 +211,7 @@ def test_vehicle_on_bridge_deck_not_on_ground():
         t.height = 3
     for t in [(5, 6), (5, 7)]:
         board.tiles[t].height = 0
+    board.tiles[(4, 6)].height = 0
     bridge = board.add_bridge((5, 5), (5, 8), 1)
     assert bridge is not None
     scene = SimpleNamespace(board=board)
@@ -224,17 +225,19 @@ def test_vehicle_on_bridge_deck_not_on_ground():
         v.route_index = index
         v.x, v.y = x, y
         tile = board.world_to_tile(x, y)
-        prev, nxt = renderer._route_endpoints(v)
-        assert renderer._ground_z(scene, tile, (x, y), prev, nxt) \
-            == deck_z, (pos_tile, tile, prev, nxt)
+        mode = renderer._crossing(scene, v)
+        assert renderer._ground_z(scene, tile, (x, y), mode) \
+            == deck_z, (pos_tile, tile, mode)
         assert renderer._vehicle_z(scene, v) == deck_z + 6.0
-    # A hovercraft sailing *under* the bridge stays at water level.
-    h = Vehicle(VehicleKind.HOVERCRAFT, 1, 10.0, [(4, 6)],
-                board.center_world((6, 6)), src_tile=(6, 6))
+    # A hovercraft sailing *under* the bridge stays at water level, even
+    # where its route runs along the bridge: it entered the fragment from
+    # the field beside it, so it keeps the ground under the deck.
+    h = Vehicle(VehicleKind.HOVERCRAFT, 1, 10.0, [(5, 7)],
+                board.center_world((4, 6)), src_tile=(4, 6))
     h.x, h.y = board.center_world((5, 6))
     tile = board.world_to_tile(h.x, h.y)
     assert renderer._ground_z(scene, tile, (h.x, h.y),
-                              *renderer._route_endpoints(h)) == 0.0
+                              renderer._crossing(scene, h)) == 0.0
     assert renderer._vehicle_z(scene, h) == 6.0
     pygame.quit()
 

@@ -9,7 +9,7 @@ import math
 
 from . import constants as C
 from .constants import VehicleKind
-from .board import Obstacle
+from .board import Obstacle, vehicle_crossing
 from .entities import (Building, BuildingKind, Player, Vehicle,
                        is_base, turret_kind_of, vehicle_kind_of)
 
@@ -145,18 +145,11 @@ class Game:
                 "target": target,
                 "dmg": math.ceil(b.units / stats["damage_div"]),
                 "owner": b.owner,
-                # Snapshot of the target's route context so the renderer
+                # Snapshot of the target's crossing mode so the renderer
                 # can draw the tracer at deck height when the target is
                 # on a bridge (and at terrain height when under it).
                 "to_tile": self.board.world_to_tile(*target.pos),
-                "to_prev": (target.route[target.route_index - 1]
-                            if target.route
-                            and 0 < target.route_index <= len(target.route)
-                            else getattr(target, "src_tile", None)),
-                "to_next": (target.route[target.route_index]
-                            if target.route
-                            and 0 <= target.route_index < len(target.route)
-                            else None),
+                "to_mode": vehicle_crossing(self.board, target),
             })
 
     def _turret_target(self, b: Building, rng: float):
@@ -411,14 +404,7 @@ class Game:
             if not target.dead:
                 p["to"] = target.pos
                 p["to_tile"] = self.board.world_to_tile(*target.pos)
-                p["to_prev"] = (target.route[target.route_index - 1]
-                                if target.route
-                                and 0 < target.route_index <= len(target.route)
-                                else getattr(target, "src_tile", None))
-                p["to_next"] = (target.route[target.route_index]
-                                if target.route
-                                and 0 <= target.route_index < len(target.route)
-                                else None)
+                p["to_mode"] = vehicle_crossing(self.board, target)
             if p["t"] >= p["dur"]:
                 self._resolve_projectile_impact(p)
             else:

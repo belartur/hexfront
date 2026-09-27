@@ -132,8 +132,7 @@ Pole p znajduje się na wysokości równej minimum z wysokości pól a oraz b.
 Most łączy ze sobą dwa niesąsiadujące ze sobą pola (nazwijmy je a i b) będące na tej samej wysokości (oznaczmy ją literą w).
 Most składa się z fragmentów mostu (obiektów z sekcji 1) położonych na kolejnych polach i leży na jednym albo więcej pól o wysokościach mniejszych od w-2 (w szczególności nie obejmuje samych pól a oraz b).
 Most zaczyna się na polu sąsiadującym z a, kończy na polu sąsiadującym z b i nigdy nie skręca (musi istnieć prosty korytarz heksów łączący a z b, biegnący w jednym z 6 kierunków siatki).
-Przejazd jest możliwy albo po moście (wzdłuż mostu), albo pod mostem (zgodnie z regułami opisanymi wcześniej).
-Helikopter lata dowolnie, nad mostem.
+Przejazd jest możliwy albo po moście (wzdłuż mostu), albo pod mostem (zgodnie z regułami opisanymi wcześniej). Wybór ten obowiązuje przez całe przejście: na pokład wjeżdża się wyłącznie wzdłuż mostu, czyli od jednego z jego końców (z pola a albo z pola b); z pola leżącego pod mostem na pokład nie wjeżdża się, a pojazd, który przejechał pod mostem, jedzie pod nim do końca. Helikopter lata dowolnie, nad mostem.
 
 ## 9. Walka pojazdów
 Odległość między dwoma pojazdami to odległość euklidesowa między ich aktualnymi pozycjami. Odległość pojazdu od nieruchomego obiektu (budynku, działka, wieży leczniczej) to odległość euklidesowa między aktualną pozycją pojazdu a środkiem pola, na którym ten obiekt stoi.

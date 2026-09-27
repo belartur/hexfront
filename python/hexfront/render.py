@@ -11,11 +11,13 @@ import pygame
 
 from . import constants as C
 from . import hexgrid
-from .board import Obstacle
+from .board import Crossing, Obstacle, route_crossings, route_prev, \
+    vehicle_crossing
 from .constants import TurretKind, VehicleKind
 from .camera import Camera
 from .depth import DepthBuffer, DepthCamera
-from .entities import (BuildingKind, is_base, is_turret, turret_kind_of)
+from .entities import (BuildingKind, is_base, is_turret, turret_kind_of,
+                       vehicle_kind_of)
 
 
 def _shade(color, factor: float) -> tuple:
@@ -234,48 +236,20 @@ class Renderer:
     # ------------------------------------------------------------------
     # Bridge-deck aware ground elevation
     # ------------------------------------------------------------------
-    def _route_endpoints(self, v) -> tuple:
-        """Tiles before/after the vehicle on its route: ``(prev, next)``.
-
-        ``prev`` is the tile the vehicle comes from: the last visited
-        waypoint, or the source tile stored on the vehicle right after
-        departure.  ``next`` is the waypoint the vehicle heads to
-        (``None`` when the route is empty/finished).  Used to tell whether
-        the vehicle travels *along* a bridge deck or passes *under* it.
-        """
-        prev = getattr(v, "src_tile", None)
-        nxt = None
-        if v.route:
-            if 0 < v.route_index <= len(v.route):
-                prev = v.route[v.route_index - 1]
-            if 0 <= v.route_index < len(v.route):
-                nxt = v.route[v.route_index]
-        return (prev, nxt)
-
-    def _deck_z(self, board, tile, prev, nxt):
-        """Deck elevation when the segment travels along a bridge.
-
-        Returns ``None`` when neither the ``prev`` -> ``nxt`` segment nor
-        the ``tile`` adjoining ``prev``/``nxt`` is a bridge-deck pair, i.e.
-        the vehicle is not on the deck (it may e.g. sail under the bridge).
-        """
-        if prev is None and nxt is None:
+    def _deck_z(self, board, tile):
+        """Deck elevation of the bridge flying over ``tile``, or ``None``."""
+        if tile is None:
             return None
-        for br in board.bridges:
-            pairs = br.pairs
-            if prev is not None and nxt is not None \
-                    and frozenset((prev, nxt)) in pairs:
-                return br.w * C.ELEVATION_PX
-            if tile is not None:
-                if prev is not None \
-                        and frozenset((prev, tile)) in pairs:
-                    return br.w * C.ELEVATION_PX
-                if nxt is not None \
-                        and frozenset((tile, nxt)) in pairs:
-                    return br.w * C.ELEVATION_PX
-        return None
+        t = board.tile(tile)
+        if t is None or t.bridge is None:
+            return None
+        return t.bridge.w * C.ELEVATION_PX
 
-    def _ground_z(self, game, tile, pos, prev=None, nxt=None) -> float:
+    def _crossing(self, game, v) -> Crossing:
+        """Which of the two ways across a bridge ``v`` drives."""
+        return vehicle_crossing(game.board, v)
+
+    def _ground_z(self, game, tile, pos, mode=Crossing.GROUND) -> float:
         """Walkable-surface elevation at ``pos`` (bridge decks included).
 
         A vehicle travelling along a bridge deck stands on the deck
@@ -284,9 +258,10 @@ class Renderer:
         it for their shadows.
         """
         board = game.board
-        deck = self._deck_z(board, tile, prev, nxt)
-        if deck is not None:
-            return deck
+        if mode == Crossing.DECK:
+            deck = self._deck_z(board, tile)
+            if deck is not None:
+                return deck
         if tile is None:
             return 0.0
         t = board.tile(tile)
@@ -309,16 +284,17 @@ class Renderer:
         board = game.board
         for v in game.vehicles:
             tile = board.world_to_tile(v.x, v.y)
-            prev, nxt = self._route_endpoints(v)
-            deck = self._deck_z(board, tile, prev, nxt)
+            mode = self._crossing(game, v)
             t = board.tile(tile) if tile is not None else None
+            on_deck = mode == Crossing.DECK
             if v.kind == VehicleKind.HELICOPTER and t is not None and t.bridge:
-                deck = t.bridge.w * C.ELEVATION_PX
+                on_deck = True
 
             def project(x: float, y: float) -> tuple:
                 """Project a shadow vertex onto its receiving surface."""
-                if deck is not None:
-                    z = deck + C.BRIDGE_DECK_LIFT
+                if on_deck:
+                    z = self._ground_z(game, tile, (x, y), Crossing.DECK) \
+                        + C.BRIDGE_DECK_LIFT
                 else:
                     z = self._ground_z(game, tile, (x, y))
                 return camera.world_to_screen(x, y, z)
@@ -545,8 +521,7 @@ class Renderer:
             if v.kind != VehicleKind.BUFFER:
                 continue
             tile = game.board.world_to_tile(v.x, v.y)
-            prev, nxt = self._route_endpoints(v)
-            z = self._ground_z(game, tile, (v.x, v.y), prev, nxt)
+            z = self._ground_z(game, tile, (v.x, v.y), self._crossing(game, v))
             circles.append((camera.screen_circle_poly(
                 v.x, v.y, C.BUFFER_HEAL_RADIUS, z),
                 C.RANGE_HEAL_COLOR, C.RANGE_HEAL_OUTLINE))
@@ -603,52 +578,50 @@ class Renderer:
     # ------------------------------------------------------------------
     # Dashed travel paths (vanish behind the vehicle - specification)
     # ------------------------------------------------------------------
-    def _waypoint_z(self, board, seq, i, on_deck=False) -> float:
+    def _waypoint_z(self, board, seq, i, mode=Crossing.GROUND) -> float:
         """Elevation of waypoint ``seq[i]`` along a tile route (deck aware).
 
-        A waypoint with a bridge fragment sits on the deck only when an
-        adjacent step of the route travels along the deck (rules.md
-        sec. 8); crossing *under* a bridge keeps the terrain elevation.
-        ``on_deck`` covers the first waypoint whose previous step left the
-        known sequence (e.g. the source tile of a vehicle route): when the
-        vehicle itself is on the deck, its next waypoint on a bridge
-        fragment stays on the deck.
+        ``mode`` is the crossing mode the vehicle reaches ``seq[i]`` in, as
+        computed by :func:`~hexfront.board.route_crossings`: on a deck the
+        waypoint rides it, a vehicle crossing *under* a bridge keeps the
+        terrain elevation (rules.md sec. 8).
         """
         tile = seq[i]
-        for pair in ([(seq[i - 1], tile)] if i > 0 else []) + \
-                ([(tile, seq[i + 1])] if i + 1 < len(seq) else []):
-            for br in board.bridges:
-                if frozenset(pair) in br.pairs:
-                    return br.w * C.ELEVATION_PX
+        if mode == Crossing.DECK:
+            deck = self._deck_z(board, tile)
+            if deck is not None:
+                return deck
         t = board.tile(tile)
-        if t is not None and t.bridge is not None and on_deck:
-            return t.bridge.w * C.ELEVATION_PX
         if t is not None and t.ramp is not None:
             return self._ramp_z(board, tile, board.center_world(tile))
         return board.height(tile) * C.ELEVATION_PX
 
     def _draw_paths(self, game, camera: Camera, selection) -> None:
+        board = game.board
         if selection is not None and selection.get("path"):
-            seq = [selection["src"]] + list(selection["path"])
-            pts = [camera.world_to_screen(*game.board.center_world(t),
-                                          self._waypoint_z(game.board, seq,
-                                                           i))
+            path = list(selection["path"])
+            src = game.building_at_tile(selection["src"])
+            modes = [Crossing.GROUND] * (len(path) + 1)
+            if src is not None:
+                modes = route_crossings(board, vehicle_kind_of(src.kind),
+                                        src.tile, path)
+            seq = [selection["src"]] + path
+            pts = [camera.world_to_screen(*board.center_world(t),
+                                          self._waypoint_z(board, seq,
+                                                           i, modes[i]))
                    for i, t in enumerate(seq)]
             self._dashed_polyline(pts, C.PATH_PREVIEW_COLOR)
         for v in game.vehicles:
             if not v.route or v.route_index >= len(v.route):
                 continue
-            tile = game.board.world_to_tile(v.x, v.y)
-            prev, nxt = self._route_endpoints(v)
-            on_deck = self._deck_z(game.board, tile, prev, nxt) is not None
             seq = v.route[v.route_index:]
+            modes = route_crossings(board, v.kind, route_prev(v), seq)
             pts = [camera.world_to_screen(v.x, v.y, self._vehicle_z(
                 game, v))]
             for i in range(len(seq)):
                 pts.append(camera.world_to_screen(
-                    *game.board.center_world(seq[i]),
-                    self._waypoint_z(game.board, seq, i,
-                                     on_deck=on_deck)))
+                    *board.center_world(seq[i]),
+                    self._waypoint_z(board, seq, i, modes[i + 1])))
             self._dashed_polyline(pts, C.PATH_COLOR)
 
     def _dashed_polyline(self, pts, color, dash=9.0, gap=6.0) -> None:
@@ -719,8 +692,8 @@ class Renderer:
     def _vehicle_z(self, game, v) -> float:
         """Render elevation of a vehicle (helicopters hover higher)."""
         tile = game.board.world_to_tile(v.x, v.y)
-        prev, nxt = self._route_endpoints(v)
-        ground = self._ground_z(game, tile, (v.x, v.y), prev, nxt)
+        ground = self._ground_z(game, tile, (v.x, v.y),
+                                self._crossing(game, v))
         return ground + (C.ELEVATION_PX * 2.2
                          if v.kind == VehicleKind.HELICOPTER else 6.0)
 
@@ -877,7 +850,7 @@ class Renderer:
             from_tile = game.board.world_to_tile(*p["from"])
             from_z = self._ground_z(game, from_tile, p["from"]) + 14.0
             to_z = self._ground_z(game, p["to_tile"], p["to"],
-                                  p.get("to_prev"), p.get("to_next")) + 14.0
+                                  p.get("to_mode", Crossing.GROUND)) + 14.0
             z = (1.0 - t) * from_z + t * to_z
             pos = camera.world_to_screen(x, y, z)
             radius = C.ROCKET_RADIUS if p.get("rocket") else C.PROJECTILE_RADIUS
