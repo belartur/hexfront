@@ -430,12 +430,38 @@ pub const PLAYER_COLORS: [[u8; 3]; 4] = [
 pub const NEUTRAL_COLOR: [u8; 3] = [165, 165, 165];
 /// Alpha of a white turret range fill on the GPU path (specification.md,
 /// graphics: ranges are mostly transparent).
-pub const RANGE_TURRET_FILL_ALPHA: u8 = 42;
+pub const RANGE_TURRET_FILL_ALPHA: u8 = 26;
 /// Alpha of a light-green heal range fill.
-pub const RANGE_HEAL_FILL_ALPHA: u8 = 46;
-/// Alpha of range outlines (same hue as the fill but clearly less
-/// transparent, so an outline stays readable over other fills).
+pub const RANGE_HEAL_FILL_ALPHA: u8 = 30;
+/// Alpha of range outlines (drawn in the owner colour, clearly less
+/// transparent than the fill, so an outline stays readable over other fills).
 pub const RANGE_OUTLINE_ALPHA: u8 = 130;
+/// Alpha written into the offscreen range masks. Range fills are composited
+/// from a mask, never blended on the scene itself, so the mask vertices are
+/// fully opaque: a second overlapping mask overwrites the first one instead of
+/// stacking its alpha, which keeps two overlapping ranges of one kind at the
+/// coverage of a single range (specification.md, graphics: overlapping ranges
+/// must not darken).
+pub const RANGE_MASK_ALPHA: u8 = 255;
+/// Outline colour of a range owned by no player (specification.md, graphics:
+/// range outlines are drawn in the player colour, white when neutral).
+pub const RANGE_OUTLINE_NEUTRAL: [u8; 3] = [255, 255, 255];
+/// Fill colour of a turret range once its mask is composited onto the scene.
+pub const RANGE_TURRET_FILL_COLOR: [u8; 3] = [255, 255, 255];
+/// Fill colour of a heal (tower or buffer) range once composited.
+pub const RANGE_HEAL_FILL_COLOR: [u8; 3] = [150, 245, 150];
+/// Colour written into the offscreen range masks. Each mask is multiplied by
+/// the presentation colour chosen at composition time
+/// ([`RANGE_TURRET_FILL_COLOR`] for turrets, [`RANGE_HEAL_FILL_COLOR`] for
+/// heals), so the mask itself carries no hue and stays white.
+pub const RANGE_MASK_COLOR: [u8; 3] = [255, 255, 255];
+/// Height of a range disc above the tile top in px (rendering only; the range
+/// itself is defined by rules.md sections 10-11). Keeps the disc slightly off
+/// the terrain plane so it never z-fights on flat ground.
+pub const RANGE_FILL_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
+/// Height of a range outline above the tile top in px (rendering only), just
+/// above [`RANGE_FILL_LIFT`] so the outline stays readable over the fill.
+pub const RANGE_OUTLINE_LIFT: f64 = 0.6 * UNIT_J_TO_PX;
 #[allow(dead_code)]
 /// Route line colour of moving vehicles.
 pub const PATH_COLOR: [u8; 3] = [255, 255, 255];

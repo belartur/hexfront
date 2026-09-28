@@ -889,6 +889,11 @@ pub struct DynamicMesh {
     pub range_turret: RangeSoup,
     /// Flat translucent light-green heal range discs (no depth write).
     pub range_heal: RangeSoup,
+    /// Range outlines (rings around turret and heal ranges), kept apart from
+    /// [`DynamicMesh::lines`] so they can be drawn after the composited range
+    /// fills, in the owner colour and without a depth test (see
+    /// [`push_ranges`]).
+    pub range_lines: Vec<(LineVertex, LineVertex)>,
     /// Explosion particles: camera-facing billboard quads, flat ground rings
     /// and shards, all with their own RGBA (no depth write, drawn after the
     /// opaque pass; see [`push_fx_blob`] and [`push_fx_ring`]).
@@ -913,6 +918,7 @@ impl DynamicMesh {
         self.range_turret.indices.clear();
         self.range_heal.vertices.clear();
         self.range_heal.indices.clear();
+        self.range_lines.clear();
         self.fx.vertices.clear();
         self.fx.indices.clear();
         self.translucent.vertices.clear();
@@ -1386,7 +1392,7 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
         game,
         &mut out.range_turret,
         &mut out.range_heal,
-        &mut out.lines,
+        &mut out.range_lines,
     );
     push_paths(game, &mut out.lines);
     push_projectiles(game, &mut out.opaque);
@@ -2380,39 +2386,57 @@ fn push_tank_oriented(
     );
 }
 
+/// Outline colour of one range: the owner colour, white when the building
+/// belongs to no player (specification.md, graphics: range outlines are drawn
+/// in the player colour, white when neutral).
+fn range_outline_color(b: &crate::entities::Building) -> [u8; 3] {
+    match b.owner {
+        Some(id) => constants::player_color(id),
+        None => constants::RANGE_OUTLINE_NEUTRAL,
+    }
+}
+
+/// Build the range discs and outlines of every turret, heal tower and buffer.
+///
+/// Fills are **masks**, not the final look: they go into the offscreen buffer
+/// of [`crate::render::Renderer`] with a fully opaque
+/// [`constants::RANGE_MASK_ALPHA`], so a disc covering the same pixels as
+/// another one simply overwrites it instead of stacking alpha. The renderer
+/// then composites each mask once with the presentation colour and alpha, which
+/// is what keeps two overlapping ranges at the coverage of a single range.
+/// Outlines are 3D strokes collected in `outlines` and drawn after the
+/// composited fills, in the owner colour, with the depth test switched off so
+/// a range stays readable even behind a cliff, a bridge deck or a building.
 fn push_ranges(
     game: &Game,
     turret: &mut RangeSoup,
     heal: &mut RangeSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    outlines: &mut Vec<(LineVertex, LineVertex)>,
 ) {
     use crate::entities::BuildingKind;
-    for (idx, b) in game.buildings.iter().enumerate() {
-        // Deterministic lift per disc: coplanar translucent fills share one
-        // depth value, so the GPU blend order flips while panning (flicker).
-        // A tiny index-based step keeps every disc distinct and stable.
-        let lift = idx as f64 * 0.05;
+    for b in game.buildings.iter() {
         if let Some(tk) = crate::entities::turret_kind_of(b.kind) {
             let (cx, cy) = b.pos(game.board.side);
             let z = tile_top_z(&game.board, b.tile);
+            let r = constants::turret_range(tk);
             push_range_disc(
                 turret,
                 cx,
                 cy,
-                z + 0.5 + lift,
-                constants::turret_range(tk),
+                z + constants::RANGE_FILL_LIFT,
+                r,
                 40,
-                [255, 255, 255],
-                constants::RANGE_TURRET_FILL_ALPHA,
+                constants::RANGE_MASK_COLOR,
+                constants::RANGE_MASK_ALPHA,
             );
             push_ring(
-                lines,
+                outlines,
                 cx,
                 cy,
-                z + 0.6 + lift,
-                constants::turret_range(tk),
+                z + constants::RANGE_OUTLINE_LIFT,
+                r,
                 48,
-                [255, 255, 255],
+                range_outline_color(b),
                 constants::RANGE_OUTLINE_ALPHA,
             );
         } else if b.kind == BuildingKind::HealTower && b.owner.is_some() {
@@ -2425,26 +2449,26 @@ fn push_ranges(
                     heal,
                     cx,
                     cy,
-                    z + 0.5 + lift,
+                    z + constants::RANGE_FILL_LIFT,
                     r,
                     40,
-                    [150, 245, 150],
-                    constants::RANGE_HEAL_FILL_ALPHA,
+                    constants::RANGE_MASK_COLOR,
+                    constants::RANGE_MASK_ALPHA,
                 );
                 push_ring(
-                    lines,
+                    outlines,
                     cx,
                     cy,
-                    z + 0.6 + lift,
+                    z + constants::RANGE_OUTLINE_LIFT,
                     r,
                     48,
-                    [150, 245, 150],
+                    range_outline_color(b),
                     constants::RANGE_OUTLINE_ALPHA,
                 );
             }
         }
     }
-    for (idx, v) in game.vehicles.iter().enumerate() {
+    for v in game.vehicles.iter() {
         if v.dead || v.kind != constants::VehicleKind::Buffer {
             continue;
         }
@@ -2453,11 +2477,11 @@ fn push_ranges(
             heal,
             v.x,
             v.y,
-            z - constants::ELEVATION_PX + 0.5 + idx as f64 * 0.05,
+            z - constants::ELEVATION_PX + constants::RANGE_FILL_LIFT,
             constants::BUFFER_HEAL_RADIUS,
             40,
-            [150, 245, 150],
-            constants::RANGE_HEAL_FILL_ALPHA,
+            constants::RANGE_MASK_COLOR,
+            constants::RANGE_MASK_ALPHA,
         );
     }
 }
@@ -3142,7 +3166,7 @@ mod tests {
     }
 
     #[test]
-    fn range_fills_keep_distinct_alpha_and_stable_lift() {
+    fn range_fills_are_opaque_masks_and_outlines_use_owner_colour() {
         use crate::entities::{Building, BuildingKind, Player};
         use crate::game::Game;
         let board = Board::new(30, 30);
@@ -3167,37 +3191,60 @@ mod tests {
             10.0,
         ));
         game.buildings
+            .push(Building::new(BuildingKind::TurretNormal, None, 9, 9, 10.0));
+        game.buildings
             .push(Building::new(BuildingKind::HealTower, Some(0), 8, 8, 10.0));
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut dynamic);
-        assert_eq!(dynamic.range_turret.vertices.len(), 2 * 40 * 3);
+        assert_eq!(dynamic.range_turret.vertices.len(), 3 * 40 * 3);
         assert!(!dynamic.range_heal.vertices.is_empty());
-        // Turret fills are subtler than before, heal fills keep their own
-        // light-green transparency.
+        // Fills are binary offscreen masks: fully opaque and colourless, so the
+        // composition pass alone decides tint and transparency. An overlapping
+        // mask overwrites the previous one instead of stacking alpha, which
+        // keeps two overlapping ranges at the coverage of a single range.
         for v in dynamic.range_turret.vertices.iter() {
-            assert_eq!(v.color[3], constants::RANGE_TURRET_FILL_ALPHA);
-            assert_eq!(&v.color[..3], &[255, 255, 255]);
+            assert_eq!(v.color[3], constants::RANGE_MASK_ALPHA);
+            assert_eq!(&v.color[..3], &constants::RANGE_MASK_COLOR);
         }
         for v in dynamic.range_heal.vertices.iter() {
-            assert_eq!(v.color[3], constants::RANGE_HEAL_FILL_ALPHA);
-            assert_eq!(&v.color[..3], &[150, 245, 150]);
+            assert_eq!(v.color[3], constants::RANGE_MASK_ALPHA);
+            assert_eq!(&v.color[..3], &constants::RANGE_MASK_COLOR);
         }
-        // The two turret discs sit at distinct deterministic lifts, so
-        // their blend no longer depends on float rounding while panning.
+        // Every disc sits just above the tile top with a constant lift: the
+        // masks carry no depth, so no per-disc lift is needed any more.
         let z0 = dynamic.range_turret.vertices[0].z;
         let z1 = dynamic.range_turret.vertices[40 * 3].z;
-        assert!((z1 - z0 - 0.05).abs() < 1e-6, "{z0} vs {z1}");
-        // Outlines share the fill hue but are clearly less transparent.
-        let mut turret_ring = false;
-        for (a, b) in dynamic.lines.iter() {
-            if a.color[3] == constants::RANGE_OUTLINE_ALPHA
-                && a.color[..3] == [255, 255, 255]
-                && b.color[3] == constants::RANGE_OUTLINE_ALPHA
-            {
-                turret_ring = true;
+        assert!((z1 - z0).abs() < 1e-6, "{z0} vs {z1}");
+        // Outlines are separate strokes drawn after the fills, in the owner
+        // colour and white for a neutral turret.
+        let owners = [
+            constants::player_color(0),
+            constants::player_color(1),
+            constants::RANGE_OUTLINE_NEUTRAL,
+        ];
+        let mut seen = [false; 3];
+        for (a, b) in dynamic.range_lines.iter() {
+            assert_eq!(a.color[3], constants::RANGE_OUTLINE_ALPHA);
+            assert_eq!(a.color, b.color);
+            for (slot, color) in seen.iter_mut().zip(owners.iter()) {
+                if a.color[..3] == *color {
+                    *slot = true;
+                }
             }
         }
-        assert!(turret_ring);
+        assert!(
+            seen.iter().all(|hit| *hit),
+            "missing owner colour: {seen:?}"
+        );
+        // Outlines never end up in the regular 3D stroke buffer, which is
+        // drawn before the range fills.
+        assert!(
+            dynamic
+                .lines
+                .iter()
+                .all(|(a, _)| a.color[3] != constants::RANGE_OUTLINE_ALPHA),
+            "range outline leaked into the main line pass"
+        );
     }
 
     #[test]

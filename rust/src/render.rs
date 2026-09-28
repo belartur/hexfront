@@ -26,6 +26,25 @@ pub struct Renderer {
     pub rotor_phase: f64,
     /// Converted static terrain buffers, uploaded once per level.
     terrain: Option<GpuTerrain>,
+    /// Offscreen masks holding the range fills, see [`draw_range_fills`].
+    range_masks: Option<RangeMasks>,
+}
+
+/// The two offscreen masks range fills are rendered into.
+///
+/// Turret ranges and heal ranges are masked separately and composited one
+/// after the other, so a pixel covered by two ranges of the **same** kind
+/// keeps the coverage of a single range, while a turret range overlapping a
+/// heal range shows both tints at once (specification.md, graphics).
+struct RangeMasks {
+    /// Mask of the turret range discs.
+    turret: macroquad::prelude::RenderTarget,
+    /// Mask of the heal (tower and buffer) range discs.
+    heal: macroquad::prelude::RenderTarget,
+    /// Window size the masks were allocated for, so a resize recreates them.
+    width: u32,
+    /// Window size the masks were allocated for, so a resize recreates them.
+    height: u32,
 }
 
 /// Static terrain already converted into macroquad meshes.
@@ -44,6 +63,7 @@ impl Renderer {
         Self {
             rotor_phase: 0.0,
             terrain: None,
+            range_masks: None,
         }
     }
     /// Convert a freshly built terrain mesh into GPU buffers.
@@ -114,12 +134,15 @@ impl Renderer {
     /// Render one frame of the running game.
     ///
     /// Pass order: opaque terrain chunks -> terrain grid lines -> opaque
-    /// dynamic objects -> translucent helicopter shadows -> translucent range
-    /// discs -> 3D strokes -> 2D overlays. Unit badges and floating texts are
-    /// drawn by [`crate::app`] on top, never occluded. Terrain chunks outside
-    /// the viewport are culled before they are submitted (their world boxes
-    /// are tested against the visible world box), which keeps huge boards
-    /// bounded by the view size.
+    /// dynamic objects -> translucent helicopter shadows -> explosion
+    /// particles -> 3D strokes (routes, details) -> range fills (offscreen
+    /// masks, composited) -> range outlines -> 2D overlays. The range passes
+    /// run last and with the depth test off, so a range is never clipped by
+    /// terrain, a bridge deck, a building or a vehicle. Unit badges and
+    /// floating texts are drawn by [`crate::app`] on top, never occluded.
+    /// Terrain chunks outside the viewport are culled before they are
+    /// submitted (their world boxes are tested against the visible world box),
+    /// which keeps huge boards bounded by the view size.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_gpu(
         &mut self,
@@ -141,10 +164,8 @@ impl Renderer {
         // arrays are passed through unchanged.
         let view = mq::glam::Mat4::from_cols_array_2d(&iso.view);
         let proj = mq::glam::Mat4::from_cols_array_2d(&iso.proj);
-        let cam3d = GpuIsoCamera {
-            matrix: proj * view,
-        };
-        mq::set_camera(&cam3d);
+        let matrix = proj * view;
+        mq::set_camera(&GpuIsoCamera::screen(matrix));
         if let Some(terrain) = self.terrain.as_ref() {
             for (mesh, bbox) in terrain.chunks.iter() {
                 if !bbox_hits(bbox, &view_bounds) {
@@ -172,9 +193,9 @@ impl Renderer {
         }
         draw_soup(&dynamic.opaque.vertices, &dynamic.opaque.indices);
         // Translucent helicopter shadows: flat dark discs just above the
-        // receiving surface, drawn right after the opaque pass and before the
-        // range fills (specification_rust.md pass order). The depth test keeps
-        // them from darkening hulls, buildings or nearer cliffs.
+        // receiving surface, drawn right after the opaque pass
+        // (specification_rust.md pass order). The depth test keeps them from
+        // darkening hulls, buildings or nearer cliffs.
         draw_range_soup(&dynamic.shadow.vertices, &dynamic.shadow.indices);
         // Explosion particles: camera-facing billboards, a flat ground wave and
         // shards, all translucent and drawn without a depth write, so nearer
@@ -182,32 +203,79 @@ impl Renderer {
         // and before the range fills, so a blast is never dimmed by a range
         // disc lying over the same tile (specification_rust.md pass order).
         draw_range_soup(&dynamic.fx.vertices, &dynamic.fx.indices);
-        // Translucent range discs: one draw call per fill kind (white
-        // turret vs. light-green heal), so overlapping fills of the same
-        // kind share one depth value per disc and blend in a stable order
-        // (specification_rust.md pass order); no depth write, depth test on.
-        draw_range_soup(
-            &dynamic.range_turret.vertices,
-            &dynamic.range_turret.indices,
-        );
-        draw_range_soup(&dynamic.range_heal.vertices, &dynamic.range_heal.indices);
-        // 3D strokes (range rings, routes, details).
-        {
-            let mut verts: Vec<macroquad::models::Vertex> =
-                Vec::with_capacity(dynamic.lines.len() * 2);
-            let mut idx: Vec<u16> = Vec::with_capacity(dynamic.lines.len() * 2);
-            for (a, b) in dynamic.lines.iter() {
-                let base = verts.len() as u16;
-                verts.push(mq_line_vertex(a));
-                verts.push(mq_line_vertex(b));
-                idx.push(base);
-                idx.push(base + 1);
-            }
-            chunked_lines(&verts, &idx);
-        }
+        // 3D strokes (routes, details). Range outlines live in a separate
+        // buffer, because they are drawn after the range fills instead.
+        draw_line_soup(&dynamic.lines);
+        // Range fills: masked offscreen and composited, then the outlines on
+        // top of them. Both ignore the depth buffer, so a range stays fully
+        // visible (specification.md, graphics).
+        self.draw_range_fills(matrix, dynamic);
+        mq::set_camera(&GpuIsoCamera::flat(matrix));
+        draw_line_soup(&dynamic.range_lines);
         // Selection outline + hovered route preview as 2D overlays.
         mq::set_default_camera();
         draw_selection_2d(camera, game, selection, hover_tile, preview);
+    }
+
+    /// Draw the range fills: offscreen masks, then one composite per kind.
+    ///
+    /// Each mask is a binary coverage map — the discs are written fully opaque
+    /// ([`constants::RANGE_MASK_ALPHA`]), so a disc covering pixels another
+    /// disc already covered overwrites them instead of stacking alpha. Drawing
+    /// them with the depth test off also means no terrain, bridge deck,
+    /// building or vehicle clips a range. The masks are composited once each
+    /// with their presentation colour and alpha, which is what makes two
+    /// overlapping ranges of one kind look like a single range while a turret
+    /// range overlapping a heal range shows both tints.
+    fn draw_range_fills(
+        &mut self,
+        matrix: macroquad::prelude::glam::Mat4,
+        dynamic: &crate::mesh::DynamicMesh,
+    ) {
+        use macroquad::prelude as mq;
+        if dynamic.range_turret.vertices.is_empty() && dynamic.range_heal.vertices.is_empty() {
+            return;
+        }
+        let width = mq::screen_width().max(1.0) as u32;
+        let height = mq::screen_height().max(1.0) as u32;
+        let stale = match self.range_masks.as_ref() {
+            Some(masks) => masks.width != width || masks.height != height,
+            None => true,
+        };
+        if stale {
+            // A window resize invalidates the masks: they are screen sized, so
+            // the old pair is dropped and allocated again at the new size.
+            self.range_masks = Some(RangeMasks {
+                turret: mq::render_target(width, height),
+                heal: mq::render_target(width, height),
+                width,
+                height,
+            });
+        }
+        let masks = self.range_masks.as_ref().expect("masks just created");
+        for (target, soup, color, alpha) in [
+            (
+                &masks.turret,
+                &dynamic.range_turret,
+                constants::RANGE_TURRET_FILL_COLOR,
+                constants::RANGE_TURRET_FILL_ALPHA,
+            ),
+            (
+                &masks.heal,
+                &dynamic.range_heal,
+                constants::RANGE_HEAL_FILL_COLOR,
+                constants::RANGE_HEAL_FILL_ALPHA,
+            ),
+        ] {
+            if soup.vertices.is_empty() {
+                continue;
+            }
+            mq::set_camera(&GpuIsoCamera::offscreen(matrix, target.render_pass.clone()));
+            mq::clear_background(mq::Color::new(0.0, 0.0, 0.0, 0.0));
+            draw_range_soup(&soup.vertices, &soup.indices);
+            mq::set_default_camera();
+            draw_mask_overlay(&target.texture, color, alpha);
+        }
     }
     /// True when the renderer holds buffers for `terrain` already.
     #[allow(dead_code)]
@@ -234,9 +302,50 @@ impl Renderer {
 }
 
 /// Custom 3D camera reproducing the isometric projection on the GPU.
+///
+/// The same matrix serves three passes, so depth testing and the render
+/// target are part of the camera: the scene is drawn with `depth` on, while
+/// the offscreen range masks and the range outlines are drawn with `depth` off
+/// so nothing occludes them.
 struct GpuIsoCamera {
     /// Combined projection * view matrix.
     matrix: macroquad::prelude::glam::Mat4,
+    /// Whether fragments are depth tested and depth writing.
+    depth: bool,
+    /// Offscreen pass to render into, `None` for the screen.
+    render_pass: Option<macroquad::prelude::RenderPass>,
+}
+
+impl GpuIsoCamera {
+    /// Screen pass with the hardware depth buffer (the opaque scene).
+    fn screen(matrix: macroquad::prelude::glam::Mat4) -> Self {
+        Self {
+            matrix,
+            depth: true,
+            render_pass: None,
+        }
+    }
+
+    /// Pass without the depth test, so every fragment survives.
+    fn flat(matrix: macroquad::prelude::glam::Mat4) -> Self {
+        Self {
+            matrix,
+            depth: false,
+            render_pass: None,
+        }
+    }
+
+    /// Offscreen pass without the depth test, used for the range masks.
+    fn offscreen(
+        matrix: macroquad::prelude::glam::Mat4,
+        render_pass: macroquad::prelude::RenderPass,
+    ) -> Self {
+        Self {
+            matrix,
+            depth: false,
+            render_pass: Some(render_pass),
+        }
+    }
 }
 
 impl macroquad::camera::Camera for GpuIsoCamera {
@@ -244,10 +353,10 @@ impl macroquad::camera::Camera for GpuIsoCamera {
         self.matrix
     }
     fn depth_enabled(&self) -> bool {
-        true
+        self.depth
     }
     fn render_pass(&self) -> Option<macroquad::prelude::RenderPass> {
-        None
+        self.render_pass.clone()
     }
     fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
         None
@@ -405,6 +514,47 @@ fn chunked_lines(vertices: &[macroquad::models::Vertex], indices: &[u16]) {
         vi = vend;
         ii = iend;
     }
+}
+
+/// Draw a list of 3D line segments (range outlines, routes, details).
+///
+/// Segments of one call always share one depth value, which keeps macroquad's
+/// draw batching from splitting the batch by depth (draw_line_3d state).
+fn draw_line_soup(lines: &[(crate::mesh::LineVertex, crate::mesh::LineVertex)]) {
+    let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(lines.len() * 2);
+    let mut idx: Vec<u16> = Vec::with_capacity(lines.len() * 2);
+    for (a, b) in lines.iter() {
+        let base = verts.len() as u16;
+        verts.push(mq_line_vertex(a));
+        verts.push(mq_line_vertex(b));
+        idx.push(base);
+        idx.push(base + 1);
+    }
+    chunked_lines(&verts, &idx);
+}
+
+/// Composite one range mask over the whole screen in `color` and `alpha`.
+///
+/// The mask is drawn 1:1 with the window it was rendered at, so the range
+/// disc keeps exactly the position and size it had in the scene. Mask pixels
+/// are white and opaque, so macroquad's `color * texture` shader gives the
+/// requested tint there and a fully transparent fragment everywhere else,
+/// which keeps the scene behind the mask untouched.
+fn draw_mask_overlay(texture: &macroquad::prelude::Texture2D, color: [u8; 3], alpha: u8) {
+    use macroquad::prelude as mq;
+    mq::draw_texture_ex(
+        texture,
+        0.0,
+        0.0,
+        mq::Color::from_rgba(color[0], color[1], color[2], alpha),
+        mq::DrawTextureParams {
+            dest_size: Some(mq::glam::vec2(mq::screen_width(), mq::screen_height())),
+            // A render target is stored bottom-up, so its rows have to be
+            // flipped to land the mask the right way up on the screen.
+            flip_y: true,
+            ..Default::default()
+        },
+    );
 }
 
 /// 2D selection outline and route preview (never occluded).
