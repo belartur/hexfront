@@ -5,7 +5,10 @@ edition = "2024"
 
 [dependencies]
 # Pinned graphics/window/input library (see specification_rust.md, section
-# "Language and libraries"). No other crates: the AI noise uses our own
-# deterministic generator in `rng.rs`.
-macroquad = "=0.4.16"
+# "Language and libraries"). The optional "audio" feature switches on
+# macroquad's own sound backend (`quad-snd`); it is the only extra dependency
+# and every sound is synthesised at runtime by `sound.rs` -- there are no
+# sample files in the repository. The AI noise uses our own deterministic
+# generator in `rng.rs`.
+macroquad = { version = "=0.4.16", features = ["audio"] }
 

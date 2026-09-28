@@ -5,6 +5,7 @@
 
 mod ai;
 mod app;
+mod audio;
 mod board;
 mod camera;
 mod constants;
@@ -20,6 +21,7 @@ mod render;
 #[cfg(test)]
 mod render_baseline;
 mod rng;
+mod sound;
 
 #[allow(unused_imports)]
 use macroquad::prelude::*;

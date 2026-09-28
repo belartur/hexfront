@@ -4,6 +4,7 @@
 
 use crate::constants::{self, VehicleKind};
 use crate::hexgrid::{self, Tile};
+use crate::sound::SoundKind;
 
 /// All building kinds (rules.md section 3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -118,6 +119,25 @@ pub struct Wreck {
     /// World x of the wreck in j.
     pub x: f64,
     /// World y of the wreck in j.
+    pub y: f64,
+}
+
+/// One sound the presentation layer should play, reported by the simulation.
+///
+/// rules.md is silent about sound: no rule says a shot or an explosion can be
+/// heard. The event is therefore a pure *record* of something that happened,
+/// in the same spirit as [`Wreck`]: the simulation knows that a turret fired
+/// or a vehicle hit a wall, and this module says nothing about how loud or
+/// how far away that should sound. Draining happens through
+/// [`crate::game::Game::take_sounds`], and deciding what it sounds like is the
+/// job of [`crate::audio`] and [`crate::sound`].
+#[derive(Clone, Copy, Debug)]
+pub struct SoundEvent {
+    /// Which sound to play (see [`crate::sound::SoundKind`]).
+    pub kind: SoundKind,
+    /// World x of the event in j, used for the distance from the camera.
+    pub x: f64,
+    /// World y of the event in j, used for the distance from the camera.
     pub y: f64,
 }
 

@@ -68,6 +68,9 @@ pub struct Application {
     /// Explosion particles of destroyed vehicles (presentation only, see
     /// [`crate::fx`]). Filled from the wrecks the simulation reports.
     fx: crate::fx::Fx,
+    /// Sound playback (presentation only, see [`crate::audio`]). Filled from
+    /// the sounds the simulation reports next to the explosion particles.
+    audio: crate::audio::Audio,
     /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`).
     capture: Option<String>,
     /// TEMPORARY debug hook frame countdown.
@@ -106,6 +109,7 @@ impl Application {
             editor_terrain_fp: 0,
             editor_tile: None,
             fx: crate::fx::Fx::new(),
+            audio: crate::audio::Audio::new(),
             playtest: false,
             capture: None,
             capture_frames: 0,
@@ -128,6 +132,9 @@ impl Application {
     }
     /// Main loop; exits when the window is closed.
     pub async fn run(mut self) {
+        // Synthesise and decode the sound effects once, before the first
+        // frame. A failure here only disables sound (see `Audio::load`).
+        self.audio.load().await;
         loop {
             let dt = get_frame_time().min(0.1);
             self.handle_input(dt);
@@ -334,6 +341,7 @@ impl Application {
         self.editor_game = None;
         self.playtest = false;
         self.fx.clear();
+        self.audio.stop_all();
     }
     fn set_selection(&mut self, src: Option<Tile>) {
         self.preview_tile = None;
@@ -509,6 +517,9 @@ impl Application {
         self.editor_clean = false;
     }
     fn update(&mut self, dt: f32) {
+        // Retrigger limiting runs on wall-clock time, not simulation time, so
+        // it keeps the same pace while the game is paused.
+        self.audio.update(dt);
         if self.state == State::Loading {
             self.load_timer += dt as f64;
             if self.load_timer >= constants::LOADING_TIME {
@@ -547,6 +558,7 @@ impl Application {
         // frame the wreck disappears. The effects themselves are advanced with
         // the wall-clock delta in `draw`, like the rotor phase.
         self.spawn_wreck_effects();
+        self.play_sounds();
         // Refresh route preview.
         if let Some(sel) = self.selection {
             let (mx, my) = mouse_position();
@@ -579,6 +591,31 @@ impl Application {
             let z = mesh::wreck_z(game, &wreck);
             self.fx.explode(&wreck, z);
         }
+    }
+    /// Play the sounds reported by the simulation since the last frame.
+    ///
+    /// Runs next to [`Application::spawn_wreck_effects`] and drains the same
+    /// kind of one-shot event list the explosion particles come from
+    /// ([`Game::take_sounds`](crate::game::Game::take_sounds)), so a shot is
+    /// heard on the same frame the simulation fired it. The events carry only
+    /// *where* they happened; [`crate::audio`] turns that into a volume using
+    /// the view centre, which is why the camera is read here.
+    fn play_sounds(&mut self) {
+        let Some(game) = self.game.as_mut() else {
+            return;
+        };
+        let events = game.take_sounds();
+        if events.is_empty() {
+            return;
+        }
+        // Invert the projection to get the world point the view is centred on
+        // (the same inverse the picking code uses, at zero elevation).
+        let (sx, sy) = (
+            self.camera.screen_size.0 / 2.0,
+            self.camera.screen_size.1 / 2.0,
+        );
+        let centre = self.camera.screen_to_world(sx, sy, 0.0);
+        self.audio.play_events(centre, &events);
     }
     fn draw(&mut self, dt: f32) {
         self.ensure_buffers();

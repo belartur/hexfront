@@ -66,7 +66,11 @@ Po wybraniu poziomu ładuje się on i gra się zaczyna.
 **Pauza:** klawisz P wstrzymuje i wznawia grę.
 
 ## Dźwięk
-Brak dźwięku (w przyszłości to się może zmienić).
+Gra odtwarza dźwięki zdarzeń bojowych: wybuch zniszczonego pojazdu, strzały działek i pojazdów oraz trafienia pocisków. Dźwięk jest wyłącznie elementem prezentacji — żadna zasada gry nie zależy od tego, co słychać, a symulacja nie bierze udziału w syntezie dźwięku ani w jego odtwarzaniu.
+
+Dźwięk zależy od odległości od miejsca zdarzenia (mierzonej w j, niezależnie od zoomu): blisko słychać pełną głośność, dalej dźwięk cichnie, a poza zasięgiem słyszalności nie jest w ogóle odtwarzany. W jednym kroku symulacji odtwarza się ograniczona liczba dźwięków, a najgłośniejsze są te z najbliższych zdarzeń, więc duża bitwa nie przerodzi się w szum. Ten sam dźwięk nie może zabrzmieć dwa razy w krótkim odstępie czasu (inaczej seria strzałów jednego działka zlewa się w jeden ciągły buczek).
+
+Sposób syntezy dźwięków, wybór biblioteki i ich pliki są decyzją każdej implementacji.
 
 ## Parametry
 

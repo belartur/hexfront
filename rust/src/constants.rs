@@ -280,6 +280,145 @@ pub const EXPLOSION_HELICOPTER_SCALE: f64 = 1.25;
 /// starts in the middle of the vehicle body instead of under its tracks.
 pub const EXPLOSION_CENTER_LIFT: f64 = 6.0;
 
+// ---------------------------------------------------------------------------
+// Audio (presentation only)
+//
+// rules.md says nothing about sound: no rule mentions hearing an explosion
+// or a shot, and none of the values below may ever influence the simulation.
+// They live here next to the explosion particle constants for the same reason
+// -- they tune presentation, not gameplay. Every sound is synthesised at
+// runtime by `sound.rs` (there are no audio files in the repository), so these
+// constants describe waveforms, not samples.
+// ---------------------------------------------------------------------------
+
+/// Sample rate of every synthesised sound in Hz. macroquad's audio backend
+/// mixes at 44100 Hz, so generating at that rate avoids a resampling pass.
+pub const AUDIO_SAMPLE_RATE: u32 = 44_100;
+/// Peak level of one synthesised sound, before the distance attenuation and
+/// the master volume are applied. Kept below full scale so that several
+/// sounds overlapping in the mixer do not clip hard.
+pub const AUDIO_PEAK: f64 = 0.85;
+/// Master volume of all game sound (0..1).
+pub const AUDIO_MASTER_VOLUME: f32 = 0.7;
+/// Distance in j at which a sound is already fully inaudible. Beyond this
+/// range nothing is played at all, so a big battle does not spend its voice
+/// budget on fights happening off screen.
+pub const AUDIO_MAX_DISTANCE_J: f64 = 900.0;
+/// Distance in j within which a sound keeps its full loudness. Past it the
+/// volume falls off linearly down to silence at `AUDIO_MAX_DISTANCE_J`.
+pub const AUDIO_FULL_DISTANCE_J: f64 = 260.0;
+/// Volume below which a sound is dropped instead of played. Very quiet events
+/// are inaudible anyway and each one still costs a mixer voice.
+pub const AUDIO_MIN_VOLUME: f32 = 0.01;
+/// Maximum number of sounds started from one simulation step. A big firefight
+/// can report dozens of events per tick; playing all of them turns into noise,
+/// and the closest ones are the ones the player can actually see.
+pub const AUDIO_MAX_VOICES_PER_STEP: usize = 6;
+/// Shortest gap in seconds between two starts of the *same* sound. Repeated
+/// shots of one rapid turret would otherwise stack into a single loud buzz.
+pub const AUDIO_RETRIGGER_INTERVAL: f64 = 0.045;
+/// Length of the fade-out at the end of every sound, in s. The decay
+/// envelopes below still leave a few percent of the amplitude on the last
+/// sample, and a waveform that stops at 4% of full scale ends on an audible
+/// click; fading the tail to silence removes it.
+pub const AUDIO_FADE_OUT_SECONDS: f64 = 0.02;
+
+// -- explosion (a destroyed vehicle, `Wreck` in `entities.rs`) ----------------
+/// Duration of a ground explosion in s.
+pub const AUDIO_EXPLOSION_GROUND_SECONDS: f64 = 1.1;
+/// Duration of an air explosion in s (a helicopter dies over the board, with
+/// no low ground thump).
+pub const AUDIO_EXPLOSION_AIR_SECONDS: f64 = 0.7;
+/// Start frequency of the noise burst of an explosion in Hz; the sweep falls
+/// to `AUDIO_EXPLOSION_NOISE_END_HZ` over the burst, which is what turns a
+/// hiss into a "whoomph".
+pub const AUDIO_EXPLOSION_NOISE_START_HZ: f64 = 2_600.0;
+/// End frequency of the noise sweep of an explosion in Hz.
+pub const AUDIO_EXPLOSION_NOISE_END_HZ: f64 = 180.0;
+/// Level of the noise layer of an explosion, relative to the tone layer.
+pub const AUDIO_EXPLOSION_NOISE_LEVEL: f64 = 0.9;
+/// Start frequency of the low tone of a ground explosion in Hz.
+pub const AUDIO_EXPLOSION_TONE_START_HZ: f64 = 130.0;
+/// End frequency of the low tone of a ground explosion in Hz.
+pub const AUDIO_EXPLOSION_TONE_END_HZ: f64 = 34.0;
+/// Decay constant of the noise layer of an explosion (1/s).
+pub const AUDIO_EXPLOSION_NOISE_DECAY: f64 = 5.0;
+/// Decay constant of the low tone of a ground explosion (1/s).
+pub const AUDIO_EXPLOSION_TONE_DECAY: f64 = 2.6;
+/// Level of the low tone of an explosion, relative to the noise layer.
+pub const AUDIO_EXPLOSION_TONE_LEVEL: f64 = 1.0;
+
+// -- shots ------------------------------------------------------------------
+/// Duration of a shot of a vehicle in combat (rules.md section 9) in s.
+pub const AUDIO_VEHICLE_FIRE_SECONDS: f64 = 0.26;
+/// Start frequency of the tone of a vehicle shot in Hz.
+pub const AUDIO_VEHICLE_FIRE_TONE_START_HZ: f64 = 220.0;
+/// End frequency of the tone of a vehicle shot in Hz.
+pub const AUDIO_VEHICLE_FIRE_TONE_END_HZ: f64 = 70.0;
+/// Decay constant of a vehicle shot (1/s).
+pub const AUDIO_VEHICLE_FIRE_DECAY: f64 = 16.0;
+/// Level of the noise layer of a vehicle shot, relative to the tone layer.
+pub const AUDIO_VEHICLE_FIRE_NOISE_LEVEL: f64 = 0.75;
+/// Start frequency of the noise layer of a vehicle shot in Hz.
+pub const AUDIO_VEHICLE_FIRE_NOISE_START_HZ: f64 = 3_200.0;
+/// End frequency of the noise layer of a vehicle shot in Hz.
+pub const AUDIO_VEHICLE_FIRE_NOISE_END_HZ: f64 = 400.0;
+/// Duration of a shot of a `Normal` turret (rules.md section 10.1) in s.
+pub const AUDIO_TURRET_NORMAL_SECONDS: f64 = 0.3;
+/// Start frequency of a `Normal` turret shot in Hz (a heavy gun).
+pub const AUDIO_TURRET_NORMAL_TONE_START_HZ: f64 = 260.0;
+/// End frequency of a `Normal` turret shot in Hz.
+pub const AUDIO_TURRET_NORMAL_TONE_END_HZ: f64 = 90.0;
+/// Duration of a shot of a `Rapid` turret (rules.md section 10.3) in s; short,
+/// because it fires every second.
+pub const AUDIO_TURRET_RAPID_SECONDS: f64 = 0.13;
+/// Start frequency of a `Rapid` turret shot in Hz (a light, snappy gun).
+pub const AUDIO_TURRET_RAPID_TONE_START_HZ: f64 = 620.0;
+/// End frequency of a `Rapid` turret shot in Hz.
+pub const AUDIO_TURRET_RAPID_TONE_END_HZ: f64 = 240.0;
+/// Duration of a shot of a `Rocket` turret (rules.md section 10.2) in s; long
+/// and hissy, it is a projectile leaving a launcher.
+pub const AUDIO_TURRET_ROCKET_SECONDS: f64 = 0.55;
+/// Start frequency of the noise layer of a rocket shot in Hz.
+pub const AUDIO_TURRET_ROCKET_NOISE_START_HZ: f64 = 900.0;
+/// End frequency of the noise layer of a rocket shot in Hz; the rising sweep
+/// is the classic "whoosh" of a rocket motor.
+pub const AUDIO_TURRET_ROCKET_NOISE_END_HZ: f64 = 3_400.0;
+/// Decay constant of a rocket shot (1/s).
+pub const AUDIO_TURRET_ROCKET_DECAY: f64 = 4.5;
+/// Level of the noise layer of a rocket shot, relative to the tone layer.
+pub const AUDIO_TURRET_ROCKET_NOISE_LEVEL: f64 = 1.0;
+/// Duration of the sound of a projectile hitting its target in s.
+pub const AUDIO_IMPACT_SECONDS: f64 = 0.18;
+/// Start frequency of the tone of an impact in Hz.
+pub const AUDIO_IMPACT_TONE_START_HZ: f64 = 900.0;
+/// End frequency of the tone of an impact in Hz.
+pub const AUDIO_IMPACT_TONE_END_HZ: f64 = 300.0;
+/// Decay constant of an impact (1/s).
+pub const AUDIO_IMPACT_DECAY: f64 = 26.0;
+/// Level of the noise layer of an impact, relative to the tone layer.
+pub const AUDIO_IMPACT_NOISE_LEVEL: f64 = 0.5;
+/// Duration of the sound of a vehicle shooting at a wall (rules.md section 4)
+/// in s; duller and shorter than a shot at a vehicle.
+pub const AUDIO_WALL_HIT_SECONDS: f64 = 0.16;
+/// Start frequency of the tone of a wall hit in Hz.
+pub const AUDIO_WALL_HIT_TONE_START_HZ: f64 = 150.0;
+/// End frequency of the tone of a wall hit in Hz.
+pub const AUDIO_WALL_HIT_TONE_END_HZ: f64 = 60.0;
+/// Decay constant of a wall hit (1/s).
+pub const AUDIO_WALL_HIT_DECAY: f64 = 24.0;
+/// Level of the noise layer of a wall hit, relative to the tone layer.
+pub const AUDIO_WALL_HIT_NOISE_LEVEL: f64 = 0.35;
+/// Level of an impact of a normal or rapid turret shot, relative to the sound
+/// of a full turret shot. A light tick under its own shot.
+pub const AUDIO_IMPACT_TURRET_LEVEL: f32 = 0.5;
+/// Level of the impact of a rocket, relative to the explosion of a vehicle: a
+/// rocket that hits kills on its own, so it reads as a small blast.
+pub const AUDIO_IMPACT_ROCKET_LEVEL: f32 = 0.75;
+/// Level of a vehicle shot compared to a turret shot; the player mostly hears
+/// their own turrets, so vehicles are a little quieter.
+pub const AUDIO_VEHICLE_FIRE_LEVEL: f32 = 0.7;
+
 // Obstacles (rules.md sections 1, 4)
 /// Damage dealt by a mine that explodes under a vehicle (section 4).
 pub const MINE_DAMAGE: f64 = 25.0;

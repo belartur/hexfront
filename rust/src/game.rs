@@ -9,9 +9,11 @@ use std::collections::{HashMap, HashSet};
 use crate::board::{Board, ObstacleKind};
 use crate::constants::{self, TurretKind, VehicleKind};
 use crate::entities::{
-    Building, BuildingKind, Player, Vehicle, Wreck, is_base, turret_kind_of, vehicle_kind_of,
+    Building, BuildingKind, Player, SoundEvent, Vehicle, Wreck, is_base, turret_kind_of,
+    vehicle_kind_of,
 };
 use crate::hexgrid::Tile;
+use crate::sound::SoundKind;
 
 /// Euclidean distance between two world points (rules.md section 9).
 fn hexgrid_pos(tile: Tile, side: f64) -> (f64, f64) {
@@ -68,6 +70,12 @@ pub struct Game {
     /// records *where* a vehicle died; the presentation layer turns each
     /// record into an effect (see [`crate::fx`]).
     pub wrecks: Vec<Wreck>,
+    /// Sounds the presentation layer should play (see
+    /// [`crate::entities::SoundEvent`]). Drained every frame by
+    /// [`Game::take_sounds`], the same way as [`Game::wrecks`]: the simulation
+    /// only records *that* something noisy happened and *where*, never how it
+    /// should sound.
+    pub sounds: Vec<SoundEvent>,
     /// Simulation time in seconds.
     pub time: f64,
     /// True once the match is decided.
@@ -105,6 +113,7 @@ impl Game {
             vehicles: Vec::new(),
             projectiles: Vec::new(),
             wrecks: Vec::new(),
+            sounds: Vec::new(),
             time: 0.0,
             over: false,
             winner: None,
@@ -274,6 +283,8 @@ impl Game {
                 (b.tile, b.owner, turret_kind_of(b.kind).unwrap())
             };
             let from_pos = hexgrid_pos(tile, side);
+            // A turret that fires is audible from the turret itself.
+            self.report_sound(SoundKind::TurretShot(kind), from_pos.0, from_pos.1);
             shots.push(Shot {
                 from: tile,
                 from_pos,
@@ -495,6 +506,8 @@ impl Game {
                     self.vehicles[idx].fire_timer -= constants::FIRE_INTERVAL;
                     let dmg = (self.vehicles[idx].units / 5.0).ceil();
                     self.vehicles[idx].last_opponent = Some(tid);
+                    let (vx, vy) = self.vehicles[idx].pos();
+                    self.report_sound(SoundKind::VehicleFire, vx, vy);
                     self.damage_vehicle_by_id(tid, dmg);
                 }
                 continue;
@@ -530,6 +543,10 @@ impl Game {
                     self.vehicles[idx].wall_timer += dt;
                     if self.vehicles[idx].wall_timer >= constants::WALL_ATTACK_INTERVAL {
                         self.vehicles[idx].wall_timer -= constants::WALL_ATTACK_INTERVAL;
+                        // Shooting a wall is a real shot of the vehicle, just
+                        // against something that does not answer back.
+                        let (vx, vy) = self.vehicles[idx].pos();
+                        self.report_sound(SoundKind::WallHit, vx, vy);
                         if let Some(tile_ref) = self.board.tiles.get_mut(&t)
                             && let Some(o) = tile_ref.obstacle.as_mut()
                         {
@@ -681,6 +698,13 @@ impl Game {
             }
         }
         if let Some(w) = wreck {
+            // A destroyed vehicle is the loudest event in the game; the kind
+            // decides between the ground blast and the air one (rules.md 5.2).
+            let kind = match w.kind {
+                VehicleKind::Helicopter => SoundKind::ExplosionAir,
+                _ => SoundKind::ExplosionGround,
+            };
+            self.report_sound(kind, w.x, w.y);
             self.wrecks.push(w);
         }
     }
@@ -691,6 +715,23 @@ impl Game {
     /// wreck is never replayed).
     pub fn take_wrecks(&mut self) -> Vec<Wreck> {
         std::mem::take(&mut self.wrecks)
+    }
+    /// Remove and return the sounds recorded so far.
+    ///
+    /// The presentation layer calls this once per frame after the simulation
+    /// step, exactly like [`Game::take_wrecks`]: an unconsumed sound is never
+    /// replayed a frame later. Whether it is audible at all (how far from the
+    /// camera it is, how loud) is decided by [`crate::audio`], not here.
+    pub fn take_sounds(&mut self) -> Vec<SoundEvent> {
+        std::mem::take(&mut self.sounds)
+    }
+    /// Record that a sound should be played at a world position.
+    ///
+    /// The single place where the simulation turns an action into a sound
+    /// event, so every noisy rule (turret fire, vehicle combat, wall attacks,
+    /// destroyed vehicles) reports through one channel.
+    fn report_sound(&mut self, kind: SoundKind, x: f64, y: f64) {
+        self.sounds.push(SoundEvent { kind, x, y });
     }
     /// Resolve a vehicle that reached the end of its route (section 4).
     fn arrive_vehicle(&mut self, idx: usize) {
@@ -752,6 +793,9 @@ impl Game {
         if !alive {
             return;
         }
+        // The impact is heard where the projectile landed, not where it was
+        // fired from.
+        self.report_sound(SoundKind::Impact(p.kind), p.to.0, p.to.1);
         self.damage_vehicle_by_id(p.target, p.dmg);
         if p.kind != TurretKind::Rocket {
             return;
@@ -1304,5 +1348,172 @@ mod tests {
                 assert!(v.units > 0.0, "dead vehicle still in the list");
             }
         }
+    }
+
+    #[test]
+    fn a_duel_reports_a_shot_and_an_explosion() {
+        // rules.md section 9: two vehicles fight to the death, so the
+        // simulation must report both sides firing and the death itself.
+        let mut game = make_game(flat_board(20, 20, 1));
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            10.0,
+            vec![],
+            (100.0, 100.0),
+            None,
+        ));
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            1,
+            10.0,
+            vec![],
+            (140.0, 100.0),
+            None,
+        ));
+        // Long enough for the duel to end with a death: damage is a few units
+        // per second, so the vehicles need a couple of shots at each other.
+        run(&mut game, 30.0);
+        let sounds = game.take_sounds();
+        assert!(
+            sounds.iter().any(|s| s.kind == SoundKind::VehicleFire),
+            "combat must be audible: {sounds:?}"
+        );
+        assert!(
+            sounds
+                .iter()
+                .any(|s| matches!(s.kind, SoundKind::ExplosionGround | SoundKind::ExplosionAir)),
+            "a destroyed vehicle must be audible: {sounds:?}"
+        );
+    }
+
+    #[test]
+    fn a_destroyed_vehicle_reports_its_explosion_at_the_wreck() {
+        // The sound and the particles must describe the same place, and the
+        // air blast belongs to a helicopter, the ground one to everything else.
+        for (kind, expect_air) in [
+            (VehicleKind::Tank, false),
+            (VehicleKind::Hovercraft, false),
+            (VehicleKind::Helicopter, true),
+            (VehicleKind::Buffer, false),
+        ] {
+            // A fresh match per kind: a destroyed vehicle is dropped from the
+            // list by the next step, so the two must not share one game.
+            let mut game = make_game(flat_board(20, 20, 1));
+            game.vehicles
+                .push(Vehicle::new(kind, 0, 5.0, vec![], (100.0, 100.0), None));
+            let id = game.vehicles[0].id;
+            game.damage_vehicle_by_id(id, 100.0);
+            // Read the events right away: they describe what just happened and
+            // are never rewritten afterwards.
+            let wrecks = game.take_wrecks();
+            let sounds = game.take_sounds();
+            assert_eq!(wrecks.len(), 1, "{kind:?} must leave exactly one wreck");
+            let blast = sounds
+                .iter()
+                .find(|s| matches!(s.kind, SoundKind::ExplosionGround | SoundKind::ExplosionAir))
+                .unwrap_or_else(|| panic!("{kind:?} died silently"));
+            assert_eq!(
+                expect_air,
+                blast.kind == SoundKind::ExplosionAir,
+                "{kind:?}"
+            );
+            assert!((blast.x - wrecks[0].x).abs() < 1e-9);
+            assert!((blast.y - wrecks[0].y).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_turret_reports_its_shot_and_the_impact_separately() {
+        // rules.md section 10: a turret fires, the projectile flies, and the
+        // impact is a second event somewhere else.
+        let board = flat_board(20, 20, 1);
+        let mut game = make_game(board);
+        game.buildings.push(Building::new(
+            BuildingKind::TurretNormal,
+            Some(0),
+            2,
+            2,
+            50.0,
+        ));
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            1,
+            40.0,
+            vec![],
+            (120.0, 120.0),
+            None,
+        ));
+        run(&mut game, 8.0);
+        let sounds = game.take_sounds();
+        assert!(
+            sounds
+                .iter()
+                .any(|s| s.kind == SoundKind::TurretShot(constants::TurretKind::Normal)),
+            "a turret must be audible: {sounds:?}"
+        );
+        assert!(
+            sounds
+                .iter()
+                .any(|s| s.kind == SoundKind::Impact(constants::TurretKind::Normal)),
+            "a hit must be audible: {sounds:?}"
+        );
+        // A shot and its impact never share a position: the projectile flies.
+        let shot = sounds
+            .iter()
+            .find(|s| matches!(s.kind, SoundKind::TurretShot(_)))
+            .unwrap();
+        let impact = sounds
+            .iter()
+            .find(|s| matches!(s.kind, SoundKind::Impact(_)))
+            .unwrap();
+        assert!(
+            (shot.x - impact.x).abs() > 1.0 || (shot.y - impact.y).abs() > 1.0,
+            "the impact must be heard where the projectile landed"
+        );
+    }
+
+    #[test]
+    fn taken_sounds_are_never_replayed() {
+        // Mirrors the wreck contract: an unconsumed event must not linger and
+        // fire again on a later frame.
+        let mut game = make_game(flat_board(20, 20, 1));
+        game.report_sound(SoundKind::VehicleFire, 0.0, 0.0);
+        assert_eq!(game.take_sounds().len(), 1);
+        assert!(
+            game.take_sounds().is_empty(),
+            "sounds must be consumed exactly once"
+        );
+    }
+
+    #[test]
+    fn sounds_do_not_change_the_simulation() {
+        // Sound is presentation: the very same seed must play out the very
+        // same match whether the events are drained every step or never.
+        let play = || {
+            let mut g = make_game(flat_board(20, 20, 1));
+            g.vehicles.push(Vehicle::new(
+                VehicleKind::Tank,
+                0,
+                10.0,
+                vec![],
+                (100.0, 100.0),
+                None,
+            ));
+            g.vehicles.push(Vehicle::new(
+                VehicleKind::Tank,
+                1,
+                10.0,
+                vec![],
+                (140.0, 100.0),
+                None,
+            ));
+            for _ in 0..(3.0 / constants::SIM_DT) as usize {
+                g.update(constants::SIM_DT);
+                g.take_sounds();
+            }
+            g.vehicles.iter().map(|v| v.units).collect::<Vec<_>>()
+        };
+        assert_eq!(play(), play());
     }
 }
