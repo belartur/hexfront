@@ -9,6 +9,7 @@ mod audio;
 mod board;
 mod camera;
 mod constants;
+mod decode;
 mod editor;
 mod entities;
 mod fx;

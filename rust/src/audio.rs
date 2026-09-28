@@ -1,10 +1,11 @@
 //! Sound playback: the only module that talks to the audio backend.
 //!
 //! The simulation reports *what* happened ([`crate::entities::SoundEvent`]),
-//! [`crate::sound`] decides *what* that sounds like, and this module is what
-//! actually makes a noise: it holds the decoded sounds, works out how loud
-//! each event should be given where the camera is looking, and hands it to
-//! macroquad's audio backend (enabled by the `audio` feature of the crate).
+//! [`crate::sound`] says which recording answers it, and this module is what
+//! actually makes a noise: it loads the Ogg Vorbis files from `sounds/` once,
+//! works out how loud each event should be given where the camera is looking,
+//! and hands it to macroquad's audio backend (enabled by the `audio` feature
+//! of the crate).
 //!
 //! Because a battle can report dozens of events in a single simulation step,
 //! this module is deliberately selective about what it plays:
@@ -27,46 +28,39 @@ use std::collections::HashMap;
 use macroquad::audio::{self, PlaySoundParams};
 
 use crate::constants;
+use crate::decode;
 use crate::entities::SoundEvent;
+use crate::rng::Rng;
 use crate::sound::{self, SoundKind};
 
-/// The sound played for one event, including how loud.
+/// The sound played for one event, including how loud and which recording.
 ///
-/// Split from [`SoundEvent`] because the loudness is *not* part of what the
-/// simulation reports: it depends on the camera, which lives in the
-/// presentation layer.
+/// Split from [`SoundEvent`] because neither the loudness nor the variant is
+/// part of what the simulation reports: they depend on the camera and on a
+/// level-seeded stream, both of which live in the presentation layer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Placed {
-    /// Which sound to play.
+    /// Which family of recordings to take from.
     kind: SoundKind,
+    /// Which recording of that family.
+    variant: usize,
     /// Final volume, already multiplied by the master volume.
     volume: f32,
 }
 
-/// Every sound kind that can be played, in a fixed order.
-///
-/// The synthesised buffers are loaded once at start-up and kept for the whole
-/// session, so a shot costs nothing but a mixer message afterwards. The order
-/// is only used to index [`Audio::sounds`], so it must not change without
-/// changing the loading code below it.
-const ALL_KINDS: [SoundKind; 8] = [
-    SoundKind::ExplosionGround,
-    SoundKind::ExplosionAir,
-    SoundKind::TurretShot(crate::constants::TurretKind::Normal),
-    SoundKind::TurretShot(crate::constants::TurretKind::Rapid),
-    SoundKind::TurretShot(crate::constants::TurretKind::Rocket),
-    SoundKind::VehicleFire,
-    SoundKind::WallHit,
-    SoundKind::Impact(crate::constants::TurretKind::Normal),
-];
-
 /// The audio subsystem: decoded sounds plus the bookkeeping of what is playing.
 pub struct Audio {
-    /// Decoded sound per index in [`ALL_KINDS`]. Empty until [`Audio::load`]
-    /// has run, which also means sound is muted.
+    /// Decoded recordings, flattened: for each kind of
+    /// [`sound::ALL_KINDS`], its variants in order. The index of a recording
+    /// is resolved by [`Audio::slot`]. Empty until [`Audio::load`] has run,
+    /// which also means sound is muted.
     sounds: Vec<Option<audio::Sound>>,
     /// Time of the last start of each kind, used for retrigger limiting.
     last_played: HashMap<SoundKind, f64>,
+    /// Stream that picks the recording variant, seeded with the level seed so
+    /// a match always replays the same sounds while two blasts within one
+    /// battle still differ.
+    variants: Rng,
     /// Current clock in seconds, advanced once per frame.
     time: f64,
     /// True once the sounds failed to load (no audio device, for instance).
@@ -77,40 +71,96 @@ impl Audio {
     /// Create a silent audio subsystem; call [`Audio::load`] to enable it.
     pub fn new() -> Self {
         Self {
-            sounds: vec![None; ALL_KINDS.len()],
+            sounds: Vec::new(),
             last_played: HashMap::new(),
+            variants: Rng::new(constants::AUDIO_VARIANT_SEED),
             time: 0.0,
             failed: false,
         }
     }
 
-    /// Synthesise and decode every sound, so the game has something to play.
+    /// Re-seed the variant stream, so a level always plays its sounds the same
+    /// way. Called when a match or an editor playtest starts, next to
+    /// `Fx::reseed()`.
+    pub fn reseed(&mut self, seed: u64) {
+        self.variants = Rng::new(seed ^ constants::AUDIO_VARIANT_SEED);
+        self.last_played.clear();
+    }
+
+    /// Load and decode every recording, so the game has something to play.
+    ///
+    /// The files come from `sounds/` (see `sounds/README.md` for provenance).
+    /// Each one is decoded and resampled here by [`crate::decode`], and the
+    /// backend receives WAV bytes in memory rather than the file: its own
+    /// resampler shortens a recording and adds aliasing (see `decode.rs`).
     ///
     /// Safe to call more than once; a failure only disables sound, it never
     /// stops the game. A machine with no working audio device (a bare CI
-    /// runner, a container without a sound card) must still be able to start
-    /// Hexfront, so a failed load is remembered instead of panicking.
+    /// runner, a container without a sound card) or a build without the `sounds/`
+    /// directory must still be able to start Hexfront, so a failure is
+    /// remembered instead of panicking.
     pub async fn load(&mut self) {
-        if self.failed || self.sounds.iter().any(|s| s.is_some()) {
+        if self.failed || !self.sounds.is_empty() {
             return;
         }
-        for (i, kind) in ALL_KINDS.iter().enumerate() {
-            let bytes = sound::synthesise(*kind);
-            match audio::load_sound_from_bytes(&bytes).await {
-                Ok(decoded) => self.sounds[i] = Some(decoded),
-                Err(err) => {
-                    eprintln!("hexfront: audio disabled, cannot decode {kind:?}: {err}");
-                    self.failed = true;
-                    self.sounds = vec![None; ALL_KINDS.len()];
-                    return;
+        for kind in sound::ALL_KINDS {
+            for path in sound::variant_paths(kind) {
+                let name = path.display().to_string();
+                let bytes = match std::fs::read(&path) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        eprintln!("hexfront: audio disabled, cannot read {name}: {err}");
+                        self.fail();
+                        return;
+                    }
+                };
+                let decoded = match decode::to_wav(&bytes, constants::AUDIO_MIX_RATE) {
+                    Ok(decoded) => decoded,
+                    Err(err) => {
+                        eprintln!("hexfront: audio disabled, cannot decode {name}: {err}");
+                        self.fail();
+                        return;
+                    }
+                };
+                match audio::load_sound_from_bytes(&decoded.wav).await {
+                    Ok(loaded) => {
+                        // The backend resamples anything that is not already at
+                        // the mix rate -- with artefacts, as `decode.rs`
+                        // explains. Reaching this branch with a different rate
+                        // means the resampler refused to convert the file, and
+                        // the recording would play wrong; say so instead of
+                        // leaving the player to wonder.
+                        if decoded.sample_rate != constants::AUDIO_MIX_RATE || decoded.channels > 2
+                        {
+                            eprintln!(
+                                "hexfront: {name} decoded to {} Hz / {} channels, \
+                                 not {} Hz stereo -- it will sound wrong",
+                                decoded.sample_rate,
+                                decoded.channels,
+                                constants::AUDIO_MIX_RATE
+                            );
+                        }
+                        self.sounds.push(Some(loaded));
+                    }
+                    Err(err) => {
+                        eprintln!("hexfront: audio disabled, cannot load {name}: {err}");
+                        self.fail();
+                        return;
+                    }
                 }
             }
         }
     }
 
+    /// Give up on sound and drop everything loaded so far.
+    fn fail(&mut self) {
+        self.failed = true;
+        self.sounds.clear();
+    }
+
     /// True while the game can actually make a sound.
     pub fn is_enabled(&self) -> bool {
-        !self.failed && self.sounds.iter().any(|s| s.is_some())
+        !self.failed && !self.sounds.is_empty()
     }
 
     /// Advance the clock used for retrigger limiting, once per frame.
@@ -134,31 +184,33 @@ impl Audio {
             return;
         }
         // Work out what each event would sound like, and how far away it is.
-        let mut candidates: Vec<(f64, Placed)> = Vec::with_capacity(events.len());
+        // The recording variant is drawn only for events that will really
+        // play, so that skipped (too far away) events do not shift the
+        // sequence of the ones that do.
+        let mut candidates: Vec<(f64, SoundKind, f32)> = Vec::with_capacity(events.len());
         for event in events {
             let Some((volume, distance)) = volume_at(centre, (event.x, event.y), event.kind) else {
                 continue;
             };
-            candidates.push((
-                distance,
-                Placed {
-                    kind: event.kind,
-                    volume,
-                },
-            ));
+            candidates.push((distance, event.kind, volume));
         }
         // Closest first, so the voices we do spend are the visible ones.
         candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut started = 0;
-        for (_, placed) in candidates {
+        for (_, kind, volume) in candidates {
             if started >= constants::AUDIO_MAX_VOICES_PER_STEP {
                 break;
             }
-            if !self.may_play(placed.kind) {
+            if !self.may_play(kind) {
                 continue;
             }
-            self.play(placed);
+            let variant = sound::pick_variant(kind, &mut self.variants);
+            self.play(Placed {
+                kind,
+                variant,
+                volume,
+            });
             started += 1;
         }
     }
@@ -171,12 +223,36 @@ impl Audio {
         }
     }
 
-    /// Hand one sound to the mixer, remembering when it started.
+    /// Index of a recording in the flattened [`Audio::sounds`] table.
+    ///
+    /// Returns `None` for a kind whose family is not in
+    /// [`sound::ALL_KINDS`], which would mean the loading pass and this lookup
+    /// disagree about what exists.
+    fn slot(&self, kind: SoundKind, variant: usize) -> Option<usize> {
+        let family = sound::ALL_KINDS
+            .iter()
+            .position(|k| *k == kind)
+            .or_else(|| {
+                // A kind that shares files with a listed one (a rocket impact
+                // shares with a plain impact) resolves through that entry.
+                sound::ALL_KINDS
+                    .iter()
+                    .position(|k| sound::file_name(*k, 0) == sound::file_name(kind, 0))
+            })?;
+        // Offsets: how many recordings the earlier families hold.
+        let offset: usize = sound::ALL_KINDS[..family]
+            .iter()
+            .map(|k| sound::variant_count(*k))
+            .sum();
+        Some(offset + variant)
+    }
+
+    /// Hand one recording to the mixer, remembering when it started.
     fn play(&mut self, placed: Placed) {
-        let Some(index) = ALL_KINDS.iter().position(|k| *k == placed.kind) else {
+        let Some(index) = self.slot(placed.kind, placed.variant) else {
             return;
         };
-        let Some(sound) = self.sounds[index].as_ref() else {
+        let Some(sound) = self.sounds.get(index).and_then(|s| s.as_ref()) else {
             return;
         };
         audio::play_sound(
@@ -235,6 +311,7 @@ fn base_level(kind: SoundKind) -> f32 {
 mod tests {
     use super::*;
     use crate::constants::TurretKind;
+    use crate::sound::ALL_KINDS;
 
     #[test]
     fn nearby_sounds_are_heard_and_distant_ones_are_not() {
@@ -294,18 +371,39 @@ mod tests {
     }
 
     #[test]
-    fn every_kind_has_a_buffer() {
-        // A kind the mixer cannot look up would play silence forever.
+    fn every_kind_resolves_to_its_own_slot() {
+        // A kind the mixer cannot look up would play silence forever, and two
+        // kinds sharing a slot would play each other's recordings.
+        let audio = Audio::new();
+        let mut seen = std::collections::HashSet::new();
         for kind in ALL_KINDS {
-            assert!(
-                ALL_KINDS.contains(&kind),
-                "{kind:?} is missing from the table"
+            for variant in 0..sound::variant_count(kind) {
+                let slot = audio
+                    .slot(kind, variant)
+                    .unwrap_or_else(|| panic!("{kind:?} variant {variant} has no slot"));
+                assert!(seen.insert(slot), "{kind:?} collides on slot {slot}");
+            }
+        }
+        // The slots must be exactly the recordings the loading pass reads,
+        // one per file, with no gaps and nothing past the end.
+        let expected: usize = ALL_KINDS.iter().map(|k| sound::variant_count(*k)).sum();
+        assert_eq!(seen.len(), expected);
+        assert_eq!(seen.iter().copied().max(), Some(expected - 1));
+    }
+
+    #[test]
+    fn a_kind_sharing_recordings_resolves_them_too() {
+        // A rocket impact shares its files with a plain impact; it must still
+        // find them, otherwise rockets would hit silently.
+        let audio = Audio::new();
+        let plain = sound::variant_count(SoundKind::Impact(TurretKind::Normal));
+        for variant in 0..plain {
+            assert_eq!(
+                audio.slot(SoundKind::Impact(TurretKind::Rocket), variant),
+                audio.slot(SoundKind::Impact(TurretKind::Normal), variant),
+                "a rocket impact must land on the shared recordings"
             );
         }
-        let mut unique = ALL_KINDS.to_vec();
-        unique.sort_by_key(|k| format!("{k:?}"));
-        unique.dedup();
-        assert_eq!(unique.len(), ALL_KINDS.len(), "duplicate kind in the table");
     }
 
     #[test]

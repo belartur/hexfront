@@ -16,12 +16,16 @@ Zasada: nie przepisuj liczb ani reguł z `rules.md` / `specification*.md` do kod
 
 Język: dokumenty (`rules.md`, `specification*.md`, ten plik) są po polsku. Kod, komentarze i dokumentacja API (docstringi / doc-commenty) są po angielsku — nowe funkcje/metody/klasy/pola też pisz po angielsku z dokumentacją. Commity gita opisuj po angielsku.
 
+Pliki `README.md` są po angielsku — niezależnie od tego, w którym katalogu leżą (na przykład `README.md` w katalogu głównym albo `sounds/README.md`). Dotyczy to treści tych plików; pozostałe dokumenty (`rules.md`, `specification*.md`, ten plik) pozostają po polsku zgodnie z zdaniem powyżej.
+
+
 ## 2. Układ repozytorium
 
 Dokumenty źródłowe (`rules.md`, `specification.md`, `specification_rust.md`, `specification_of_map_format.md`) oraz katalog `maps/` z planszami leżą w katalogu głównym repozytorium. Kod implementacji języka ma osobny katalog — obecnie `rust/`:
 
 ```text
 maps/*.map                   pliki binarne plansz (nazwa pliku = nazwa poziomu w menu)
+sounds/*.ogg               nagrania dźwięków zdarzeń bojowych w formacie Ogg Vorbis; sounds/README.md podaje pochodzenie, licencję i sposób przygotowania plików
 rust/Cargo.toml              manifest crate'a hexfront (Cargo.lock wersjonowany; target/ ignorowany)
 rust/src/main.rs             punkt wejścia gry (cd rust && cargo run --release)
 rust/src/                    moduły gry (logika + UI, szczegóły w sekcji „Katalog rust/src/" poniżej)
@@ -32,7 +36,7 @@ Katalog `maps` jest listowany dynamicznie — nazwa pliku jest wyświetlaną naz
 ## 3. Moduły implementacji (krótki opis — szczegóły w dokumentacji modułów)
 
 ### Katalog `rust/src/` (implementacja w Rust)
-- `rust/Cargo.toml` — manifest binarnego crate'a `hexfront` (tylko `macroquad =0.4.16` z opcjonalną funkcją `audio` dla dźwięku; `Cargo.lock` wersjonowany, `target/` w `.gitignore`).
+- `rust/Cargo.toml` — manifest binarnego crate'a `hexfront` (`macroquad =0.4.16` z opcjonalną funkcją `audio` oraz `lewton` i `resampler` do dekodowania dźwięku; `Cargo.lock` wersjonowany, `target/` w `.gitignore`).
 - `rust/src/main.rs` — tylko konfiguracja okna i `Application::run()`. Nic tu nie dopisuj.
 - `rust/src/constants.rs` — moduł stałych: `UNIT_J_TO_PX` dokładnie raz, `FPS`/`SIM_DT`, współczynniki rzutu, `maps_dir()`/`MAP_EXTENSION`, presety `AiDifficulty` / `AI_DIFFICULTIES`, stałe edytora `EDITOR_*`; każda stała z komentarzem wskazującym sekcję `rules.md`.
 - `rust/src/hexgrid.rs` — czysta geometria flat-top hex (odd-q) bez logiki gry.
@@ -40,8 +44,9 @@ Katalog `maps` jest listowany dynamicznie — nazwa pliku jest wyświetlaną naz
 - `rust/src/entities.rs` — dane: `BuildingKind`, `Player`, `Building`, `Vehicle`, `Wreck` (pozycja pojazdu zniszczonego w walce); helpery `is_base()`, `is_turret()`, `vehicle_kind_of()`, `turret_kind_of()`, `capacity_of()`. Logika w `game.rs`.
 - `rust/src/game.rs` — symulacja czasu rzeczywistego o stałym kroku `SIM_DT`, bez zależności od macroquad; flaga `sandbox` wyłącza warunki zakończenia meczu dla gry testowej edytora; `Game::wrecks` + `take_wrecks()` raportują zniszczenia do warstwy efektów (`fx.rs`).
 - `rust/src/fx.rs` — system cząstek wybuchu zniszczonych pojazdów (bez macroquad, więc testy headless): `EmitterConfig`, `ColorCurve`, `Fx::explode()`/`update()`/`build()`; geometrię cząstek buduje `mesh.rs`.
-- `rust/src/sound.rs` — synteza dźwięków zdarzeń bojowych w kodzie (bez macroquad i bez plików z próbkami, więc testy headless): `SoundKind`, warstwy tonu i szumu z obwiednią zaniku, `synthesise()` zwracający WAV w pamięci; parametry brzmienia w `constants.rs`.
-- `rust/src/audio.rs` — odtwarzanie dźwięków z `sound.rs` przez backend macroquad (opcjonalna funkcja `audio`): `Audio::load()`/`play_events()`; tłumienie odległości od środka widoku, limit głosów na krok, ograniczenie powtórzeń tego samego dźwięku.
+- `rust/src/sound.rs` — katalog dźwięków (bez macroquad, więc testy headless): `SoundKind` i mapowanie zdarzenia na plik Ogg Vorbis z `sounds/`, w tym deterministyczny wybór wariantu (`pick_variant()`); testy sprawdzają mapowanie i nagłówki plików na prawdziwych plikach.
+- `rust/src/decode.rs` — dekodowanie nagrań dla odtwarzacza (bez macroquad, więc testy headless): dekodowanie Ogg Vorbis (`lewton`), korekta próbkowania do 44100 Hz (`resampler`) i zapis WAV-a w pamięci; obsługuje dowolne próbkowanie odczytane z nagłówka pliku.
+- `rust/src/audio.rs` — wczytywanie i odtwarzanie plików `sounds/` przez backend macroquad (opcjonalna funkcja `audio`): `Audio::load()`/`play_events()`/`reseed()`; tłumienie odległości od środka widoku, limit głosów na krok, ograniczenie powtórzeń tego samego dźwięku.
 - `rust/src/ai.rs` — `AiController` (pętla decyzyjna z sekcji 13 `rules.md`). Determinystyczny dla danego seeda.
 - `rust/src/rng.rs` — własny deterministyczny PRNG (splitmix64 + Box-Muller) na szum AI, bez dodatkowych crate'ów.
 - `rust/src/mapfile.rs` — implementacja formatu `.map` opisanego w `specification_of_map_format.md`: `save_map()`, `save_path()`, `load_board()`, `load_game()`, `list_maps()`, `level_seed()`, `rebuild_bridges()`. Jedynie tu wolno ruszać format pliku.
@@ -71,8 +76,8 @@ Katalog `maps` jest listowany dynamicznie — nazwa pliku jest wyświetlaną naz
 
 ## 5. Implementacja Rust (obecna)
 
-1. Separacja modułów crate'a `hexfront`: logika w `board.rs` / `game.rs` / `ai.rs` / `rng.rs` (bez zależności od macroquad, więc testy działają bez okna), efekty prezentacyjne w `fx.rs` (również bez macroquad), synteza dźwięków w `sound.rs` (też bez macroquad), budowa meshy w `mesh.rs` / `iso.rs` (też bez macroquad), rysowanie w `render.rs`, odtwarzanie dźwięku w `audio.rs` (jedyny moduł rozmawiający z backendem audio), obsługa wejścia w `app.rs`.
-2. Moduł stałych: `rust/src/constants.rs`; ścieżki plików plansz: `repo_root()`, `maps_dir()`, `MAP_EXTENSION`.
+1. Separacja modułów crate'a `hexfront`: logika w `board.rs` / `game.rs` / `ai.rs` / `rng.rs` (bez zależności od macroquad, więc testy działają bez okna), efekty prezentacyjne w `fx.rs` (również bez macroquad), katalog dźwięków w `sound.rs` i dekodowanie nagrań w `decode.rs` (też bez macroquad), budowa meshy w `mesh.rs` / `iso.rs` (też bez macroquad), rysowanie w `render.rs`, odtwarzanie dźwięku w `audio.rs` (jedyny moduł rozmawiający z backendem audio), obsługa wejścia w `app.rs`.
+2. Moduł stałych: `rust/src/constants.rs`; ścieżki plików: `repo_root()`, `maps_dir()`, `sounds_dir()`, `MAP_EXTENSION`. Wszystkie liczą od katalogu głównego repozytorium, nigdy od katalogu roboczego.
 3. Implementację formatu `.map` zmieniasz wyłącznie w `rust/src/mapfile.rs`; tabele kodów w `mapfile.rs` są implementacją tabel z `specification_of_map_format.md` — zmieniając format, zaktualizuj oba miejsca.
 4. Gra i picking współdzielą geometrię `Board::pick_tile()` / `Board::snap_to_building()` (pick z Alt jako `flat=true`); `Renderer::pick_tile()` / `Renderer::snap_to_building()` tylko delegują do `Board`. Edytor wbudowany w grę (`rust/src/editor.rs` jako stan aplikacji, nie osobny program) współdzieli ten sam renderer i picking.
 5. Uruchamianie (z dowolnego katalogu): `cd rust && cargo run --release` (gra; wymaga toolchaina Rust + pobrania `macroquad =0.4.16` z crates.io).

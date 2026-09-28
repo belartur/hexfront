@@ -164,7 +164,9 @@ dependencies = [
 name = "hexfront"
 version = "0.1.0"
 dependencies = [
+ "lewton",
  "macroquad",
+ "resampler",
 ]
 
 [[package]]
@@ -350,6 +352,12 @@ dependencies = [
  "quad-alsa-sys",
  "winapi",
 ]
+
+[[package]]
+name = "resampler"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28fdbea87ff02ebbfd904079d1e52138c0c7fbaa3aaddca4a1b9c7d3f85749f2"
 
 [[package]]
 name = "simd-adler32"

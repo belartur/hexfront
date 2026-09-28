@@ -6,9 +6,19 @@ edition = "2024"
 [dependencies]
 # Pinned graphics/window/input library (see specification_rust.md, section
 # "Language and libraries"). The optional "audio" feature switches on
-# macroquad's own sound backend (`quad-snd`); it is the only extra dependency
-# and every sound is synthesised at runtime by `sound.rs` -- there are no
-# sample files in the repository. The AI noise uses our own deterministic
-# generator in `rng.rs`.
+# macroquad's own sound backend (`quad-snd`).
 macroquad = { version = "=0.4.16", features = ["audio"] }
+
+# Sound decoding for the files in `sounds/`. The backend decodes audio on its
+# own, but its resampler copies neighbouring samples without filtering, which
+# halves the duration of a recording and adds audible aliasing, so the
+# recordings are decoded and resampled here instead (see `decode.rs`).
+#   * lewton decodes the Ogg Vorbis files. It already comes with the backend
+#     (through `audrey`), so it adds no new transitive dependency.
+#   * resampler is a zero-dependency resampling library, used instead of
+#     hand-rolled code so the filtering is correct and other sample rates keep
+#     working if the recordings are ever re-sourced.
+# The AI noise uses our own deterministic generator in `rng.rs`.
+lewton = "0.9.4"
+resampler = "0.5.1"
 
