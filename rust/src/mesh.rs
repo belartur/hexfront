@@ -1069,6 +1069,54 @@ pub fn push_disc(mesh: &mut TriangleSoup, x: f64, y: f64, z: f64, r: f64, n: usi
     }
 }
 
+/// Flat-top hexagonal slab (prism) centred at `(x, y)` on base `z`.
+///
+/// Buildings stand on one of these instead of on the bare tile top: the slab
+/// shares the flat-top orientation of the fields, so a building reads as one
+/// structure with the tile below it, and its dark colour cuts the building
+/// out of the grey terrain. Six facets with two alternating side shades keep
+/// the flat-shaded look of [`push_cylinder`] without rounding the outline,
+/// which would blur the hexagon into the field.
+pub fn push_hex_prism(
+    mesh: &mut TriangleSoup,
+    x: f64,
+    y: f64,
+    z: f64,
+    r: f64,
+    h: f64,
+    color: [u8; 3],
+) {
+    let facets = [constants::shade(color, 0.85), constants::shade(color, 0.7)];
+    let corner = |k: usize| -> (f64, f64) {
+        let a = std::f64::consts::FRAC_PI_3 * k as f64;
+        (x + r * a.cos(), y + r * a.sin())
+    };
+    // Top face as a fan around the centre, so the slab stays closed.
+    for k in 0..6 {
+        let (ax, ay) = corner(k);
+        let (bx, by) = corner((k + 1) % 6);
+        let c = constants::shade(color, 1.0);
+        push_tri(
+            mesh,
+            vert(x, y, z + h, c),
+            vert(ax, ay, z + h, c),
+            vert(bx, by, z + h, c),
+        );
+    }
+    for k in 0..6 {
+        let (ax, ay) = corner(k);
+        let (bx, by) = corner((k + 1) % 6);
+        let c = facets[k % 2];
+        push_quad(
+            mesh,
+            vert(ax, ay, z, c),
+            vert(bx, by, z, c),
+            vert(bx, by, z + h, c),
+            vert(ax, ay, z + h, c),
+        );
+    }
+}
+
 /// Axis-aligned isometric box centred at `(x, y)` on base `z`.
 #[allow(clippy::too_many_arguments)]
 pub fn push_box(
@@ -1466,67 +1514,926 @@ fn push_building(
     let (cx, cy) = b.pos(game.board.side);
     let z = tile_top_z(&game.board, b.tile);
     let color = building_color(b);
-    let dark = constants::shade(color, 0.7);
+    // Every building stands on the same dark hexagonal foundation slab, so
+    // the eight kinds share one visual family and none of them floats on the
+    // bare grey tile top. The slab floats like the flat obstacle markers:
+    // coplanar with the tile top it would lose the depth race against the
+    // terrain (see `constants::OBSTACLE_LIFT`).
+    push_hex_prism(
+        mesh,
+        cx,
+        cy,
+        z + constants::OBSTACLE_LIFT,
+        BLD_FOUND_R,
+        BLD_FOUND_H,
+        constants::shade(color, BLD_DARK),
+    );
+    let slab = z + constants::OBSTACLE_LIFT + BLD_FOUND_H;
     match b.kind {
-        BuildingKind::BaseTank | BuildingKind::BaseBuffer => {
-            push_box(mesh, cx, cy, z, 26.0, 26.0, 14.0, color);
-            if b.kind == BuildingKind::BaseBuffer {
-                push_cross(mesh, lines, cx, cy, z + 14.0, [130, 235, 140]);
-            } else {
-                push_box(mesh, cx, cy, z + 14.0, 12.0, 12.0, 6.0, dark);
-            }
-        }
-        BuildingKind::BaseHelicopter => {
-            // Ground pad floats like the flat obstacle markers: coplanar
-            // with the tile top it loses the depth race against terrain.
-            push_disc(mesh, cx, cy, z + constants::OBSTACLE_LIFT, 20.0, 20, dark);
-            push_disc(
-                mesh,
-                cx,
-                cy,
-                z + constants::OBSTACLE_LIFT + 1.0,
-                15.0,
-                20,
-                color,
-            );
-        }
-        BuildingKind::BaseHovercraft => {
-            push_box(mesh, cx, cy, z, 30.0, 20.0, 10.0, color);
-        }
+        BuildingKind::BaseTank => push_base_tank(mesh, lines, cx, cy, slab, color),
+        BuildingKind::BaseHelicopter => push_base_helicopter(mesh, lines, cx, cy, slab, color),
+        BuildingKind::BaseHovercraft => push_base_hovercraft(mesh, lines, cx, cy, slab, color),
+        BuildingKind::BaseBuffer => push_base_buffer(mesh, lines, cx, cy, slab, color),
         BuildingKind::TurretNormal | BuildingKind::TurretRapid | BuildingKind::TurretRocket => {
-            // Base ring floats like the flat obstacle markers: coplanar
-            // with the tile top it loses the depth race against terrain.
-            push_disc(mesh, cx, cy, z + constants::OBSTACLE_LIFT, 14.0, 16, dark);
-            push_disc(mesh, cx, cy, z + 8.0, 10.0, 14, color);
-            let (dx, dy) = match b.last_target_pos {
-                Some((tx, ty)) => {
-                    let d = ((tx - cx).powi(2) + (ty - cy).powi(2)).sqrt().max(1e-6);
-                    ((tx - cx) / d, (ty - cy) / d)
-                }
-                None => (1.0, 0.0),
-            };
-            let tk =
-                crate::entities::turret_kind_of(b.kind).unwrap_or(constants::TurretKind::Normal);
-            let len = if tk == constants::TurretKind::Rapid {
-                10.0
-            } else {
-                18.0
-            };
-            push_beam(
-                lines,
-                cx,
-                cy,
-                z + 12.0,
-                cx + dx * len,
-                cy + dy * len,
-                z + 14.0,
+            push_turret(mesh, lines, b, cx, cy, slab, color);
+        }
+        BuildingKind::HealTower => push_heal_tower(mesh, lines, cx, cy, slab, color),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Building parts (rules.md section 3; every value is a rendering-only size in
+// px, exactly like the tank and helicopter constants -- the owner colour comes
+// from the player, only the medical green and the landing markings are fixed).
+// ---------------------------------------------------------------------------
+
+/// Radius of the hexagonal foundation slab every building stands on in px.
+/// Smaller than the field inradius, so the slab never spills into a
+/// neighbouring field.
+const BLD_FOUND_R: f64 = 21.0;
+/// Height of the foundation slab in px.
+const BLD_FOUND_H: f64 = 2.5;
+/// Shade factor of the foundation and other dark structural parts.
+const BLD_DARK: f64 = 0.55;
+/// Thickness of a roof plate in px.
+const BLD_ROOF_H: f64 = 2.0;
+#[allow(dead_code)]
+/// Highest point any building part may reach above its field in px: the unit
+/// counter and the floating texts sit right next to the structure, and a
+/// building must never hide the field behind it. The cap is a design limit
+/// checked by the mesh tests, not a value the builder reads back.
+const BLD_MAX_H: f64 = 30.0;
+#[allow(dead_code)]
+/// Furthest horizontal distance of a building part from its field centre in
+/// px. A gun barrel overhangs its field (like a tank's), everything else
+/// stays inside it. Also a design limit checked by the mesh tests.
+const BLD_MAX_REACH: f64 = 27.0;
+/// Light green of every healing part (tanks of the buffer base, crosses). It
+/// matches the healed-range tint, so the support role reads the same way.
+const BLD_MED_COLOR: [u8; 3] = [150, 245, 150];
+/// Bright colour of a healing cross.
+const BLD_CROSS_COLOR: [u8; 3] = [200, 255, 200];
+/// Colour of the landing markings and the mast light of a helicopter base.
+const BLD_MARK_COLOR: [u8; 3] = [240, 240, 240];
+
+// Tank base (rules.md section 3: the plant that produces tanks).
+/// Footprint of the assembly hall along x in px.
+const BLD_TANK_HALL_X: f64 = 24.0;
+/// Footprint of the assembly hall along y in px.
+const BLD_TANK_HALL_Y: f64 = 21.0;
+/// Height of the assembly hall in px.
+const BLD_TANK_HALL_H: f64 = 11.0;
+/// Width of the dark gate on the front wall in px.
+const BLD_TANK_GATE_W: f64 = 9.0;
+/// Thickness of the gate box in px. A thin plate just proud of the wall: it
+/// reads as an opening, and being this flat its side faces never show.
+const BLD_TANK_GATE_OUT: f64 = 0.4;
+/// Height of the gate in px.
+const BLD_TANK_GATE_H: f64 = 7.0;
+/// Length of the entry ramp in px.
+const BLD_TANK_RAMP_LEN: f64 = 9.0;
+/// Width of the entry ramp in px.
+const BLD_TANK_RAMP_WID: f64 = 16.0;
+/// Height of the ramp where it meets the hall in px.
+const BLD_TANK_RAMP_H: f64 = 6.5;
+/// Radius of a roof vent in px.
+const BLD_TANK_VENT_R: f64 = 2.8;
+/// Roof radius of a roof vent in px.
+const BLD_TANK_VENT_TOP_R: f64 = 2.3;
+/// Height of a roof vent in px.
+const BLD_TANK_VENT_H: f64 = 5.0;
+/// Distance of each roof vent from the hall centre along x in px.
+const BLD_TANK_VENT_OFF: f64 = 6.0;
+
+// Buffer base (rules.md section 3: the medical plant; section 5.4 makes the
+// buffer the healing vehicle, so its base speaks the same colour).
+/// Footprint of the buffer hall along x in px.
+const BLD_BUF_HALL_X: f64 = 22.0;
+/// Footprint of the buffer hall along y in px.
+const BLD_BUF_HALL_Y: f64 = 19.0;
+/// Height of the buffer hall in px.
+const BLD_BUF_HALL_H: f64 = 10.0;
+/// Radius of one light-green tank on the roof in px.
+const BLD_BUF_TANK_R: f64 = 4.0;
+/// Height of one tank on the roof in px.
+const BLD_BUF_TANK_H: f64 = 7.0;
+/// Distance of each tank from the hall centre along x in px.
+const BLD_BUF_TANK_OFF: f64 = 6.5;
+/// Side of the square plinth carrying the healing cross in px.
+const BLD_BUF_PLINTH: f64 = 8.0;
+/// Height of the cross plinth in px.
+const BLD_BUF_PLINTH_H: f64 = 3.0;
+
+// Helicopter base (rules.md section 3: the round landing pad).
+/// Radius of the landing pad in px. Small enough that the control shack at
+/// its edge still fits on the foundation slab beside it.
+const BLD_PAD_R: f64 = 14.5;
+/// Height of the pad slab in px.
+const BLD_PAD_H: f64 = 2.5;
+/// Facets of the pad cylinder.
+const BLD_PAD_SEGMENTS: usize = 20;
+/// Radius of the thin ring painted on the pad in px.
+const BLD_PAD_RING_R: f64 = 10.5;
+/// Facets of the painted ring (a circle, unlike the hexagonal slab below).
+const BLD_PAD_RING_SEGMENTS: usize = 24;
+/// Half-width of the painted landing H in px.
+const BLD_MARK_HW: f64 = 4.0;
+/// Half-height of the painted landing H in px.
+const BLD_MARK_HH: f64 = 5.0;
+/// Footprint of the control shack at the pad edge in px.
+const BLD_SHACK_SIDE: f64 = 8.0;
+/// Height of the control shack in px.
+const BLD_SHACK_H: f64 = 6.0;
+/// Offset of the shack from the pad centre along x in px; positive, so the
+/// shack stands on the side of the pad the camera sees.
+const BLD_SHACK_X: f64 = 12.0;
+/// Offset of the shack from the pad centre along y in px.
+const BLD_SHACK_Y: f64 = -9.0;
+/// Height of the shack mast in px.
+const BLD_MAST_H: f64 = 5.0;
+
+// Hovercraft base (rules.md section 3: the low dock).
+/// Footprint of the dock along x in px.
+const BLD_DOCK_X: f64 = 24.0;
+/// Footprint of the dock along y in px.
+const BLD_DOCK_Y: f64 = 22.0;
+/// Height of the dock slab in px.
+const BLD_DOCK_H: f64 = 3.0;
+/// Length of the sloped bow ramp in px.
+const BLD_DOCK_BOW_LEN: f64 = 8.0;
+/// Distance of each guide rail from the dock centre line in px.
+const BLD_DOCK_RAIL_OFF: f64 = 5.5;
+/// Width of one guide rail in px.
+const BLD_DOCK_RAIL_WID: f64 = 3.0;
+/// Height of one guide rail in px.
+const BLD_DOCK_RAIL_H: f64 = 2.6;
+/// Shrink of the rails relative to the dock length in px, so they stay on it.
+const BLD_DOCK_RAIL_SHORT: f64 = 6.0;
+/// Radius of one blower housing in px.
+const BLD_DOCK_FAN_R: f64 = 3.4;
+/// Roof radius of one blower housing in px.
+const BLD_DOCK_FAN_TOP_R: f64 = 2.8;
+/// Height of one blower housing in px.
+const BLD_DOCK_FAN_H: f64 = 2.8;
+/// Offset of the blower housings from the dock centre in px; outside the
+/// guide rails, so they stay visible next to them.
+const BLD_DOCK_FAN_OFF: f64 = 9.0;
+/// Facets of a blower housing.
+const BLD_DOCK_FAN_SEGMENTS: usize = 6;
+
+// Turrets (rules.md section 10; the weapon on the roof differs per kind).
+/// Radius of the parapet base in px. Kept clearly smaller than the reach of
+/// any weapon, so the gun always sticks out of the emplacement.
+const BLD_TUR_PARA_R: f64 = 12.5;
+/// Roof radius of the parapet base in px.
+const BLD_TUR_PARA_TOP_R: f64 = 11.0;
+/// Height of the parapet base in px.
+const BLD_TUR_PARA_H: f64 = 3.5;
+/// Radius of the turret body in px.
+const BLD_TUR_BODY_R: f64 = 9.5;
+/// Roof radius of the turret body in px.
+const BLD_TUR_BODY_TOP_R: f64 = 8.5;
+/// Height of the turret body in px.
+const BLD_TUR_BODY_H: f64 = 4.0;
+/// Radius of the armoured dome in px.
+const BLD_TUR_DOME_R: f64 = 7.5;
+/// Roof radius of the armoured dome in px.
+const BLD_TUR_DOME_TOP_R: f64 = 6.0;
+/// Height of the armoured dome in px.
+const BLD_TUR_DOME_H: f64 = 3.5;
+/// Facets of every turret cylinder (low-poly, flat-shaded look).
+const BLD_TUR_SEGMENTS: usize = 8;
+/// Shift of the mantlet towards the aim direction in px.
+const BLD_TUR_MANTLET_SHIFT: f64 = 5.5;
+/// Length of the mantlet wedge along the aim direction in px.
+const BLD_TUR_MANTLET_LEN: f64 = 5.5;
+/// Width of the mantlet in px.
+const BLD_TUR_MANTLET_WID: f64 = 8.0;
+/// Distance from the turret centre where a gun barrel starts in px; the rear
+/// end hides inside the turret, so no gap opens when the turret turns.
+const BLD_TUR_BARREL_GAP: f64 = 3.0;
+/// Length of the ordinary turret barrel in px.
+const BLD_TUR_BARREL_LEN: f64 = 20.0;
+/// Cross-section of the ordinary turret barrel in px.
+const BLD_TUR_BARREL_WID: f64 = 3.0;
+/// Height of the barrel axis above the dome roof in px.
+const BLD_TUR_BARREL_LIFT: f64 = 1.4;
+/// Length of the muzzle brake in px.
+const BLD_TUR_MUZZLE_LEN: f64 = 4.0;
+/// Width of the muzzle brake in px.
+const BLD_TUR_MUZZLE_WID: f64 = 4.0;
+/// Height of the muzzle brake in px.
+const BLD_TUR_MUZZLE_H: f64 = 3.4;
+/// Length of one of the two rapid-fire barrels in px.
+const BLD_TUR_TWIN_LEN: f64 = 12.0;
+/// Cross-section of a rapid-fire barrel in px.
+const BLD_TUR_TWIN_WID: f64 = 2.2;
+/// Distance of each twin barrel from the aim axis in px.
+const BLD_TUR_TWIN_OFF: f64 = 2.6;
+/// Radius of the ammo drum of the rapid turret in px.
+const BLD_TUR_DRUM_R: f64 = 3.2;
+/// Height of the ammo drum in px.
+const BLD_TUR_DRUM_H: f64 = 3.0;
+/// Rearward shift of the ammo drum in px.
+const BLD_TUR_DRUM_SHIFT: f64 = 6.5;
+/// Facets of the ammo drum.
+const BLD_TUR_DRUM_SEGMENTS: usize = 8;
+/// Shift of the rocket rack towards the aim direction in px.
+const BLD_TUR_RACK_SHIFT: f64 = 3.0;
+/// Length of the rocket rack in px.
+const BLD_TUR_RACK_LEN: f64 = 13.0;
+/// Width of the rocket rack in px.
+const BLD_TUR_RACK_WID: f64 = 13.0;
+/// Height of the rack rear edge above the dome roof in px.
+const BLD_TUR_RACK_BACK_H: f64 = 2.5;
+/// Height of the rack front edge above the dome roof in px (tilted up).
+const BLD_TUR_RACK_FRONT_H: f64 = 8.5;
+/// Shift of the rocket tubes towards the aim direction in px.
+const BLD_TUR_TUBE_SHIFT: f64 = 3.0;
+/// Length of one rocket tube in px.
+const BLD_TUR_TUBE_LEN: f64 = 9.0;
+/// Cross-section of one rocket tube in px.
+const BLD_TUR_TUBE_WID: f64 = 2.8;
+/// Distance of each tube from the aim axis in px.
+const BLD_TUR_TUBE_OFF: f64 = 3.2;
+/// Height of the lower tube row above the dome roof in px.
+const BLD_TUR_TUBE_RISE: f64 = 3.2;
+/// Extra height of the upper tube row in px.
+const BLD_TUR_TUBE_STACK: f64 = 2.8;
+/// Height of the turret antenna above the dome roof in px.
+const BLD_TUR_ANTENNA_H: f64 = 6.0;
+
+// Healing tower (rules.md section 11).
+/// Radius of the tower shaft at its base in px. Slim on purpose: the mast has
+/// to read as a tower, not as another squat emplacement.
+const BLD_HEAL_SHAFT_R: f64 = 6.0;
+/// Radius of the tower shaft at its top in px.
+const BLD_HEAL_SHAFT_TOP_R: f64 = 5.0;
+/// Height of the shaft in px.
+const BLD_HEAL_SHAFT_H: f64 = 14.0;
+/// Radius of the light-green ring around the shaft in px.
+const BLD_HEAL_BAND_R: f64 = 6.8;
+/// Height of the ring around the shaft in px.
+const BLD_HEAL_BAND_H: f64 = 1.6;
+/// Height of the ring above the slab in px.
+const BLD_HEAL_BAND_LIFT: f64 = 4.5;
+/// Radius of the crown at its base in px (only a little wider than the
+/// shaft, so the silhouette stays a mast with a head).
+const BLD_HEAL_CROWN_R: f64 = 8.0;
+/// Radius of the crown at its top in px.
+const BLD_HEAL_CROWN_TOP_R: f64 = 7.0;
+/// Height of the crown in px.
+const BLD_HEAL_CROWN_H: f64 = 3.0;
+/// Radius of the roof dome in px.
+const BLD_HEAL_DOME_R: f64 = 7.0;
+/// Roof radius of the dome in px.
+const BLD_HEAL_DOME_TOP_R: f64 = 2.6;
+/// Height of the dome in px.
+const BLD_HEAL_DOME_H: f64 = 2.6;
+/// Facets of the tower cylinders.
+const BLD_HEAL_SEGMENTS: usize = 8;
+/// Offset of each corner rib from the tower centre in px.
+const BLD_HEAL_RIB_OFF: f64 = 5.6;
+
+/// Aim direction of a turret gun as a unit `(dx, dy)` vector in world space.
+///
+/// Points at the last target the simulation shot at (rules.md section 10).
+/// A turret that never fired keeps the historical fallback of aiming east,
+/// so a level always renders the same way.
+fn turret_aim(b: &crate::entities::Building, cx: f64, cy: f64) -> (f64, f64) {
+    match b.last_target_pos {
+        Some((tx, ty)) => {
+            let d = ((tx - cx).powi(2) + (ty - cy).powi(2)).sqrt().max(1e-6);
+            ((tx - cx) / d, (ty - cy) / d)
+        }
+        None => (1.0, 0.0),
+    }
+}
+
+/// Tank base: an assembly hall with a sloped entry ramp, a dark gate, two
+/// roof vents and a panel seam (rules.md section 3: the plant producing
+/// tanks). The hall is the tallest of the four bases, so the tank base stays
+/// apart from the low hovercraft dock and the flat helicopter pad.
+fn push_base_tank(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    cx: f64,
+    cy: f64,
+    slab: f64,
+    color: [u8; 3],
+) {
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.5);
+    // Entry ramp and gate sit on the +y wall: the isometric camera looks from
+    // +x/+y, so only those two walls (and the roof) are actually visible.
+    let front = cy + BLD_TANK_HALL_Y / 2.0;
+    // Entry ramp: a sloped plate rising from the field to the hall floor, so
+    // a produced tank has somewhere to roll out of.
+    push_oriented_slope(
+        mesh,
+        cx,
+        front + BLD_TANK_RAMP_LEN / 2.0,
+        slab,
+        BLD_TANK_RAMP_LEN,
+        BLD_TANK_RAMP_WID,
+        BLD_TANK_RAMP_H,
+        0.4,
+        0.0,
+        1.0,
+        darker,
+    );
+    push_box(
+        mesh,
+        cx,
+        cy,
+        slab,
+        BLD_TANK_HALL_X,
+        BLD_TANK_HALL_Y,
+        BLD_TANK_HALL_H,
+        color,
+    );
+    // Dark gate on the front wall: a little proud of it, so it reads as an
+    // opening instead of as a painted rectangle.
+    push_box(
+        mesh,
+        cx,
+        front,
+        slab,
+        BLD_TANK_GATE_W,
+        BLD_TANK_GATE_OUT,
+        BLD_TANK_GATE_H,
+        constants::shade(color, 0.25),
+    );
+    let roof = slab + BLD_TANK_HALL_H;
+    push_box(
+        mesh,
+        cx,
+        cy,
+        roof,
+        BLD_TANK_HALL_X + 2.0,
+        BLD_TANK_HALL_Y + 2.0,
+        BLD_ROOF_H,
+        dark,
+    );
+    let deck = roof + BLD_ROOF_H;
+    for side in [-1.0, 1.0] {
+        push_cylinder(
+            mesh,
+            cx + side * BLD_TANK_VENT_OFF,
+            cy + 3.0,
+            deck,
+            BLD_TANK_VENT_R,
+            BLD_TANK_VENT_TOP_R,
+            BLD_TANK_VENT_H,
+            6,
+            darker,
+        );
+    }
+    // Panel seam across the rear half of the roof, a thin stroke like the
+    // tank's tread marks.
+    let seam = constants::shade(color, 0.35);
+    push_beam(
+        lines,
+        cx - 9.0,
+        cy - 6.0,
+        deck + 0.2,
+        cx + 9.0,
+        cy - 6.0,
+        deck + 0.2,
+        seam,
+    );
+}
+
+/// Buffer base: the tank-base hall carrying two light-green tanks and the
+/// healing cross on a raised plinth (rules.md sections 3 and 5.4; the base
+/// speaks the colour of the healing vehicle it produces).
+fn push_base_buffer(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    cx: f64,
+    cy: f64,
+    slab: f64,
+    color: [u8; 3],
+) {
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.5);
+    push_box(
+        mesh,
+        cx,
+        cy,
+        slab,
+        BLD_BUF_HALL_X,
+        BLD_BUF_HALL_Y,
+        BLD_BUF_HALL_H,
+        color,
+    );
+    let roof = slab + BLD_BUF_HALL_H;
+    push_box(
+        mesh,
+        cx,
+        cy,
+        roof,
+        BLD_BUF_HALL_X + 2.0,
+        BLD_BUF_HALL_Y + 2.0,
+        BLD_ROOF_H,
+        dark,
+    );
+    let deck = roof + BLD_ROOF_H;
+    for side in [-1.0, 1.0] {
+        push_cylinder(
+            mesh,
+            cx + side * BLD_BUF_TANK_OFF,
+            cy - 2.0,
+            deck,
+            BLD_BUF_TANK_R,
+            BLD_BUF_TANK_R,
+            BLD_BUF_TANK_H,
+            8,
+            BLD_MED_COLOR,
+        );
+    }
+    // Raised plinth with the cross at the front of the roof.
+    push_box(
+        mesh,
+        cx,
+        cy + 5.5,
+        deck,
+        BLD_BUF_PLINTH,
+        BLD_BUF_PLINTH,
+        BLD_BUF_PLINTH_H,
+        darker,
+    );
+    push_cross(
+        mesh,
+        lines,
+        cx,
+        cy + 5.5,
+        deck + BLD_BUF_PLINTH_H + 0.4,
+        BLD_CROSS_COLOR,
+    );
+    // Green stripe along the visible (+y) wall, in the same healing colour.
+    push_beam(
+        lines,
+        cx - 7.0,
+        cy + BLD_BUF_HALL_Y / 2.0 + 0.2,
+        slab + 4.5,
+        cx + 7.0,
+        cy + BLD_BUF_HALL_Y / 2.0 + 0.2,
+        slab + 4.5,
+        BLD_MED_COLOR,
+    );
+}
+
+/// Helicopter base: a round pad painted with a white H inside a thin ring,
+/// with a control shack and its mast at the pad edge (rules.md section 3).
+/// The landing mark makes the kind unmistakable even at the smallest zoom.
+fn push_base_helicopter(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    cx: f64,
+    cy: f64,
+    slab: f64,
+    color: [u8; 3],
+) {
+    let dark = constants::shade(color, 0.7);
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        slab,
+        BLD_PAD_R,
+        BLD_PAD_R,
+        BLD_PAD_H,
+        BLD_PAD_SEGMENTS,
+        constants::shade(color, 0.85),
+    );
+    let deck = slab + BLD_PAD_H;
+    // Painted markings: a ring plus the H, thin strokes floating just above
+    // the pad (a coplanar line loses the depth race against its own disc).
+    push_ring(
+        lines,
+        cx,
+        cy,
+        deck + 0.2,
+        BLD_PAD_RING_R,
+        BLD_PAD_RING_SEGMENTS,
+        BLD_MARK_COLOR,
+        130,
+    );
+    let mark = deck + 0.3;
+    for side in [-1.0, 1.0] {
+        push_beam(
+            lines,
+            cx + side * BLD_MARK_HW,
+            cy - BLD_MARK_HH,
+            mark,
+            cx + side * BLD_MARK_HW,
+            cy + BLD_MARK_HH,
+            mark,
+            BLD_MARK_COLOR,
+        );
+    }
+    push_beam(
+        lines,
+        cx - BLD_MARK_HW,
+        cy,
+        mark,
+        cx + BLD_MARK_HW,
+        cy,
+        mark,
+        BLD_MARK_COLOR,
+    );
+    // Control shack with a mast at the pad edge (inside the foundation slab,
+    // on the visible +x side of the pad).
+    let shack = (cx + BLD_SHACK_X, cy + BLD_SHACK_Y);
+    push_box(
+        mesh,
+        shack.0,
+        shack.1,
+        slab,
+        BLD_SHACK_SIDE,
+        BLD_SHACK_SIDE,
+        BLD_SHACK_H,
+        dark,
+    );
+    push_beam(
+        lines,
+        shack.0,
+        shack.1,
+        slab + BLD_SHACK_H,
+        shack.0,
+        shack.1,
+        slab + BLD_SHACK_H + BLD_MAST_H,
+        BLD_MARK_COLOR,
+    );
+    push_box(
+        mesh,
+        shack.0,
+        shack.1,
+        slab + BLD_SHACK_H + BLD_MAST_H,
+        2.0,
+        2.0,
+        2.0,
+        BLD_MARK_COLOR,
+    );
+}
+
+/// Hovercraft base: a low, wide dock with two guide rails, a sloped bow ramp
+/// and four blower housings (rules.md section 3). Flat and wide instead of
+/// tall, so it never reads like a tank plant.
+fn push_base_hovercraft(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    cx: f64,
+    cy: f64,
+    slab: f64,
+    color: [u8; 3],
+) {
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.5);
+    push_box(
+        mesh, cx, cy, slab, BLD_DOCK_X, BLD_DOCK_Y, BLD_DOCK_H, color,
+    );
+    let deck = slab + BLD_DOCK_H;
+    // Sloped bow on the front (+y) side: the slipway a hovercraft leaves on.
+    push_oriented_slope(
+        mesh,
+        cx,
+        cy + BLD_DOCK_Y / 2.0 + BLD_DOCK_BOW_LEN / 2.0,
+        slab,
+        BLD_DOCK_BOW_LEN,
+        BLD_DOCK_X,
+        0.4,
+        BLD_DOCK_H,
+        0.0,
+        -1.0,
+        dark,
+    );
+    // Two guide rails along the dock; the channel between them is where a
+    // hovercraft is serviced.
+    for side in [-1.0, 1.0] {
+        push_oriented_box(
+            mesh,
+            cx + side * BLD_DOCK_RAIL_OFF,
+            cy,
+            deck,
+            BLD_DOCK_X - BLD_DOCK_RAIL_SHORT,
+            BLD_DOCK_RAIL_WID,
+            BLD_DOCK_RAIL_H,
+            0.0,
+            1.0,
+            darker,
+        );
+    }
+    // Blower housings in the corners: the dock feeds hovercraft skirts.
+    for sx in [-1.0, 1.0] {
+        for sy in [-1.0, 1.0] {
+            push_cylinder(
+                mesh,
+                cx + sx * BLD_DOCK_FAN_OFF,
+                cy + sy * BLD_DOCK_FAN_OFF,
+                deck,
+                BLD_DOCK_FAN_R,
+                BLD_DOCK_FAN_TOP_R,
+                BLD_DOCK_FAN_H,
+                BLD_DOCK_FAN_SEGMENTS,
                 dark,
             );
         }
-        BuildingKind::HealTower => {
-            push_box(mesh, cx, cy, z, 16.0, 16.0, 26.0, color);
-            push_cross(mesh, lines, cx, cy, z + 26.0, [200, 255, 200]);
+    }
+    // Centre line of the slipway, a thin marking like the landing pad ring.
+    push_beam(
+        lines,
+        cx,
+        cy - BLD_DOCK_Y / 2.0 + 2.0,
+        deck + 0.2,
+        cx,
+        cy + BLD_DOCK_Y / 2.0 - 2.0,
+        deck + 0.2,
+        BLD_MARK_COLOR,
+    );
+}
+
+/// Turret: a stepped emplacement (parapet, turret body, armoured dome) whose
+/// weapon turns towards the last target the gun fired at (rules.md section
+/// 10). The three kinds differ exactly where it matters: one long barrel, two
+/// short barrels with an ammo drum, or a tilted rack of four rocket tubes.
+fn push_turret(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    b: &crate::entities::Building,
+    cx: f64,
+    cy: f64,
+    slab: f64,
+    color: [u8; 3],
+) {
+    use crate::constants::TurretKind;
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.5);
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        slab,
+        BLD_TUR_PARA_R,
+        BLD_TUR_PARA_TOP_R,
+        BLD_TUR_PARA_H,
+        BLD_TUR_SEGMENTS,
+        darker,
+    );
+    let barbette = slab + BLD_TUR_PARA_H;
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        barbette,
+        BLD_TUR_BODY_R,
+        BLD_TUR_BODY_TOP_R,
+        BLD_TUR_BODY_H,
+        BLD_TUR_SEGMENTS,
+        dark,
+    );
+    let body = barbette + BLD_TUR_BODY_H;
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        body,
+        BLD_TUR_DOME_R,
+        BLD_TUR_DOME_TOP_R,
+        BLD_TUR_DOME_H,
+        BLD_TUR_SEGMENTS,
+        color,
+    );
+    let roof = body + BLD_TUR_DOME_H;
+    let (ax, ay) = turret_aim(b, cx, cy);
+    let (px, py) = (-ay, ax);
+    // Sloped mantlet (a gun shield) on the turret front, turning with the
+    // weapon so the battery never looks symmetrical.
+    push_oriented_slope(
+        mesh,
+        cx + ax * BLD_TUR_MANTLET_SHIFT,
+        cy + ay * BLD_TUR_MANTLET_SHIFT,
+        body,
+        BLD_TUR_MANTLET_LEN,
+        BLD_TUR_MANTLET_WID,
+        1.2,
+        BLD_TUR_DOME_H + 0.8,
+        ax,
+        ay,
+        dark,
+    );
+    // Whip antenna on the rear dome roof, a stroke like the tank's antenna.
+    let antenna = (cx - ax * 4.5 + px * 2.5, cy - ay * 4.5 + py * 2.5);
+    push_beam(
+        lines,
+        antenna.0,
+        antenna.1,
+        roof,
+        antenna.0,
+        antenna.1,
+        roof + BLD_TUR_ANTENNA_H,
+        darker,
+    );
+    let barrel = roof + BLD_TUR_BARREL_LIFT;
+    match crate::entities::turret_kind_of(b.kind).unwrap_or(TurretKind::Normal) {
+        TurretKind::Normal => {
+            // One long barrel ending in a wider muzzle brake.
+            let mid = BLD_TUR_BARREL_GAP + BLD_TUR_BARREL_LEN / 2.0;
+            push_oriented_box(
+                mesh,
+                cx + ax * mid,
+                cy + ay * mid,
+                barrel,
+                BLD_TUR_BARREL_LEN,
+                BLD_TUR_BARREL_WID,
+                BLD_TUR_BARREL_WID,
+                ax,
+                ay,
+                dark,
+            );
+            let muzzle = BLD_TUR_BARREL_GAP + BLD_TUR_BARREL_LEN - BLD_TUR_MUZZLE_LEN / 2.0;
+            push_oriented_box(
+                mesh,
+                cx + ax * muzzle,
+                cy + ay * muzzle,
+                barrel - 0.3,
+                BLD_TUR_MUZZLE_LEN,
+                BLD_TUR_MUZZLE_WID,
+                BLD_TUR_MUZZLE_H,
+                ax,
+                ay,
+                darker,
+            );
         }
+        TurretKind::Rapid => {
+            // Twin short barrels side by side, plus an ammo drum on the rear.
+            let mid = BLD_TUR_BARREL_GAP + BLD_TUR_TWIN_LEN / 2.0;
+            let reach = BLD_TUR_BARREL_GAP + BLD_TUR_TWIN_LEN;
+            for side in [-1.0, 1.0] {
+                let (ox, oy) = (px * side * BLD_TUR_TWIN_OFF, py * side * BLD_TUR_TWIN_OFF);
+                push_oriented_box(
+                    mesh,
+                    cx + ax * mid + ox,
+                    cy + ay * mid + oy,
+                    barrel,
+                    BLD_TUR_TWIN_LEN,
+                    BLD_TUR_TWIN_WID,
+                    BLD_TUR_TWIN_WID,
+                    ax,
+                    ay,
+                    dark,
+                );
+                push_oriented_box(
+                    mesh,
+                    cx + ax * (reach - 1.0) + ox,
+                    cy + ay * (reach - 1.0) + oy,
+                    barrel - 0.2,
+                    2.0,
+                    BLD_TUR_TWIN_WID + 0.8,
+                    BLD_TUR_TWIN_WID + 0.8,
+                    ax,
+                    ay,
+                    darker,
+                );
+            }
+            push_cylinder(
+                mesh,
+                cx - ax * BLD_TUR_DRUM_SHIFT,
+                cy - ay * BLD_TUR_DRUM_SHIFT,
+                roof - 0.5,
+                BLD_TUR_DRUM_R,
+                BLD_TUR_DRUM_R,
+                BLD_TUR_DRUM_H,
+                BLD_TUR_DRUM_SEGMENTS,
+                darker,
+            );
+        }
+        TurretKind::Rocket => {
+            // Tilted rack carrying four tubes with dark muzzle rings: a rocket
+            // battery can never be mistaken for a gun barrel.
+            push_oriented_slope(
+                mesh,
+                cx + ax * BLD_TUR_RACK_SHIFT,
+                cy + ay * BLD_TUR_RACK_SHIFT,
+                roof,
+                BLD_TUR_RACK_LEN,
+                BLD_TUR_RACK_WID,
+                BLD_TUR_RACK_BACK_H,
+                BLD_TUR_RACK_FRONT_H,
+                ax,
+                ay,
+                dark,
+            );
+            let mid = BLD_TUR_TUBE_SHIFT + BLD_TUR_TUBE_LEN / 2.0;
+            let front = BLD_TUR_TUBE_SHIFT + BLD_TUR_TUBE_LEN;
+            for side in [-1.0, 1.0] {
+                for row in 0..2 {
+                    let (ox, oy) = (px * side * BLD_TUR_TUBE_OFF, py * side * BLD_TUR_TUBE_OFF);
+                    let z = roof + BLD_TUR_TUBE_RISE + row as f64 * BLD_TUR_TUBE_STACK;
+                    push_oriented_box(
+                        mesh,
+                        cx + ax * mid + ox,
+                        cy + ay * mid + oy,
+                        z,
+                        BLD_TUR_TUBE_LEN,
+                        BLD_TUR_TUBE_WID,
+                        BLD_TUR_TUBE_WID,
+                        ax,
+                        ay,
+                        dark,
+                    );
+                    let w = BLD_TUR_TUBE_WID * 0.7;
+                    push_oriented_box(
+                        mesh,
+                        cx + ax * front + ox,
+                        cy + ay * front + oy,
+                        z + 0.5,
+                        1.4,
+                        w,
+                        w,
+                        ax,
+                        ay,
+                        constants::shade(color, 0.2),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Healing tower: a slim shaft with a light-green ring, a wider crown, a
+/// domed roof carrying the bright cross and four corner ribs (rules.md
+/// section 11). The tall mast shape keeps it apart from the squat turret
+/// emplacements, which also stand on a round base.
+fn push_heal_tower(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(LineVertex, LineVertex)>,
+    cx: f64,
+    cy: f64,
+    slab: f64,
+    color: [u8; 3],
+) {
+    let dark = constants::shade(color, 0.7);
+    let rib = constants::shade(color, 0.4);
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        slab,
+        BLD_HEAL_SHAFT_R,
+        BLD_HEAL_SHAFT_TOP_R,
+        BLD_HEAL_SHAFT_H,
+        BLD_HEAL_SEGMENTS,
+        dark,
+    );
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        slab + BLD_HEAL_BAND_LIFT,
+        BLD_HEAL_BAND_R,
+        BLD_HEAL_BAND_R,
+        BLD_HEAL_BAND_H,
+        BLD_HEAL_SEGMENTS,
+        BLD_MED_COLOR,
+    );
+    let crown = slab + BLD_HEAL_SHAFT_H;
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        crown,
+        BLD_HEAL_CROWN_R,
+        BLD_HEAL_CROWN_TOP_R,
+        BLD_HEAL_CROWN_H,
+        BLD_HEAL_SEGMENTS,
+        color,
+    );
+    let dome = crown + BLD_HEAL_CROWN_H;
+    push_cylinder(
+        mesh,
+        cx,
+        cy,
+        dome,
+        BLD_HEAL_DOME_R,
+        BLD_HEAL_DOME_TOP_R,
+        BLD_HEAL_DOME_H,
+        BLD_HEAL_SEGMENTS,
+        constants::shade(color, 0.85),
+    );
+    push_cross(
+        mesh,
+        lines,
+        cx,
+        cy,
+        dome + BLD_HEAL_DOME_H + 0.4,
+        BLD_CROSS_COLOR,
+    );
+    // Four corner ribs along the shaft: thin strokes give the mast a profile.
+    for (sx, sy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        let (rx, ry) = (cx + sx * BLD_HEAL_RIB_OFF, cy + sy * BLD_HEAL_RIB_OFF);
+        push_beam(lines, rx, ry, slab, rx, ry, crown, rib);
     }
 }
 
@@ -3331,24 +4238,51 @@ mod tests {
         assert!(raised, "wall box has no height");
     }
 
+    /// Every building kind in a fixed order (rules.md section 3).
+    fn all_building_kinds() -> [crate::entities::BuildingKind; 8] {
+        use crate::entities::BuildingKind;
+        [
+            BuildingKind::BaseTank,
+            BuildingKind::BaseHelicopter,
+            BuildingKind::BaseHovercraft,
+            BuildingKind::BaseBuffer,
+            BuildingKind::TurretNormal,
+            BuildingKind::TurretRapid,
+            BuildingKind::TurretRocket,
+            BuildingKind::HealTower,
+        ]
+    }
+
     #[test]
     fn flat_building_parts_float_above_terrain() {
-        use crate::entities::{Building, BuildingKind, Player};
+        use crate::entities::{Building, Player};
         use crate::game::Game;
-        let mut board = Board::new(10, 10);
+        let mut board = Board::new(12, 12);
         for t in board.tiles.clone().keys() {
             board.tiles.get_mut(t).unwrap().height = 1;
         }
-        let turret = Building::new(BuildingKind::TurretNormal, Some(0), 2, 2, 10.0);
-        let pad = Building::new(BuildingKind::BaseHelicopter, Some(0), 5, 5, 10.0);
-        let game = Game::new(board, vec![Player::new(0, true)], vec![turret, pad], 1);
+        let buildings: Vec<Building> = all_building_kinds()
+            .iter()
+            .enumerate()
+            .map(|(i, kind)| {
+                Building::new(
+                    *kind,
+                    Some(0),
+                    1 + (i as i32 % 6) * 2,
+                    1 + (i as i32 / 6) * 2,
+                    10.0,
+                )
+            })
+            .collect();
+        let game = Game::new(board, vec![Player::new(0, true)], buildings, 1);
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut dynamic);
         assert!(!dynamic.opaque.vertices.is_empty());
-        // The lowest opaque vertex of the flat parts sits at the shared
-        // lift, not coplanar with the tile top (the 1-px upper pads and
-        // the raised turret dome sit higher by construction).
-        let top = tile_top_z(&game.board, (2, 2));
+        // Every foundation slab floats like the flat obstacle markers: the
+        // lowest opaque vertex of the whole scene sits at the shared lift
+        // above the (identical) tile top, so no building part is coplanar
+        // with the terrain anywhere.
+        let top = tile_top_z(&game.board, (1, 1));
         let lowest = dynamic
             .opaque
             .vertices
@@ -3359,6 +4293,315 @@ mod tests {
             lowest >= top + constants::OBSTACLE_LIFT - 1e-6,
             "flat part not lifted: {lowest} vs {top}"
         );
+    }
+
+    #[test]
+    fn every_building_kind_fits_its_field() {
+        use crate::entities::{Building, Player};
+        use crate::game::Game;
+        for kind in all_building_kinds() {
+            let mut board = Board::new(8, 8);
+            for t in board.tiles.clone().keys() {
+                board.tiles.get_mut(t).unwrap().height = 1;
+            }
+            let tile = (3, 3);
+            let building = Building::new(kind, Some(1), tile.0, tile.1, 10.0);
+            let game = Game::new(
+                board,
+                vec![Player::new(0, true), Player::new(1, false)],
+                vec![building],
+                1,
+            );
+            let mut dynamic = DynamicMesh::default();
+            build_dynamic(&game, 0.0, &mut dynamic);
+            assert!(
+                !dynamic.opaque.vertices.is_empty(),
+                "{kind:?} has no geometry"
+            );
+            // Detail strokes: gates, crosses, landing marks, antennae, ribs.
+            assert!(!dynamic.lines.is_empty(), "{kind:?} has no detail strokes");
+            let (cx, cy) = game.board.center_world(tile);
+            let top = tile_top_z(&game.board, tile);
+            let (mut reach, mut high) = (0.0_f64, 0.0_f64);
+            let mut lowest = f64::INFINITY;
+            for v in dynamic.opaque.vertices.iter() {
+                let (dx, dy) = (f64::from(v.x) - cx, f64::from(v.y) - cy);
+                reach = reach.max((dx * dx + dy * dy).sqrt());
+                high = high.max(f64::from(v.z) - top);
+                lowest = lowest.min(f64::from(v.z));
+            }
+            assert!(
+                reach <= BLD_MAX_REACH + 1e-6,
+                "{kind:?} reaches {reach} px past the field centre"
+            );
+            assert!(
+                high <= BLD_MAX_H + 1e-6,
+                "{kind:?} is {high} px tall, above the {BLD_MAX_H} px cap"
+            );
+            // The foundation slab is the lowest part and floats above terrain.
+            assert!(
+                lowest >= top + constants::OBSTACLE_LIFT - 1e-6,
+                "{kind:?} is not lifted: {lowest} vs {top}"
+            );
+        }
+    }
+
+    #[test]
+    fn building_mesh_is_deterministic() {
+        use crate::entities::{Building, Player};
+        use crate::game::Game;
+        let mut board = Board::new(12, 12);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let buildings: Vec<Building> = all_building_kinds()
+            .iter()
+            .enumerate()
+            .map(|(i, kind)| {
+                Building::new(
+                    *kind,
+                    Some(0),
+                    1 + (i as i32 % 6) * 2,
+                    1 + (i as i32 / 6) * 2,
+                    10.0,
+                )
+            })
+            .collect();
+        let game = Game::new(board, vec![Player::new(0, true)], buildings, 1);
+        let mut first = DynamicMesh::default();
+        let mut second = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut first);
+        build_dynamic(&game, 0.0, &mut second);
+        assert_eq!(first.opaque.vertices.len(), second.opaque.vertices.len());
+        assert_eq!(first.lines.len(), second.lines.len());
+        for (a, b) in first
+            .opaque
+            .vertices
+            .iter()
+            .zip(second.opaque.vertices.iter())
+        {
+            assert_eq!((a.x, a.y, a.z, a.color), (b.x, b.y, b.z, b.color));
+        }
+    }
+
+    /// Furthest turret vertex from its field centre, ignoring the symmetric
+    /// parts of the emplacement (foundation, parapet, turret body): the
+    /// remaining tip is the weapon, so tests can read which way it points.
+    /// `aim` records a shot towards `centre + aim`; `None` keeps the east
+    /// fallback of a turret that never fired.
+    fn turret_weapon_tip(
+        kind: crate::entities::BuildingKind,
+        aim: Option<(f64, f64)>,
+    ) -> (f64, f64) {
+        use crate::entities::{Building, Player};
+        use crate::game::Game;
+        let mut board = Board::new(8, 8);
+        for t in board.tiles.clone().keys() {
+            board.tiles.get_mut(t).unwrap().height = 1;
+        }
+        let tile = (3, 3);
+        let (cx, cy) = board.center_world(tile);
+        let mut b = Building::new(kind, Some(0), tile.0, tile.1, 10.0);
+        if let Some((ox, oy)) = aim {
+            b.last_target_pos = Some((cx + ox, cy + oy));
+        }
+        let game = Game::new(board, vec![Player::new(0, true)], vec![b], 1);
+        let mut dynamic = DynamicMesh::default();
+        build_dynamic(&game, 0.0, &mut dynamic);
+        let weapon_base = tile_top_z(&game.board, tile)
+            + constants::OBSTACLE_LIFT
+            + BLD_FOUND_H
+            + BLD_TUR_PARA_H
+            + BLD_TUR_BODY_H;
+        let (mut best, mut best_d) = ((0.0_f64, 0.0_f64), 0.0_f64);
+        for v in dynamic.opaque.vertices.iter() {
+            if f64::from(v.z) < weapon_base - 1e-6 {
+                continue;
+            }
+            let (dx, dy) = (f64::from(v.x) - cx, f64::from(v.y) - cy);
+            let d = (dx * dx + dy * dy).sqrt();
+            if d > best_d {
+                best_d = d;
+                best = (dx, dy);
+            }
+        }
+        best
+    }
+
+    #[test]
+    fn turret_weapon_turns_with_its_last_target() {
+        use crate::entities::BuildingKind;
+        // The same gun, recorded as firing first east and then north: the tip
+        // of the weapon must lie in the direction of that shot (rules.md
+        // section 10).
+        let (ex, ey) = turret_weapon_tip(BuildingKind::TurretNormal, Some((100.0, 0.0)));
+        assert!(
+            ex > 15.0 && ey.abs() < 5.0,
+            "barrel did not turn east: ({ex}, {ey})"
+        );
+        let (nx, ny) = turret_weapon_tip(BuildingKind::TurretNormal, Some((0.0, 100.0)));
+        assert!(
+            ny > 15.0 && nx.abs() < 5.0,
+            "barrel did not turn north: ({nx}, {ny})"
+        );
+    }
+
+    #[test]
+    fn the_three_turrets_carry_different_weapons() {
+        use crate::entities::BuildingKind;
+        // The ordinary gun reaches further than the twin barrels of the rapid
+        // mount, and the rocket rack is the shortest of the three, so the
+        // kinds stay apart without reading the ammo drum (rules.md section 10).
+        let length = |kind| {
+            let (dx, dy) = turret_weapon_tip(kind, None);
+            (dx * dx + dy * dy).sqrt()
+        };
+        let normal = length(BuildingKind::TurretNormal);
+        let rapid = length(BuildingKind::TurretRapid);
+        let rocket = length(BuildingKind::TurretRocket);
+        assert!(
+            normal > rapid + 2.0,
+            "ordinary gun is not the longest: {normal} vs {rapid}"
+        );
+        assert!(
+            rapid > rocket,
+            "the rocket rack reaches past the twin guns: {rapid} vs {rocket}"
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn preview_buildings_to_ppm() {
+        // Temporary developer preview: software-rasterise the isometric scene
+        // into a PPM file so the models can be eyeballed without a GPU.
+        use crate::entities::{Building, Player};
+        use crate::game::Game;
+        let kinds = all_building_kinds();
+        for (i, kind) in kinds.iter().enumerate() {
+            let mut board = Board::new(8, 8);
+            for t in board.tiles.clone().keys() {
+                board.tiles.get_mut(t).unwrap().height = 1;
+            }
+            let game = Game::new(
+                board,
+                vec![Player::new(0, true)],
+                vec![Building::new(*kind, Some(0), 3, 3, 40.0)],
+                1,
+            );
+            let terrain = build_terrain(&game.board);
+            let mut dynamic = DynamicMesh::default();
+            build_dynamic(&game, 1.0, &mut dynamic);
+
+            struct Tri {
+                p: [(f64, f64, f64); 3],
+                c: [u8; 3],
+                d: f64,
+            }
+            let mut tris: Vec<Tri> = Vec::new();
+            let collect = |soup: &TriangleSoup, tris: &mut Vec<Tri>| {
+                for i in (0..soup.indices.len()).step_by(3) {
+                    let v: Vec<&GpuVertex> = (0..3)
+                        .map(|k| &soup.vertices[soup.indices[i + k] as usize])
+                        .collect();
+                    let p = [
+                        (f64::from(v[0].x), f64::from(v[0].y), f64::from(v[0].z)),
+                        (f64::from(v[1].x), f64::from(v[1].y), f64::from(v[1].z)),
+                        (f64::from(v[2].x), f64::from(v[2].y), f64::from(v[2].z)),
+                    ];
+                    let d = p
+                        .iter()
+                        .map(|q| (q.0 + q.1) * constants::ISO_SIN + q.2)
+                        .sum::<f64>()
+                        / 3.0;
+                    tris.push(Tri {
+                        p,
+                        c: v[0].color,
+                        d,
+                    });
+                }
+            };
+            for chunk in terrain.chunks.iter() {
+                collect(&chunk.soup, &mut tris);
+            }
+            // Index of the first building triangle: the preview is fitted to the
+            // buildings only, so the models fill the frame.
+            let building_start = tris.len();
+            collect(&dynamic.opaque, &mut tris);
+
+            let (w, h) = (640usize, 640usize);
+            let proj = |p: (f64, f64, f64)| -> (f64, f64) {
+                (
+                    (p.0 - p.1) * constants::ISO_COS,
+                    (p.0 + p.1) * constants::ISO_SIN - p.2,
+                )
+            };
+            let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
+            let (mut x1, mut y1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+            for t in tris[building_start..].iter() {
+                for p in t.p.iter() {
+                    let (sx, sy) = proj(*p);
+                    x0 = x0.min(sx);
+                    y0 = y0.min(sy);
+                    x1 = x1.max(sx);
+                    y1 = y1.max(sy);
+                }
+            }
+            // A little padding around the building keeps the field under it (and
+            // its slab) visible.
+            let (x0, y0, x1, y1) = (x0 - 12.0, y0 - 12.0, x1 + 12.0, y1 + 12.0);
+            let scale = ((w as f64 - 40.0) / (x1 - x0)).min((h as f64 - 40.0) / (y1 - y0));
+            let to_px = |p: (f64, f64, f64)| -> (f64, f64) {
+                let (sx, sy) = proj(p);
+                ((sx - x0) * scale + 20.0, (sy - y0) * scale + 20.0)
+            };
+            tris.sort_by(|a, b| a.d.partial_cmp(&b.d).unwrap_or(std::cmp::Ordering::Equal));
+            let mut img = vec![[110u8, 170, 225]; w * h];
+            for t in tris.iter() {
+                let a = to_px(t.p[0]);
+                let b = to_px(t.p[1]);
+                let c = to_px(t.p[2]);
+                let area = (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1);
+                if area.abs() < 1e-9 {
+                    continue;
+                }
+                let minx = a.0.min(b.0).min(c.0).floor().max(0.0) as usize;
+                let maxx = (a.0.max(b.0).max(c.0).ceil() as usize).min(w - 1);
+                let miny = a.1.min(b.1).min(c.1).floor().max(0.0) as usize;
+                let maxy = (a.1.max(b.1).max(c.1).ceil() as usize).min(h - 1);
+                for py in miny..=maxy {
+                    for px in minx..=maxx {
+                        let (x, y) = (px as f64 + 0.5, py as f64 + 0.5);
+                        let wa = ((b.0 - x) * (c.1 - y) - (c.0 - x) * (b.1 - y)) / area;
+                        let wb = ((c.0 - x) * (a.1 - y) - (a.0 - x) * (c.1 - y)) / area;
+                        if wa >= 0.0 && wb >= 0.0 && 1.0 - wa - wb >= 0.0 {
+                            img[py * w + px] = t.c;
+                        }
+                    }
+                }
+            }
+            // Detail strokes on top (approximate: no depth test in the preview).
+            for (l0, l1) in dynamic.lines.iter() {
+                let a = to_px((f64::from(l0.x), f64::from(l0.y), f64::from(l0.z)));
+                let b = to_px((f64::from(l1.x), f64::from(l1.y), f64::from(l1.z)));
+                let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs())).ceil() as usize + 1;
+                for i in 0..=steps {
+                    let f = i as f64 / steps as f64;
+                    let (px, py) = (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+                    for (dx, dy) in [(0isize, 0isize), (1, 0), (0, 1)] {
+                        let (xx, yy) = (px as isize + dx, py as isize + dy);
+                        if xx >= 0 && yy >= 0 && (xx as usize) < w && (yy as usize) < h {
+                            img[yy as usize * w + xx as usize] =
+                                [l0.color[0], l0.color[1], l0.color[2]];
+                        }
+                    }
+                }
+            }
+            let mut out = format!("P6\n{w} {h}\n255\n").into_bytes();
+            for px in img.iter() {
+                out.extend_from_slice(px);
+            }
+            std::fs::write(format!("/tmp/hexfront_kind_{i}.ppm"), &out).unwrap();
+        }
     }
 
     #[test]
