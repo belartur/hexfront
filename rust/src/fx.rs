@@ -16,9 +16,10 @@
 //! It also means no raster assets, no extra dependency, and headless unit
 //! tests -- the module deliberately does not depend on macroquad at all.
 //!
-//! Randomness comes from [`crate::rng::Rng`] seeded with the id of the
-//! destroyed vehicle, so the same wreck always explodes the same way, no
-//! matter when the frame happens to be rendered.
+//! Randomness comes from the stateful [`crate::rng::Rng`] stream kept in
+//! [`Fx`], which the application seeds with the level seed: every explosion
+//! looks different from the last, yet a given level always plays its blasts
+//! the same way.
 
 use crate::constants::{self, VehicleKind};
 use crate::entities::Wreck;
@@ -210,18 +211,45 @@ impl Particle {
 /// Kept out of [`crate::game::Game`] on purpose: the simulation must stay
 /// free of rendering state, and the effect must never influence gameplay or
 /// the determinism of the simulation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Fx {
     /// All live particles, in spawn order.
     pub particles: Vec<Particle>,
+    /// Random stream every burst draws from.
+    ///
+    /// It is a *stateful* stream, not a fresh generator per explosion: two
+    /// wrecks of the same kind, and the same wreck blown up twice, look
+    /// different each time. The stream is seeded per level
+    /// ([`Fx::reseed`]) so a level always plays its explosions the same way --
+    /// random enough to stay lively, reproducible enough to be testable and to
+    /// replay a match identically.
+    rng: Rng,
+}
+
+impl Default for Fx {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Fx {
-    /// Create an empty effect system.
+    /// Create an empty effect system with the default seed
+    /// ([`constants::FX_DEFAULT_SEED`]).
     pub fn new() -> Self {
         Self {
             particles: Vec::new(),
+            rng: Rng::new(constants::FX_DEFAULT_SEED),
         }
+    }
+
+    /// Drop every particle and restart the random stream from `seed`.
+    ///
+    /// Called with the level seed whenever a match or an editor playtest
+    /// starts: the explosions of one level are then reproducible, while every
+    /// explosion inside it still differs from the previous one.
+    pub fn reseed(&mut self, seed: u64) {
+        self.particles.clear();
+        self.rng = Rng::new(seed ^ constants::FX_DEFAULT_SEED);
     }
 
     /// Drop every particle (new match, new level, leaving a playtest).
@@ -243,10 +271,11 @@ impl Fx {
     ///
     /// `z` is the elevation the wreck occupied -- [`crate::mesh`] computes it
     /// (the walkable surface for a ground vehicle, the fixed flight altitude
-    /// for a helicopter). The burst is seeded with the vehicle id, so a given
-    /// wreck always explodes identically and the effect is reproducible.
+    /// for a helicopter). The burst draws from the shared random stream of
+    /// [`Fx`], so no two explosions look alike even for the same vehicle; the
+    /// sequence stays reproducible within one level, because that stream is
+    /// seeded with the level seed.
     pub fn explode(&mut self, w: &Wreck, z: f64) {
-        let mut rng = Rng::new(w.id ^ constants::FX_SEED_SALT);
         let owner = constants::player_color(w.owner);
         // Bigger airframes burn bigger (rules.md section 5.2).
         let scale = if w.kind == VehicleKind::Helicopter {
@@ -281,9 +310,7 @@ impl Fx {
                 shape: FxShape::Blob,
             },
             (w.x, w.y, cy),
-            &mut rng,
         );
-
         // Fireball: the body of the blast, swelling and drifting upwards.
         self.emit(
             &EmitterConfig {
@@ -308,9 +335,7 @@ impl Fx {
                 shape: FxShape::Blob,
             },
             (w.x, w.y, cy),
-            &mut rng,
         );
-
         // Ground shock wave: a flat ring running over the surface the wreck
         // stood on. Ground vehicles only -- a helicopter explodes in the air,
         // where a wave on the ground would point at the wrong spot.
@@ -338,10 +363,8 @@ impl Fx {
                     shape: FxShape::Ring,
                 },
                 (w.x, w.y, z + constants::EXPLOSION_RING_LIFT),
-                &mut rng,
             );
         }
-
         // Sparks: hard embers thrown out of the hull in every direction,
         // arcing down under gravity.
         self.emit(
@@ -367,9 +390,7 @@ impl Fx {
                 shape: FxShape::Shard,
             },
             (w.x, w.y, cy),
-            &mut rng,
         );
-
         // Smoke: the longest-lived part of the blast, spreading and rising
         // slowly long after the fire is gone.
         self.emit(
@@ -395,9 +416,7 @@ impl Fx {
                 shape: FxShape::Blob,
             },
             (w.x, w.y, cy),
-            &mut rng,
         );
-
         // Wreck fragments: dark hull pieces flung out of the wreck, the only
         // particles that keep the memory of a vehicle shape in the blast.
         self.emit(
@@ -423,20 +442,19 @@ impl Fx {
                 shape: FxShape::Shard,
             },
             (w.x, w.y, cy),
-            &mut rng,
         );
-
         self.trim();
     }
-
-    /// Spawn one burst of `cfg` at `(x, y, z)`.
+    /// Spawn one burst of `cfg` at `(x, y, z)`, drawing every random value
+    /// from the shared stream of [`Fx`].
     ///
     /// Directions are uniform over the full circle (an isotropic burst, as in
     /// the `initial_direction_spread: 2 * PI` of `macroquad-particles`), and
     /// `explosiveness` decides how much of the burst is delayed: the share
     /// `1 - explosiveness` of a particle's lifetime becomes its spawn delay, so
     /// a high value fires everything at once and a low value trickles it out.
-    fn emit(&mut self, cfg: &EmitterConfig, at: (f64, f64, f64), rng: &mut Rng) {
+    fn emit(&mut self, cfg: &EmitterConfig, at: (f64, f64, f64)) {
+        let rng = &mut self.rng;
         for _ in 0..cfg.amount {
             let life = (cfg.lifetime * (1.0 + rng.next_f64() * cfg.lifetime_randomness))
                 .max(constants::FX_MIN_LIFETIME);
@@ -610,9 +628,8 @@ mod tests {
     use super::*;
     use crate::mesh::DynamicMesh;
 
-    fn wreck(id: u64, kind: VehicleKind) -> Wreck {
+    fn wreck(kind: VehicleKind) -> Wreck {
         Wreck {
-            id,
             owner: 0,
             kind,
             x: 1234.0,
@@ -624,7 +641,7 @@ mod tests {
     fn explode_spawns_every_part_of_the_blast() {
         let mut fx = Fx::new();
         assert!(fx.is_empty());
-        fx.explode(&wreck(7, VehicleKind::Tank), 40.0);
+        fx.explode(&wreck(VehicleKind::Tank), 40.0);
         // Flash, fireball, ground wave, sparks, smoke and debris.
         let blobs = fx
             .particles
@@ -657,7 +674,7 @@ mod tests {
     #[test]
     fn helicopter_explodes_in_the_air_without_a_ground_wave() {
         let mut fx = Fx::new();
-        fx.explode(&wreck(8, VehicleKind::Helicopter), 200.0);
+        fx.explode(&wreck(VehicleKind::Helicopter), 200.0);
         assert!(
             !fx.particles.iter().any(|p| p.shape == FxShape::Ring),
             "a helicopter dies in the air, there is no wave to run over the ground"
@@ -734,38 +751,81 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_same_wreck_always_explodes_the_same_way() {
-        // The effect is seeded with the vehicle id, so the presentation is
-        // reproducible and independent of the frame it happens to be built in.
-        let mut a = Fx::new();
-        let mut b = Fx::new();
-        a.explode(&wreck(42, VehicleKind::Tank), 10.0);
-        b.explode(&wreck(42, VehicleKind::Tank), 10.0);
-        assert_eq!(a.len(), b.len());
-        for (pa, pb) in a.particles.iter().zip(b.particles.iter()) {
-            assert_eq!(pa.x, pb.x);
-            assert_eq!(pa.y, pb.y);
-            assert_eq!(pa.vx, pb.vx);
-            assert_eq!(pa.vz, pb.vz);
-            assert_eq!(pa.life, pb.life);
-            assert_eq!(pa.size, pb.size);
-        }
-        // A different wreck must not look like a copy of the first one.
-        let mut c = Fx::new();
-        c.explode(&wreck(43, VehicleKind::Tank), 10.0);
-        let differs = a
-            .particles
+    /// The full particle state of an explosion, compared field by field.
+    fn signature(fx: &Fx) -> Vec<(f64, f64, f64, f64, f64, f64)> {
+        fx.particles
             .iter()
-            .zip(c.particles.iter())
-            .any(|(pa, pc)| pa.vx != pc.vx || pa.vz != pc.vz);
-        assert!(differs, "two wrecks exploded identically");
+            .map(|p| (p.x, p.y, p.z, p.vx, p.vy, p.vz))
+            .collect()
+    }
+
+    #[test]
+    fn every_explosion_looks_different() {
+        // The whole point of the stateful stream: no two wrecks share a blast,
+        // not even two explosions of the very same vehicle.
+        let mut fx = Fx::new();
+        fx.explode(&wreck(VehicleKind::Tank), 10.0);
+        let first = signature(&fx);
+        fx.particles.clear();
+        fx.explode(&wreck(VehicleKind::Tank), 10.0);
+        let second = signature(&fx);
+        assert_eq!(first.len(), second.len(), "the burst size must be stable");
+        assert_ne!(first, second, "the same wreck exploded identically twice");
+
+        // A different vehicle of the same kind, exploded next in the same
+        // system, differs as well -- the stream keeps moving.
+        fx.particles.clear();
+        fx.explode(&wreck(VehicleKind::Tank), 10.0);
+        assert_ne!(
+            second,
+            signature(&fx),
+            "two different wrecks exploded identically"
+        );
+    }
+
+    #[test]
+    fn a_level_seed_makes_the_whole_sequence_reproducible() {
+        // Same seed, same order of explosions -> exactly the same effects, so
+        // a level can still be replayed (and the effects unit-tested) even
+        // though every single explosion is random.
+        let play = |seed: u64| {
+            let mut fx = Fx::new();
+            fx.reseed(seed);
+            for (i, w) in [
+                wreck(VehicleKind::Tank),
+                wreck(VehicleKind::Tank),
+                wreck(VehicleKind::Helicopter),
+            ]
+            .iter()
+            .enumerate()
+            {
+                fx.explode(w, 10.0 * (i as f64 + 1.0));
+                fx.update(0.2);
+            }
+            signature(&fx)
+        };
+        assert_eq!(play(7), play(7), "the same seed must replay identically");
+        assert_ne!(play(7), play(8), "another seed must give other effects");
+    }
+
+    #[test]
+    fn reseed_clears_live_particles_and_restarts_the_stream() {
+        let mut fx = Fx::new();
+        fx.explode(&wreck(VehicleKind::Tank), 0.0);
+        assert!(!fx.is_empty());
+        fx.reseed(123);
+        assert!(fx.is_empty(), "a new level must not inherit old particles");
+        let mut fresh = Fx::new();
+        fresh.reseed(123);
+        fresh.explode(&wreck(VehicleKind::Tank), 0.0);
+        fx.explode(&wreck(VehicleKind::Tank), 0.0);
+        assert_eq!(signature(&fx), signature(&fresh));
     }
 
     #[test]
     fn particles_die_and_the_system_empties_itself() {
         let mut fx = Fx::new();
-        fx.explode(&wreck(5, VehicleKind::Tank), 0.0);
+        fx.explode(&wreck(VehicleKind::Tank), 0.0);
         let longest = fx.particles.iter().map(|p| p.life).fold(0.0_f64, f64::max);
         // Far more than the smoke needs: nothing may survive.
         fx.update(longest + constants::SIM_DT);
@@ -779,8 +839,9 @@ mod tests {
     fn delayed_particles_appear_later_and_fade_afterwards() {
         let mut fx = Fx::new();
         // A single, fully delayed particle (`explosiveness: 0` spreads it over
-        // its whole lifetime), so the birth window is easy to hit.
-        let mut rng = Rng::new(1);
+        // its whole lifetime). The stream is seeded so that the delay is
+        // comfortably long, which keeps the birth window easy to hit.
+        fx.reseed(4);
         fx.emit(
             &EmitterConfig {
                 amount: 1,
@@ -804,7 +865,6 @@ mod tests {
                 shape: FxShape::Blob,
             },
             (100.0, 200.0, 0.0),
-            &mut rng,
         );
         let delay = fx.particles[0].delay;
         assert!(delay > 0.0, "the particle must start out delayed");
@@ -829,7 +889,7 @@ mod tests {
     #[test]
     fn smoke_rises_sparks_fall() {
         let mut fx = Fx::new();
-        fx.explode(&wreck(11, VehicleKind::Tank), 0.0);
+        fx.explode(&wreck(VehicleKind::Tank), 0.0);
         // Highest vertical speed of the sparks / of the smoke right now. The
         // sparks are picked by their gravity: the flash and the debris are no
         // sparks even though they are shards, and the fire drifts upwards.
@@ -867,7 +927,7 @@ mod tests {
     #[test]
     fn build_writes_particles_and_is_idempotent_between_frames() {
         let mut fx = Fx::new();
-        fx.explode(&wreck(3, VehicleKind::Tank), 0.0);
+        fx.explode(&wreck(VehicleKind::Tank), 0.0);
         fx.update(0.05);
         let mut mesh = DynamicMesh::default();
         fx.build(&mut mesh);
@@ -890,10 +950,10 @@ mod tests {
         // Translucent geometry without a depth write has to be submitted back
         // to front, otherwise overlapping puffs blend in the wrong order.
         let mut fx = Fx::new();
-        let mut far = wreck(1, VehicleKind::Tank);
+        let mut far = wreck(VehicleKind::Tank);
         far.x = 0.0;
         far.y = 0.0;
-        let mut near = wreck(2, VehicleKind::Tank);
+        let mut near = wreck(VehicleKind::Tank);
         near.x = 4000.0;
         near.y = 4000.0;
         fx.explode(&far, 0.0);
@@ -914,8 +974,8 @@ mod tests {
     #[test]
     fn particles_never_exceed_the_budget() {
         let mut fx = Fx::new();
-        for i in 0..200 {
-            fx.explode(&wreck(1000 + i, VehicleKind::Tank), 0.0);
+        for _ in 0..200 {
+            fx.explode(&wreck(VehicleKind::Tank), 0.0);
         }
         assert!(
             fx.len() <= constants::EXPLOSION_MAX_PARTICLES,

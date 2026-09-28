@@ -443,7 +443,10 @@ impl Application {
                 self.preview_path = None;
                 self.load_timer = 0.0;
                 self.sim_acc = 0.0;
-                self.fx.clear();
+                // The explosion particles of a level are drawn from a stream
+                // seeded with the level seed: random on screen, repeatable
+                // when the same level is played again.
+                self.fx.reseed(seed);
                 self.state = State::Loading;
             }
             Err(e) => eprintln!("cannot load {}: {}", path.display(), e),
@@ -488,7 +491,7 @@ impl Application {
         self.preview_path = None;
         self.load_timer = 0.0;
         self.sim_acc = 0.0;
-        self.fx.clear();
+        self.fx.reseed(seed);
         self.state = State::Playing;
     }
     /// Leave a playtest run and keep editing the same map (Esc in playtest).

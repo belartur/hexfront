@@ -111,9 +111,7 @@ impl Player {
 /// presentation layer turns the record into an effect.
 #[derive(Clone, Copy, Debug)]
 pub struct Wreck {
-    /// Id of the vehicle that was destroyed (also a stable effect seed).
-    pub id: u64,
-    /// Owning player id (decides the tint of the sparks).
+    /// Owning player id (decides the tint of the fire and the sparks).
     pub owner: usize,
     /// Destroyed vehicle kind (rules.md section 4).
     pub kind: VehicleKind,

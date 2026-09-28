@@ -673,7 +673,6 @@ impl Game {
                 v.units = 0.0;
                 v.dead = true;
                 wreck = Some(Wreck {
-                    id: v.id,
                     owner: v.owner,
                     kind: v.kind,
                     x: v.x,
@@ -1223,11 +1222,9 @@ mod tests {
         assert_eq!(wrecks.len(), 1, "one vehicle must die in the duel");
         let w = wrecks[0];
         assert_eq!(w.kind, VehicleKind::Tank);
-        // The wreck records the id of a vehicle that really died, and its
-        // position is a copy, not a handle into the simulation.
-        assert!(game.vehicles.iter().all(|v| v.id != w.id || v.dead));
-        // The wreck is a copy of a position, not a handle: reading the log
-        // changes nothing in the simulation.
+        // The wreck is a copy of where the vehicle died (the vehicle itself is
+        // already gone), and reading the log changes nothing in the simulation.
+        assert!(w.x.is_finite() && w.y.is_finite());
         let before = game.time;
         assert!(game.take_wrecks().is_empty());
         assert_eq!(game.time, before, "draining must not step the game");

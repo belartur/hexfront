@@ -155,9 +155,9 @@ pub const FX_BURST_UP: f64 = 14.0;
 pub const FX_BURST_UP_RANDOM: f64 = 26.0;
 /// Maximum spin of a shard in rad/s.
 pub const FX_SHARD_SPIN: f64 = 9.0;
-/// Salt mixed into the vehicle id to seed the effect generator, so wreck ids
-/// (which start at 1) never produce a degenerate random stream.
-pub const FX_SEED_SALT: u64 = 0x5EED_CAFE_BABE_1234;
+/// Default seed of the explosion particle stream, used before a level is
+/// loaded and mixed into the level seed by `Fx::reseed()` (rendering only).
+pub const FX_DEFAULT_SEED: u64 = 0x5EED_CAFE_BABE_1234;
 /// Start radius of the ground shock wave in px.
 pub const EXPLOSION_RING_START_R: f64 = 6.0;
 /// End radius of the ground shock wave in px.
