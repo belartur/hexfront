@@ -2486,19 +2486,38 @@ fn push_ranges(
     }
 }
 
+/// Elevation the drawn route of `v` starts at.
+///
+/// A ground vehicle is drawn on the surface it drives on, so its route
+/// leaves the hull. A helicopter flies at a fixed altitude above the whole
+/// board (rules.md section 5.2), far from the ground, so a route starting at
+/// the hull would hang in the air far from the route it describes. Its route
+/// therefore starts at the shadow underneath it, on the surface the shadow
+/// falls on: the bridge deck while it crosses one, the terrain otherwise (the
+/// very surface used by [`push_helicopter_shadow`]). The rest of the route
+/// already runs on the surfaces below the waypoints, so the whole line stays
+/// on the ground.
+fn route_start_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
+    if v.kind == constants::VehicleKind::Helicopter {
+        helicopter_shadow_surface(game, v.x, v.y).0
+    } else {
+        vehicle_z(game, v)
+    }
+}
+
 fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
     for v in game.vehicles.iter() {
         if v.dead || v.route.is_empty() {
             continue;
         }
-        // The first leg starts at the vehicle itself (a helicopter above the
-        // terrain), the following waypoints sit on the surface below them, so
-        // an airborne route descends to the ground instead of floating. A
-        // route crossing a bridge rides its deck, the fields of a route
-        // crossing under one keep the terrain below (rules.md section 8).
+        // The first leg starts at the vehicle: on the surface it stands on, or
+        // -- for a helicopter -- on the ground under its shadow (see
+        // `route_start_z`). The following waypoints sit on the surface below
+        // them. A route crossing a bridge rides its deck, the fields of a
+        // route crossing under one keep the terrain below (rules.md section 8).
         let seq = &v.route[v.route_index.min(v.route.len())..];
         let modes = route_crossings(&game.board, v.kind, route_prev(v), seq);
-        let mut prev = (v.x, v.y, vehicle_z(game, v));
+        let mut prev = (v.x, v.y, route_start_z(game, v));
         for i in 0..seq.len() {
             let (wx, wy) = game.board.center_world(seq[i]);
             let wz = waypoint_z(&game.board, seq, i, modes[i + 1]);
@@ -3839,6 +3858,57 @@ mod tests {
             span(&open, (gx, gy)) > span(&dynamic, (mx, my)),
             "the shadow was clipped off the bridge too"
         );
+    }
+    #[test]
+    fn helicopter_route_leaves_from_its_shadow_not_from_the_hull() {
+        use crate::constants::VehicleKind;
+        use crate::entities::{Player, Vehicle};
+        use crate::game::Game;
+        let (board, a, b, frags) = bridge_board();
+        let (mx, my) = board.center_world(frags[0]);
+        let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Helicopter,
+            0,
+            10.0,
+            vec![frags[1], b],
+            (mx, my),
+            Some(a),
+        ));
+        let v = &game.vehicles[0];
+        // The hull is at the fixed flight altitude, the route starts where the
+        // shadow falls: on the deck while the helicopter crosses the bridge.
+        assert_eq!(vehicle_z(&game, v), helicopter_altitude(&game));
+        let deck = bridge_deck_z(&game.board.bridges[0]);
+        assert_eq!(route_start_z(&game, v), deck);
+        // The first drawn leg leaves from that surface, not from the hull.
+        let mut lines = Vec::new();
+        push_paths(&game, &mut lines);
+        assert_eq!(lines.len(), 2, "one line per remaining leg");
+        assert!((f64::from(lines[0].0.z) - deck).abs() < 1e-6);
+        assert!(
+            (f64::from(lines[0].0.z) - vehicle_z(&game, v)).abs() > 1.0,
+            "the route still starts at the flying hull"
+        );
+        // Away from the bridge the shadow falls on the terrain, and so does
+        // the route.
+        let (lx, ly) = game.board.center_world((1, 1));
+        game.vehicles[0].x = lx;
+        game.vehicles[0].y = ly;
+        let ground = vehicle_ground_z(&game, lx, ly);
+        assert_eq!(route_start_z(&game, &game.vehicles[0]), ground);
+        // A ground vehicle is drawn on the surface it drives on, so its route
+        // still leaves the hull.
+        game.vehicles.push(Vehicle::new(
+            VehicleKind::Tank,
+            0,
+            10.0,
+            vec![(2, 2)],
+            (lx, ly),
+            Some((1, 1)),
+        ));
+        let tank = &game.vehicles[1];
+        assert_eq!(route_start_z(&game, tank), vehicle_z(&game, tank));
     }
 
     #[test]
