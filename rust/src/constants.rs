@@ -126,6 +126,160 @@ pub const BUFFER_HEAL_RADIUS: f64 = 160.0;
 /// Units restored per second by a buffer (1 unit / 2 s, section 5.4).
 pub const BUFFER_HEAL_RATE: f64 = 0.5;
 
+// ---------------------------------------------------------------------------
+// Explosion effects (rendering only)
+//
+// rules.md has no explosions at all: section 9 only says a vehicle stops
+// existing once its units drop to zero. Every number below is therefore a pure
+// presentation value in px or seconds and must never influence the simulation.
+// ---------------------------------------------------------------------------
+
+/// Upper bound of particles alive at the same time (rendering budget only).
+pub const EXPLOSION_MAX_PARTICLES: usize = 512;
+/// Fraction of a blob's half-size filled with the opaque core colour; the
+/// remaining rim fades out, which turns the flat quad into a soft round puff
+/// (see [`crate::mesh::push_fx_blob`]).
+pub const FX_CORE_FILL: f64 = 0.45;
+/// Segments of one flat ground shock-wave ring (rendering only).
+pub const FX_RING_SEGMENTS: usize = 20;
+/// Fraction of the wave's current radius that stays transparent, so the ring
+/// reads as a moving band instead of a filled disc.
+pub const EXPLOSION_RING_INNER_FRAC: f64 = 0.55;
+/// Shortest lifetime a particle may get, in s (a jittered emitter must never
+/// produce a zero-length particle that would never be drawn).
+pub const FX_MIN_LIFETIME: f64 = 0.02;
+/// Initial vertical speed given to every particle of a burst in px/s, so the
+/// explosion opens upwards instead of spreading flat.
+pub const FX_BURST_UP: f64 = 14.0;
+/// Jitter of that initial vertical speed in px/s.
+pub const FX_BURST_UP_RANDOM: f64 = 26.0;
+/// Maximum spin of a shard in rad/s.
+pub const FX_SHARD_SPIN: f64 = 9.0;
+/// Salt mixed into the vehicle id to seed the effect generator, so wreck ids
+/// (which start at 1) never produce a degenerate random stream.
+pub const FX_SEED_SALT: u64 = 0x5EED_CAFE_BABE_1234;
+/// Start radius of the ground shock wave in px.
+pub const EXPLOSION_RING_START_R: f64 = 6.0;
+/// End radius of the ground shock wave in px.
+pub const EXPLOSION_RING_END_R: f64 = 44.0;
+/// Lifetime of the ground shock wave in s.
+pub const EXPLOSION_RING_LIFETIME: f64 = 0.45;
+/// Peak alpha of the ground shock wave (0..1).
+pub const EXPLOSION_RING_ALPHA: f64 = 0.55;
+/// Lift of the ground shock wave above the receiving surface in px, so the
+/// ring does not fight the terrain it runs over (same reason as
+/// [`SHADOW_LIFT`]).
+pub const EXPLOSION_RING_LIFT: f64 = 0.3 * UNIT_J_TO_PX;
+/// Half-size of the one-frame white flash of a new explosion in px.
+pub const EXPLOSION_FLASH_SIZE: f64 = 26.0;
+/// Lifetime of the white flash in s.
+pub const EXPLOSION_FLASH_LIFETIME: f64 = 0.16;
+/// Peak alpha of the white flash (0..1).
+pub const EXPLOSION_FLASH_ALPHA: f64 = 0.9;
+/// Colour of the white flash: hot core at the first frame of the blast.
+pub const EXPLOSION_FLASH_COLOR: [u8; 3] = [255, 246, 214];
+/// Number of fireball blobs of one explosion.
+pub const EXPLOSION_FIREBALL_COUNT: usize = 9;
+/// Start size of one fireball blob in px.
+pub const EXPLOSION_FIREBALL_SIZE: f64 = 13.0;
+/// Size jitter of the fireball blobs (fraction of the start size).
+pub const EXPLOSION_FIREBALL_SIZE_RANDOM: f64 = 0.45;
+/// Growth of the fireball size in px/s (the blast swells while fading out).
+pub const EXPLOSION_FIREBALL_GROWTH: f64 = 16.0;
+/// Lifetime of one fireball blob in s.
+pub const EXPLOSION_FIREBALL_LIFETIME: f64 = 0.45;
+/// Lifetime jitter of the fireball blobs (fraction of the lifetime).
+pub const EXPLOSION_FIREBALL_LIFETIME_RANDOM: f64 = 0.4;
+/// Vertical speed of the fireball blobs in px/s (the flame front rises).
+pub const EXPLOSION_FIREBALL_RISE: f64 = 26.0;
+/// Horizontal drift speed of the fireball blobs in px/s.
+pub const EXPLOSION_FIREBALL_DRIFT: f64 = 30.0;
+/// Fireball colour at birth: yellow-hot.
+pub const EXPLOSION_FIRE_COLOR_START: [u8; 3] = [255, 232, 150];
+/// Fireball colour in mid-life: orange.
+pub const EXPLOSION_FIRE_COLOR_MID: [u8; 3] = [255, 138, 46];
+/// Fireball colour at death: dark red.
+pub const EXPLOSION_FIRE_COLOR_END: [u8; 3] = [122, 30, 18];
+/// Peak alpha of one fireball blob (0..1).
+pub const EXPLOSION_FIRE_ALPHA: f64 = 0.95;
+/// Number of smoke puffs of one explosion.
+pub const EXPLOSION_SMOKE_COUNT: usize = 10;
+/// Start size of one smoke puff in px.
+pub const EXPLOSION_SMOKE_SIZE: f64 = 11.0;
+/// Size jitter of the smoke puffs (fraction of the start size).
+pub const EXPLOSION_SMOKE_SIZE_RANDOM: f64 = 0.4;
+/// Growth of the smoke size in px/s (smoke keeps spreading as it dies).
+pub const EXPLOSION_SMOKE_GROWTH: f64 = 15.0;
+/// Lifetime of one smoke puff in s.
+pub const EXPLOSION_SMOKE_LIFETIME: f64 = 1.5;
+/// Lifetime jitter of the smoke puffs (fraction of the lifetime).
+pub const EXPLOSION_SMOKE_LIFETIME_RANDOM: f64 = 0.35;
+/// Rise speed of the smoke in px/s (hot air lifts it).
+pub const EXPLOSION_SMOKE_RISE: f64 = 30.0;
+/// Horizontal drift speed of the smoke in px/s.
+pub const EXPLOSION_SMOKE_DRIFT: f64 = 16.0;
+/// Smoke colour at birth: light grey, still tinted by the blast.
+pub const EXPLOSION_SMOKE_COLOR_START: [u8; 3] = [156, 150, 144];
+/// Smoke colour in mid-life: darker grey.
+pub const EXPLOSION_SMOKE_COLOR_MID: [u8; 3] = [104, 100, 98];
+/// Smoke colour at death: almost black, the puff has thinned out.
+pub const EXPLOSION_SMOKE_COLOR_END: [u8; 3] = [48, 46, 46];
+/// Peak alpha of one smoke puff (0..1); smoke is thinner than fire.
+pub const EXPLOSION_SMOKE_ALPHA: f64 = 0.6;
+/// Number of sparks of one explosion.
+pub const EXPLOSION_SPARK_COUNT: usize = 16;
+/// Start size of one spark in px.
+pub const EXPLOSION_SPARK_SIZE: f64 = 2.6;
+/// Size jitter of the sparks (fraction of the start size).
+pub const EXPLOSION_SPARK_SIZE_RANDOM: f64 = 0.5;
+/// Lifetime of one spark in s.
+pub const EXPLOSION_SPARK_LIFETIME: f64 = 0.55;
+/// Lifetime jitter of the sparks (fraction of the lifetime).
+pub const EXPLOSION_SPARK_LIFETIME_RANDOM: f64 = 0.5;
+/// Speed of a spark leaving the wreck in px/s.
+pub const EXPLOSION_SPARK_SPEED: f64 = 150.0;
+/// Speed jitter of the sparks (fraction of the speed).
+pub const EXPLOSION_SPARK_SPEED_RANDOM: f64 = 0.7;
+/// Downward acceleration of a spark in px/s^2 (they arc down like debris).
+pub const EXPLOSION_SPARK_GRAVITY: f64 = 190.0;
+/// Spark colour at birth: white-hot.
+pub const EXPLOSION_SPARK_COLOR_START: [u8; 3] = [255, 244, 206];
+/// Spark colour in mid-life: ember orange.
+pub const EXPLOSION_SPARK_COLOR_MID: [u8; 3] = [255, 152, 58];
+/// Spark colour at death: dark ember.
+pub const EXPLOSION_SPARK_COLOR_END: [u8; 3] = [150, 52, 20];
+/// Peak alpha of one spark (0..1).
+pub const EXPLOSION_SPARK_ALPHA: f64 = 1.0;
+/// Number of dark wreck fragments thrown out by one explosion.
+pub const EXPLOSION_DEBRIS_COUNT: usize = 7;
+/// Size of one wreck fragment in px.
+pub const EXPLOSION_DEBRIS_SIZE: f64 = 3.0;
+/// Size jitter of the fragments (fraction of the size).
+pub const EXPLOSION_DEBRIS_SIZE_RANDOM: f64 = 0.5;
+/// Lifetime of one wreck fragment in s.
+pub const EXPLOSION_DEBRIS_LIFETIME: f64 = 0.8;
+/// Lifetime jitter of the fragments (fraction of the lifetime).
+pub const EXPLOSION_DEBRIS_LIFETIME_RANDOM: f64 = 0.4;
+/// Speed of a fragment leaving the wreck in px/s.
+pub const EXPLOSION_DEBRIS_SPEED: f64 = 95.0;
+/// Speed jitter of the fragments (fraction of the speed).
+pub const EXPLOSION_DEBRIS_SPEED_RANDOM: f64 = 0.6;
+/// Downward acceleration of a fragment in px/s^2.
+pub const EXPLOSION_DEBRIS_GRAVITY: f64 = 260.0;
+/// Colour of a thrown wreck fragment: the burnt hull of the vehicle.
+pub const EXPLOSION_DEBRIS_COLOR: [u8; 3] = [58, 56, 58];
+/// Peak alpha of one wreck fragment (0..1).
+pub const EXPLOSION_DEBRIS_ALPHA: f64 = 0.9;
+/// Fraction of the player colour mixed into the fire, so the blast still
+/// reads as belonging to the destroyed vehicle's owner.
+pub const EXPLOSION_TINT_MIX: f64 = 0.35;
+/// Multiplier of the whole explosion size for a helicopter (rules.md section
+/// 5.2): a bigger airframe burns bigger than a tank.
+pub const EXPLOSION_HELICOPTER_SCALE: f64 = 1.25;
+/// Vertical offset of the blast above the wreck position in px, so the fire
+/// starts in the middle of the vehicle body instead of under its tracks.
+pub const EXPLOSION_CENTER_LIFT: f64 = 6.0;
+
 // Obstacles (rules.md sections 1, 4)
 /// Damage dealt by a mine that explodes under a vehicle (section 4).
 pub const MINE_DAMAGE: f64 = 25.0;

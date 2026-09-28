@@ -176,6 +176,12 @@ impl Renderer {
         // range fills (specification_rust.md pass order). The depth test keeps
         // them from darkening hulls, buildings or nearer cliffs.
         draw_range_soup(&dynamic.shadow.vertices, &dynamic.shadow.indices);
+        // Explosion particles: camera-facing billboards, a flat ground wave and
+        // shards, all translucent and drawn without a depth write, so nearer
+        // puffs blend over farther ones. They go after the helicopter shadows
+        // and before the range fills, so a blast is never dimmed by a range
+        // disc lying over the same tile (specification_rust.md pass order).
+        draw_range_soup(&dynamic.fx.vertices, &dynamic.fx.indices);
         // Translucent range discs: one draw call per fill kind (white
         // turret vs. light-green heal), so overlapping fills of the same
         // kind share one depth value per disc and blend in a stable order

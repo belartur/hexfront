@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::board::{Board, ObstacleKind};
 use crate::constants::{self, TurretKind, VehicleKind};
 use crate::entities::{
-    Building, BuildingKind, Player, Vehicle, is_base, turret_kind_of, vehicle_kind_of,
+    Building, BuildingKind, Player, Vehicle, Wreck, is_base, turret_kind_of, vehicle_kind_of,
 };
 use crate::hexgrid::Tile;
 
@@ -63,6 +63,11 @@ pub struct Game {
     pub vehicles: Vec<Vehicle>,
     /// Turret shots in flight, resolved on impact.
     pub projectiles: Vec<Projectile>,
+    /// Wrecks of the vehicles destroyed since the last [`Game::take_wrecks`]
+    /// call. rules.md knows nothing about explosions, so the simulation only
+    /// records *where* a vehicle died; the presentation layer turns each
+    /// record into an effect (see [`crate::fx`]).
+    pub wrecks: Vec<Wreck>,
     /// Simulation time in seconds.
     pub time: f64,
     /// True once the match is decided.
@@ -99,6 +104,7 @@ impl Game {
             building_at,
             vehicles: Vec::new(),
             projectiles: Vec::new(),
+            wrecks: Vec::new(),
             time: 0.0,
             over: false,
             winner: None,
@@ -651,18 +657,41 @@ impl Game {
         best.map(|(id, _)| id)
     }
     /// Damage vehicle `id` by `dmg` (fractional bookkeeping included).
+    ///
+    /// Every point of damage in rules.md (section 9 combat, section 4 mines
+    /// and fire traps, section 10 turret fire) goes through this one function,
+    /// so a vehicle reaching zero units is recorded exactly once, here.
     fn damage_vehicle_by_id(&mut self, id: u64, dmg: f64) {
         if dmg <= 0.0 {
             return;
         }
+        let mut wreck = None;
         if let Some(v) = self.vehicles.iter_mut().find(|v| v.id == id && !v.dead) {
             v.units -= dmg;
             v.loss_acc += dmg;
             if v.units <= 0.0 {
                 v.units = 0.0;
                 v.dead = true;
+                wreck = Some(Wreck {
+                    id: v.id,
+                    owner: v.owner,
+                    kind: v.kind,
+                    x: v.x,
+                    y: v.y,
+                });
             }
         }
+        if let Some(w) = wreck {
+            self.wrecks.push(w);
+        }
+    }
+    /// Remove and return the wrecks recorded so far.
+    ///
+    /// The presentation layer calls this once per frame after the simulation
+    /// step, which keeps [`crate::fx`] fed and the log short (an unconsumed
+    /// wreck is never replayed).
+    pub fn take_wrecks(&mut self) -> Vec<Wreck> {
+        std::mem::take(&mut self.wrecks)
     }
     /// Resolve a vehicle that reached the end of its route (section 4).
     fn arrive_vehicle(&mut self, idx: usize) {
@@ -1171,6 +1200,63 @@ mod tests {
             "units={}",
             game.buildings[di].units
         );
+    }
+    #[test]
+    fn destroyed_vehicle_leaves_exactly_one_wreck() {
+        // rules.md section 9: a duel ends when one side reaches zero units.
+        let board = flat_board(20, 12, 1);
+        let mut game = make_game(board);
+        game.buildings = vec![
+            Building::new(BuildingKind::BaseTank, Some(0), 1, 5, 10.0),
+            Building::new(BuildingKind::BaseTank, Some(1), 12, 5, 10.0),
+        ];
+        game.building_at = [(game.buildings[0].tile, 0), (game.buildings[1].tile, 1)]
+            .into_iter()
+            .collect();
+        assert!(game.try_send(0, (1, 5), (12, 5)));
+        assert!(game.try_send(1, (12, 5), (1, 5)));
+        // 10 units each, a shot every second, ceil(10/5) = 2 damage a shot, so
+        // the duel lasts about five seconds -- but the tanks first have to
+        // cover the eleven hexes between the bases.
+        run(&mut game, 30.0);
+        let wrecks = game.take_wrecks();
+        assert_eq!(wrecks.len(), 1, "one vehicle must die in the duel");
+        let w = wrecks[0];
+        assert_eq!(w.kind, VehicleKind::Tank);
+        // The wreck records the id of a vehicle that really died, and its
+        // position is a copy, not a handle into the simulation.
+        assert!(game.vehicles.iter().all(|v| v.id != w.id || v.dead));
+        // The wreck is a copy of a position, not a handle: reading the log
+        // changes nothing in the simulation.
+        let before = game.time;
+        assert!(game.take_wrecks().is_empty());
+        assert_eq!(game.time, before, "draining must not step the game");
+    }
+    #[test]
+    fn arriving_vehicle_leaves_no_wreck() {
+        // Reaching the target is not a destruction (rules.md section 4), so
+        // the arriving vehicle must not trigger an explosion.
+        let mut game = {
+            let board = flat_board(10, 10, 1);
+            let buildings = vec![
+                Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 20.0),
+                Building::new(BuildingKind::BaseTank, Some(0), 6, 1, 0.0),
+            ];
+            Game::new(
+                board,
+                vec![Player::new(0, true), Player::new(1, false)],
+                buildings,
+                0,
+            )
+        };
+        game.building_at = [(game.buildings[0].tile, 0), (game.buildings[1].tile, 1)]
+            .into_iter()
+            .collect();
+        assert!(game.try_send(0, (1, 1), (6, 1)));
+        run(&mut game, 20.0);
+        assert!(game.vehicles.is_empty());
+        assert!(game.take_wrecks().is_empty());
+        assert!(game.buildings[1].units > 0.0);
     }
     #[test]
     fn elimination_and_victory() {

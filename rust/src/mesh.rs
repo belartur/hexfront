@@ -214,6 +214,18 @@ fn range_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> RangeVertex 
     }
 }
 
+/// Same as [`range_vert`], but with the alpha channel given outright: the
+/// explosion particles of [`crate::fx`] fade a colour and its transparency
+/// independently, so both components come from the particle itself.
+fn range_vert_rgba(x: f64, y: f64, z: f64, color: [u8; 4]) -> RangeVertex {
+    RangeVertex {
+        x: x as f32,
+        y: y as f32,
+        z: z as f32,
+        color,
+    }
+}
+
 fn line_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> LineVertex {
     LineVertex {
         x: x as f32,
@@ -253,6 +265,139 @@ fn push_range_disc(
         push_range_tri(mesh, center, prev, next);
         prev = next;
     }
+}
+
+/// Axis vectors of a screen-facing (billboard) square in world coordinates.
+///
+/// The isometric projection of `camera.rs` maps a world delta `(dx, dy, dz)`
+/// to the screen delta `((dx - dy) * ISO_COS, (dx + dy) * ISO_SIN - dz)`, so a
+/// particle quad has to be spanned by the two world directions that move the
+/// screen exactly right and exactly up:
+///
+/// * `right = (k, -k, 0)`, with `k = 1 / (2 * ISO_COS)`, gives screen
+///   `(+1, 0)` and no depth change (`D` is unchanged), so a quad built on it
+///   is perfectly flat in the depth buffer -- no z-fighting between its own
+///   halves and a stable translucent blend,
+/// * `up = (-k, -k, 2 * ISO_SIN / 2)`, with `k = 1 / (4 * ISO_SIN)`, gives
+///   screen `(0, -1)` and `dD = 2k * ISO_SIN - 2k * ISO_SIN = 0` as well.
+///
+/// Both vectors are unit *screen* steps, not unit world vectors, which is why
+/// the particle sizes in [`crate::fx`] can be written in plain px.
+pub fn billboard_axes() -> ((f64, f64, f64), (f64, f64, f64)) {
+    let k = 1.0 / (2.0 * constants::ISO_COS);
+    let m = 1.0 / (4.0 * constants::ISO_SIN);
+    ((k, -k, 0.0), (-m, -m, constants::ISO_SIN))
+}
+
+/// Soft, camera-facing blob (fire, smoke, flash) of half-size `radius` px.
+///
+/// Built as a square with a **fully transparent centre and opaque edges**, so
+/// the flat quad blends into a round puff without any texture: the fade is
+/// radial by construction and costs eight triangles per particle. `center` is
+/// the current RGBA, `edge` the RGBA of the outer ring.
+pub fn push_fx_blob(
+    soup: &mut RangeSoup,
+    x: f64,
+    y: f64,
+    z: f64,
+    radius: f64,
+    center: [u8; 4],
+    edge: [u8; 4],
+) {
+    let (right, up) = billboard_axes();
+    let at = |a: f64, b: f64, c: [u8; 4]| {
+        range_vert_rgba(
+            x + a * right.0 + b * up.0,
+            y + a * right.1 + b * up.1,
+            z + a * right.2 + b * up.2,
+            c,
+        )
+    };
+    let mid = at(0.0, 0.0, center);
+    // Four edge midpoints carry the colour, the four corners stay transparent:
+    // the square therefore reads as a soft round puff.
+    let n = at(0.0, -radius, edge);
+    let e = at(radius, 0.0, edge);
+    let s = at(0.0, radius, edge);
+    let w = at(-radius, 0.0, edge);
+    for (a, b) in [(n, e), (e, s), (s, w), (w, n)] {
+        push_range_tri(soup, mid, a, b);
+    }
+    // Two opaque triangles fill the middle of the square so the blob has a
+    // solid core instead of four thin triangles meeting in one point.
+    let top = at(0.0, -radius * constants::FX_CORE_FILL, center);
+    let right_mid = at(radius * constants::FX_CORE_FILL, 0.0, center);
+    let bottom = at(0.0, radius * constants::FX_CORE_FILL, center);
+    let left_mid = at(-radius * constants::FX_CORE_FILL, 0.0, center);
+    push_range_tri(soup, mid, top, right_mid);
+    push_range_tri(soup, mid, right_mid, bottom);
+    push_range_tri(soup, mid, bottom, left_mid);
+    push_range_tri(soup, mid, left_mid, top);
+}
+
+/// One flat ring lying in the ground plane: the blast shock wave of an
+/// explosion. Built as a band of quads between `inner` and `outer` radius,
+/// whose inner rim is `inner_alpha` and outer rim `outer_alpha`, so the ring
+/// fades out towards its centre. It is a *ground* effect on purpose: it reads
+/// as a wave running over the terrain instead of a sprite floating in the air.
+#[allow(clippy::too_many_arguments)]
+pub fn push_fx_ring(
+    soup: &mut RangeSoup,
+    x: f64,
+    y: f64,
+    z: f64,
+    inner: f64,
+    outer: f64,
+    color: [u8; 3],
+    inner_alpha: u8,
+    outer_alpha: u8,
+) {
+    let inner_c = [color[0], color[1], color[2], inner_alpha];
+    let outer_c = [color[0], color[1], color[2], outer_alpha];
+    let n = constants::FX_RING_SEGMENTS;
+    let at = |r: f64, a: f64, c: [u8; 4]| range_vert_rgba(x + r * a.cos(), y + r * a.sin(), z, c);
+    for i in 0..n {
+        let a0 = std::f64::consts::TAU * i as f64 / n as f64;
+        let a1 = std::f64::consts::TAU * (i + 1) as f64 / n as f64;
+        let p0 = at(inner, a0, inner_c);
+        let p1 = at(inner, a1, inner_c);
+        let p2 = at(outer, a1, outer_c);
+        let p3 = at(outer, a0, outer_c);
+        push_range_tri(soup, p0, p1, p2);
+        push_range_tri(soup, p0, p2, p3);
+    }
+}
+
+/// Oriented square shard (spark, wreck fragment): a hard-edged billboard,
+/// unlike the soft [`push_fx_blob`]. Sparks stay crisp, which is what makes
+/// them read as glowing embers rather than more smoke.
+pub fn push_fx_shard(
+    soup: &mut RangeSoup,
+    x: f64,
+    y: f64,
+    z: f64,
+    radius: f64,
+    color: [u8; 4],
+    angle: f64,
+) {
+    let (right, up) = billboard_axes();
+    let (c, s) = (angle.cos(), angle.sin());
+    let at = |along: f64, across: f64| {
+        let a = along * c - across * s;
+        let b = along * s + across * c;
+        range_vert_rgba(
+            x + a * right.0 + b * up.0,
+            y + a * right.1 + b * up.1,
+            z + a * right.2 + b * up.2,
+            color,
+        )
+    };
+    let a = at(-radius, -radius);
+    let b = at(radius, -radius);
+    let c = at(radius, radius);
+    let d = at(-radius, radius);
+    push_range_tri(soup, a, b, c);
+    push_range_tri(soup, a, c, d);
 }
 
 /// Flat oriented rectangle with one RGBA colour (helicopter shadow parts).
@@ -744,6 +889,10 @@ pub struct DynamicMesh {
     pub range_turret: RangeSoup,
     /// Flat translucent light-green heal range discs (no depth write).
     pub range_heal: RangeSoup,
+    /// Explosion particles: camera-facing billboard quads, flat ground rings
+    /// and shards, all with their own RGBA (no depth write, drawn after the
+    /// opaque pass; see [`push_fx_blob`] and [`push_fx_ring`]).
+    pub fx: RangeSoup,
     /// Flat translucent range discs (no depth write, drawn after opaque).
     ///
     /// Kept so older callers keep compiling; new code fills
@@ -764,6 +913,8 @@ impl DynamicMesh {
         self.range_turret.indices.clear();
         self.range_heal.vertices.clear();
         self.range_heal.indices.clear();
+        self.fx.vertices.clear();
+        self.fx.indices.clear();
         self.translucent.vertices.clear();
         self.translucent.indices.clear();
         self.lines.clear();
@@ -1465,6 +1616,26 @@ pub fn vehicle_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
         helicopter_altitude(game)
     } else {
         vehicle_surface_z(game, v)
+    }
+}
+
+/// Rendered elevation of an explosion of the destroyed vehicle `w` in px.
+///
+/// A ground vehicle is drawn on the surface it stood on, so its blast starts
+/// there -- a bridge deck included, the wreck may have been driving along one.
+/// A helicopter explodes at its flight altitude, because rules.md section 5.2
+/// makes it ignore terrain heights: the same [`helicopter_altitude`] the hull
+/// was drawn at. The wreck is only a position now (the vehicle is already
+/// gone), so the mode it was crossing in cannot be replayed; the deck is
+/// therefore used whenever the wreck sits on one.
+pub fn wreck_z(game: &Game, w: &crate::entities::Wreck) -> f64 {
+    if w.kind == constants::VehicleKind::Helicopter {
+        return helicopter_altitude(game);
+    }
+    let tile = game.board.world_to_tile(w.x, w.y);
+    match deck_z_of(&game.board, tile) {
+        Some(z) if z > vehicle_ground_z(game, w.x, w.y) => z,
+        _ => vehicle_ground_z(game, w.x, w.y),
     }
 }
 
@@ -2341,6 +2512,66 @@ fn push_projectiles(game: &Game, mesh: &mut TriangleSoup) {
 mod tests {
     use super::*;
     use crate::board::Board;
+
+    #[test]
+    fn billboard_quads_are_flat_in_the_depth_buffer() {
+        // A particle quad has to be perfectly flat in D, otherwise its two
+        // halves land on different depths and the translucent blend of one
+        // puff over another flickers while the camera pans.
+        let camera = crate::camera::Camera::new((1180.0, 720.0));
+        let iso = crate::iso::IsoCamera::from_camera(&camera, 0.0, 40000.0);
+        let d = |x: f64, y: f64, z: f64| {
+            let (_, _, depth) = iso.project_point(&camera, x, y, z);
+            depth
+        };
+        for (x, y, z, radius) in [
+            (100.0, 200.0, 36.0, 12.0),
+            (-500.0, 900.0, 0.0, 4.0),
+            (2500.0, 1700.0, 81.0, 30.0),
+        ] {
+            let mut soup = RangeSoup::default();
+            push_fx_blob(
+                &mut soup,
+                x,
+                y,
+                z,
+                radius,
+                [255, 200, 100, 255],
+                [255, 200, 100, 40],
+            );
+            let center = d(x, y, z);
+            for v in soup.vertices.iter() {
+                let vert_d = d(f64::from(v.x), f64::from(v.y), f64::from(v.z));
+                assert!(
+                    (vert_d - center).abs() < 1e-4,
+                    "blob vertex off the particle depth: {vert_d} vs {center}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn billboard_axes_move_exactly_one_pixel_on_screen() {
+        // The axes are unit *screen* steps, which is why the particle sizes in
+        // `fx` can be written in plain px.
+        let camera = crate::camera::Camera::new((1180.0, 720.0));
+        let (right, up) = billboard_axes();
+        let (ox, oy) = camera.world_to_screen(500.0, 500.0, 45.0);
+        let (rx, ry) = camera.world_to_screen(500.0 + right.0, 500.0 + right.1, 45.0 + right.2);
+        let (ux, uy) = camera.world_to_screen(500.0 + up.0, 500.0 + up.1, 45.0 + up.2);
+        assert!((rx - ox - 1.0).abs() < 1e-3, "right axis: {}", rx - ox);
+        assert!(
+            (ry - oy).abs() < 1e-3,
+            "right axis must not move vertically: {}",
+            ry - oy
+        );
+        assert!(
+            (ux - ox).abs() < 1e-3,
+            "up axis must not move sideways: {}",
+            ux - ox
+        );
+        assert!((uy - oy + 1.0).abs() < 1e-3, "up axis: {}", uy - oy);
+    }
 
     #[test]
     fn helicopter_has_slender_hull_and_spinning_rotor() {

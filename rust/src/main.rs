@@ -10,6 +10,7 @@ mod camera;
 mod constants;
 mod editor;
 mod entities;
+mod fx;
 mod game;
 mod hexgrid;
 mod iso;

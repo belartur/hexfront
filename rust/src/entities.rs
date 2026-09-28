@@ -102,6 +102,27 @@ impl Player {
     }
 }
 
+/// A vehicle destroyed in combat, reported by the simulation so the renderer
+/// can play an explosion where it happened.
+///
+/// rules.md has no explosions: section 9 only says a vehicle stops existing
+/// once its units drop to zero. The wreck is therefore a pure *position* of
+/// the event -- the log and the disappearance stay untouched, and only the
+/// presentation layer turns the record into an effect.
+#[derive(Clone, Copy, Debug)]
+pub struct Wreck {
+    /// Id of the vehicle that was destroyed (also a stable effect seed).
+    pub id: u64,
+    /// Owning player id (decides the tint of the sparks).
+    pub owner: usize,
+    /// Destroyed vehicle kind (rules.md section 4).
+    pub kind: VehicleKind,
+    /// World x of the wreck in j.
+    pub x: f64,
+    /// World y of the wreck in j.
+    pub y: f64,
+}
+
 /// A floating combat number: `(amount, age)`.
 #[derive(Clone, Copy, Debug)]
 pub struct FloatText {

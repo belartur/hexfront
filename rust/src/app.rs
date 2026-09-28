@@ -65,6 +65,9 @@ pub struct Application {
     editor_terrain_fp: u64,
     /// Last frame's hovered editor tile (for click edge detection).
     editor_tile: Option<Tile>,
+    /// Explosion particles of destroyed vehicles (presentation only, see
+    /// [`crate::fx`]). Filled from the wrecks the simulation reports.
+    fx: crate::fx::Fx,
     /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`).
     capture: Option<String>,
     /// TEMPORARY debug hook frame countdown.
@@ -102,6 +105,7 @@ impl Application {
             editor_clean: true,
             editor_terrain_fp: 0,
             editor_tile: None,
+            fx: crate::fx::Fx::new(),
             playtest: false,
             capture: None,
             capture_frames: 0,
@@ -329,6 +333,7 @@ impl Application {
         self.editor = None;
         self.editor_game = None;
         self.playtest = false;
+        self.fx.clear();
     }
     fn set_selection(&mut self, src: Option<Tile>) {
         self.preview_tile = None;
@@ -438,6 +443,7 @@ impl Application {
                 self.preview_path = None;
                 self.load_timer = 0.0;
                 self.sim_acc = 0.0;
+                self.fx.clear();
                 self.state = State::Loading;
             }
             Err(e) => eprintln!("cannot load {}: {}", path.display(), e),
@@ -482,6 +488,7 @@ impl Application {
         self.preview_path = None;
         self.load_timer = 0.0;
         self.sim_acc = 0.0;
+        self.fx.clear();
         self.state = State::Playing;
     }
     /// Leave a playtest run and keep editing the same map (Esc in playtest).
@@ -532,6 +539,11 @@ impl Application {
             self.sim_acc -= constants::SIM_DT;
             steps += 1;
         }
+        // Vehicles that fell to zero units (rules.md sections 4, 9, 10) leave a
+        // wreck behind; the effect is started here, so it runs on the same
+        // frame the wreck disappears. The effects themselves are advanced with
+        // the wall-clock delta in `draw`, like the rotor phase.
+        self.spawn_wreck_effects();
         // Refresh route preview.
         if let Some(sel) = self.selection {
             let (mx, my) = mouse_position();
@@ -548,6 +560,21 @@ impl Application {
                     self.preview_path = game.board.find_path(sel, h, kind);
                 }
             }
+        }
+    }
+    /// Turn the wrecks reported by the simulation into explosion effects.
+    ///
+    /// The rendered height of each wreck is taken from the same geometry the
+    /// vehicle itself was drawn with ([`mesh::vehicle_z`]), so a blast starts
+    /// exactly where the hull was: on the ground for a ground vehicle, at
+    /// flight altitude for a helicopter.
+    fn spawn_wreck_effects(&mut self) {
+        let Some(game) = self.game.as_mut() else {
+            return;
+        };
+        for wreck in game.take_wrecks() {
+            let z = mesh::wreck_z(game, &wreck);
+            self.fx.explode(&wreck, z);
         }
     }
     fn draw(&mut self, dt: f32) {
@@ -580,6 +607,12 @@ impl Application {
                 game.board.side,
             );
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
+            // Explosion particles live in the presentation layer, not in the
+            // simulation, so they are advanced with the wall-clock delta
+            // (exactly like the rotor phase) and rebuilt into the same
+            // per-frame mesh.
+            self.fx.update(f64::from(dt));
+            self.fx.build(&mut self.dynamic);
             // Advance the shared rotor phase by wall-clock time, so the
             // spin speed does not depend on the frame rate; the next frame
             // uses it for the airframe blades and their shadow alike.
@@ -1447,6 +1480,8 @@ impl Application {
                 game.board.side,
             );
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
+            self.fx.update(f64::from(dt));
+            self.fx.build(&mut self.dynamic);
             self.renderer.rotor_phase = (self.renderer.rotor_phase
                 + constants::ROTOR_SPIN_RAD_PER_S * f64::from(dt))
                 % std::f64::consts::TAU;
