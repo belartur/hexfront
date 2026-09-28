@@ -193,10 +193,119 @@ impl Game {
         self.time += dt;
         self.update_buildings(dt);
         self.update_buffers(dt);
+        self.update_tank_guns(dt);
         self.update_vehicles(dt);
         self.update_projectiles(dt);
         self.vehicles.retain(|v| !v.dead);
         self.check_elimination();
+    }
+    /// Tank guns (rules.md sec. 5.1).
+    ///
+    /// A tank carries a homing gun that fires at an enemy lying strictly
+    /// *outside* the detection radius: inside it, section 9 combat already
+    /// stops both vehicles and trades shots, and the gun stays silent so a
+    /// tank in a duel never doubles its fire. The gun fires while moving, so
+    /// a tank is a mobile firing platform; it shoots the nearest eligible
+    /// enemy, ties broken by id like everywhere else.
+    /// A tank held back by a wall or a fire trap does not use its gun: it is
+    /// busy with something more urgent (rules.md sections 4, 5.1).
+    fn busy_attacking(&self, x: f64, y: f64) -> bool {
+        self.board
+            .world_to_tile(x, y)
+            .and_then(|t| self.board.tiles.get(&t))
+            .and_then(|t| t.obstacle.as_ref())
+            .is_some_and(|o| matches!(o.kind, ObstacleKind::Wall | ObstacleKind::TrapFire))
+    }
+    /// Tank guns (rules.md sec. 5.1).
+    fn update_tank_guns(&mut self, dt: f64) {
+        // A tank carries a homing gun that fires at an enemy lying strictly
+        // *outside* the detection radius: inside it, section 9 combat already
+        // stops both vehicles and trades shots, and the gun stays silent so a
+        // tank in a duel never doubles its fire. The gun fires while moving, so
+        // a tank is a mobile firing platform; it shoots the nearest eligible
+        // enemy, ties broken by id like everywhere else.
+        // Collect first: shooting needs &mut self (projectiles, sounds) while
+        // scanning targets needs &self, exactly like update_buffers.
+        let guns: Vec<(u64, usize, f64, f64, f64)> = self
+            .vehicles
+            .iter()
+            .filter(|v| {
+                !v.dead
+                    && v.kind == VehicleKind::Tank
+                    // A tank that is already trading shots in a duel shoots
+                    // with that duel only (rules.md sec. 9).
+                    && v.combat_target.is_none()
+                    && !self.busy_attacking(v.x, v.y)
+            })
+            .map(|v| (v.id, v.owner, v.x, v.y, v.units))
+            .collect();
+        if guns.is_empty() {
+            return;
+        }
+        let mut shots: Vec<(u64, usize, u64, f64)> = Vec::new();
+        for (id, owner, x, y, units) in guns {
+            let i = match self.vehicles.iter().position(|v| v.id == id) {
+                Some(i) => i,
+                None => continue,
+            };
+            self.vehicles[i].gun_timer += dt;
+            if self.vehicles[i].gun_timer < constants::TANK_GUN_INTERVAL {
+                continue;
+            }
+            // Drop a target that died or left the range since the last shot.
+            self.vehicles[i].gun_target = None;
+            let mut best: Option<(u64, f64)> = None;
+            for e in self.vehicles.iter() {
+                if e.dead || e.owner == owner {
+                    continue;
+                }
+                let d = dist((x, y), e.pos());
+                let eligible = d > constants::TANK_GUN_MIN_RANGE && d <= constants::TANK_GUN_RANGE;
+                let better = match best {
+                    None => eligible,
+                    Some((bid, bd)) => eligible && (d < bd || (d == bd && e.id < bid)),
+                };
+                if better {
+                    best = Some((e.id, d));
+                }
+            }
+            if let Some((tid, _)) = best {
+                self.vehicles[i].gun_timer = 0.0;
+                self.vehicles[i].gun_target = Some(tid);
+                shots.push((
+                    id,
+                    owner,
+                    tid,
+                    (units / constants::TANK_GUN_DAMAGE_DIV).ceil(),
+                ));
+            }
+        }
+        for (id, owner, tid, dmg) in shots {
+            let (pos, tile) = match self.vehicles.iter().find(|v| v.id == id) {
+                Some(v) => (v.pos(), self.board.world_to_tile(v.x, v.y)),
+                None => continue,
+            };
+            let target = match self.vehicles.iter().find(|v| v.id == tid) {
+                Some(v) => v.pos(),
+                None => continue,
+            };
+            // The gun uses the same homing shell as the ordinary emplacement,
+            // so flight, impact and splash are resolved by the one existing
+            // code path (rules.md sec. 10).
+            self.report_sound(SoundKind::TurretShot(TurretKind::Normal), pos.0, pos.1);
+            self.projectiles.push(Projectile {
+                from: tile.unwrap_or((0, 0)),
+                from_pos: pos,
+                owner: Some(owner),
+                target: tid,
+                to: target,
+                to_tile: self.board.world_to_tile(target.0, target.1),
+                dmg,
+                kind: TurretKind::Normal,
+                t: 0.0,
+                dur: constants::TANK_GUN_FLIGHT_TIME,
+            });
+        }
     }
     fn update_buildings(&mut self, dt: f64) {
         // Production + overcrowding (rules.md sec. 3). Flush texts first.
@@ -1167,6 +1276,116 @@ mod tests {
         ));
         run(&mut game, 4.0);
         assert!(game.vehicles[0].units > 10.0);
+    }
+    /// Place a vehicle of `kind` owned by `owner` at world position (x, y).
+    fn spawn(game: &mut Game, kind: VehicleKind, owner: usize, units: f64, x: f64, y: f64) -> u64 {
+        game.vehicles
+            .push(Vehicle::new(kind, owner, units, vec![], (x, y), None));
+        game.vehicles.last().unwrap().id
+    }
+    #[test]
+    fn tank_gun_shells_an_enemy_out_of_melee_range() {
+        // A tank guns down an enemy that is outside the detection radius
+        // (rules.md 5.1): the shell is homing and damages on impact.
+        let board = flat_board(20, 20, 1);
+        let mut game = make_game(board);
+        spawn(&mut game, VehicleKind::Tank, 0, 40.0, 100.0, 100.0);
+        spawn(&mut game, VehicleKind::Helicopter, 1, 40.0, 250.0, 100.0);
+        run(&mut game, 3.6);
+        let heli = game.vehicles.iter().find(|v| v.owner == 1);
+        assert!(
+            heli.is_none_or(|v| v.units < 40.0),
+            "gun did no damage: {:?}",
+            game.vehicles.iter().map(|v| v.units).collect::<Vec<_>>()
+        );
+    }
+    #[test]
+    fn tank_gun_is_silent_inside_the_detection_radius() {
+        // The gun must never double the fire of a tank in a duel: an enemy
+        // inside the detection radius is damaged by section 9 alone
+        // (ceil(units/5) per second), never by the gun.
+        let board = flat_board(20, 20, 1);
+        let mut game = make_game(board);
+        spawn(&mut game, VehicleKind::Tank, 0, 40.0, 100.0, 100.0);
+        spawn(&mut game, VehicleKind::Helicopter, 1, 1000.0, 150.0, 100.0);
+        run(&mut game, 10.0);
+        // 10 s of section 9 fire: ceil(40/5) = 8 per second.
+        let expected = 1000.0 - 8.0 * 10.0;
+        let heli = game.vehicles.iter().find(|v| v.owner == 1);
+        assert!(
+            heli.is_none_or(|v| v.units >= expected - 1e-6),
+            "took {:?}, close-combat alone gives {}",
+            heli.map(|v| v.units),
+            expected
+        );
+    }
+    #[test]
+    fn tank_gun_respects_its_cooldown() {
+        // One shell per TANK_GUN_INTERVAL, not one per tick.
+        let board = flat_board(20, 20, 1);
+        let mut game = make_game(board);
+        spawn(&mut game, VehicleKind::Tank, 0, 40.0, 100.0, 100.0);
+        spawn(&mut game, VehicleKind::Hovercraft, 1, 2000.0, 250.0, 100.0);
+        // Far enough to never enter melee, so only the gun can do damage.
+        let per_shot = (40.0 / constants::TANK_GUN_DAMAGE_DIV).ceil();
+        run(&mut game, constants::TANK_GUN_INTERVAL - 0.05);
+        let hov = game.vehicles.iter().find(|v| v.owner == 1);
+        assert!(
+            hov.is_none_or(|v| v.units >= 2000.0),
+            "fired before the cooldown elapsed: {:?}",
+            hov.map(|v| v.units)
+        );
+        run(&mut game, constants::TANK_GUN_FLIGHT_TIME + 0.2);
+        let hov = game.vehicles.iter().find(|v| v.owner == 1);
+        assert!(
+            hov.is_none_or(|v| v.units <= 2000.0 - per_shot),
+            "shell never landed: {:?}",
+            hov.map(|v| v.units)
+        );
+    }
+    #[test]
+    fn only_tanks_carry_the_gun() {
+        // Helicopter, hovercraft and buffer have no gun at all.
+        for kind in [
+            VehicleKind::Helicopter,
+            VehicleKind::Hovercraft,
+            VehicleKind::Buffer,
+        ] {
+            let board = flat_board(20, 20, 1);
+            let mut game = make_game(board);
+            spawn(&mut game, kind, 0, 40.0, 100.0, 100.0);
+            spawn(&mut game, VehicleKind::Tank, 1, 40.0, 250.0, 100.0);
+            run(&mut game, 8.0);
+            let enemy = game.vehicles.iter().find(|v| v.owner == 1);
+            assert!(
+                enemy.is_none_or(|v| v.units >= 40.0),
+                "{kind:?} fired its gun: {:?}",
+                enemy.map(|v| v.units)
+            );
+        }
+    }
+    #[test]
+    fn tank_gun_hits_a_moving_target() {
+        // The shell is homing: a target that keeps moving is still hit.
+        let board = flat_board(20, 20, 1);
+        let mut game = make_game(board);
+        let id = spawn(&mut game, VehicleKind::Tank, 0, 40.0, 100.0, 100.0);
+        spawn(&mut game, VehicleKind::Hovercraft, 1, 2000.0, 250.0, 100.0);
+        // Slide the target sideways every step, well outside melee range.
+        for _ in 0..(4.0 / constants::SIM_DT).round() as usize {
+            if let Some(t) = game.vehicles.iter_mut().find(|v| v.owner == 1) {
+                t.y += 6.0 * constants::SIM_DT;
+            }
+            game.update(constants::SIM_DT);
+        }
+        let shooter = game.vehicles.iter().find(|v| v.id == id);
+        assert!(shooter.is_some(), "shooter died");
+        let target = game.vehicles.iter().find(|v| v.owner == 1);
+        assert!(
+            target.is_none_or(|v| v.units < 2000.0),
+            "moving target untouched: {:?}",
+            target.map(|v| v.units)
+        );
     }
     #[test]
     fn wall_mine_traps() {

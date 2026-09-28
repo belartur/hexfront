@@ -101,6 +101,14 @@ Każdy pojazd porusza się z określoną dla jego typu prędkością. Szybkość
 
 Czołg jest pojazdem lądowym. To oznacza, że może poruszać się tylko po lądzie. Oddziałują na niego wszelkie przeszkody umieszczone na lądzie. Porusza się z prędkością 60 j/s.
 
+Czołg dodatkowo dysponuje działkiem samonaprowadzającym się, które odpala pocisk w wrogie pojazdy. Pocisk zadaje obrażenia równe $\lceil x \div 8 \rceil$, gdzie $x$ oznacza ilość jednostek w pojeździe, który wystrzelił, i rozliczany jest w momencie **trafienia**, po stałym czasie lotu — tak jak pocisk działka (sekcja 10). Pocisk jest samonaprowadzający się, a pocisk ginie bez skutku, jeśli jego cel zostanie zniszczony w trakcie lotu.
+
+Działko czołgu odpala się wyłącznie wtedy, gdy przeciwnik znajduje się **poza zasięgiem wykrywania** z sekcji 9. Wewnątrz tego zasięgu oba pojazdy zatrzymują się i walczą na zasadach sekcji 9, a działko milczy — dzięki temu czołg prowadzący walkę nie prowadzi podwójnego ognia. Działko strzela do wrogiego pojazdu znajdującego się najbliżej, spośród tych, które leżą w jego zasięgu; przy identycznych odległościach celem jest ten, który wcześniej wszedł w zasięg działka, a przy pełnej remisie — ten o mniejszym identyfikatorze pojazdu.
+
+Działko czołgu działa również wtedy, gdy czołg się porusza, i nie wpływa na jego prędkość ani bieg. Czołg może więc ostrzeliwać przeciwnika z dystansu i odchodzić.
+
+Czołg nie odpala działka, gdy sam jest unieruchomiony przez ścianę (sekcja 4) albo gdy stoi w ogniu pułapki ogniowej — w obu przypadkach zajęty jest sprawami pilniejszymi.
+
 ### 5.2. Helikopter
 
 Helikopter jest pojazdem latającym. Może poruszać się wszędzie: nad wodą i nad lądem. Jest jedynym pojazdem, którego nie dotyczą różnice wysokości pól. Ponadto nie oddziałują na niego żadne utrudnienia. Porusza się z prędkością 90 j/s.

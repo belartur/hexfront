@@ -1333,6 +1333,14 @@ fn tank_aim(game: &Game, v: &crate::entities::Vehicle, heading: (f64, f64)) -> (
     {
         return dir;
     }
+    // A tank shelling from beyond detection range has no duel to aim at, but
+    // its gun still points at the enemy it is shooting (rules.md section 5.1).
+    if let Some(tid) = v.gun_target
+        && let Some(enemy) = game.vehicles.iter().find(|x| x.id == tid && !x.dead)
+        && let Some(dir) = aim_at(enemy.x, enemy.y)
+    {
+        return dir;
+    }
     if let Some(tile) = v.wall_target {
         let (wx, wy) = game.board.center_world(tile);
         if let Some(dir) = aim_at(wx, wy) {

@@ -363,6 +363,25 @@ pub const DETECTION_RADIUS: f64 = 80.0;
 /// Interval between consecutive shots in vehicle-vs-vehicle combat.
 pub const FIRE_INTERVAL: f64 = 1.0;
 
+// Tank gun (rules.md section 5.1). The gun is a separate weapon from the
+// close-combat shot of section 9: it engages an enemy that is *outside* the
+// detection radius, so it never doubles the fire of a tank that is already
+// trading shots in a duel. The close-combat damage formula (ceil(units/5)) is
+// untouched and applies only to that duel.
+/// Range of the tank gun in j (rules.md section 5.1).
+pub const TANK_GUN_RANGE: f64 = 180.0;
+/// Lower bound in j on the target distance: the gun stays silent inside the
+/// detection radius, where section 9 combat already resolves the fight.
+pub const TANK_GUN_MIN_RANGE: f64 = DETECTION_RADIUS;
+/// Interval between two tank gun shots in seconds (rules.md section 5.1).
+pub const TANK_GUN_INTERVAL: f64 = 3.0;
+/// Damage divisor of one tank gun shell: damage is ceil(units / divisor)
+/// (rules.md section 5.1).
+pub const TANK_GUN_DAMAGE_DIV: f64 = 8.0;
+/// Flight time of one tank gun shell in seconds. The shell is homing, exactly
+/// like a turret projectile (rules.md sections 5.1, 10).
+pub const TANK_GUN_FLIGHT_TIME: f64 = 0.4;
+
 // Turrets (rules.md section 10)
 /// Kinds of gun emplacements (rules.md section 10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

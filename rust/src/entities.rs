@@ -236,6 +236,12 @@ pub struct Vehicle {
     pub last_opponent: Option<u64>,
     /// Combat shot cooldown progress.
     pub fire_timer: f64,
+    /// Tank gun cooldown progress (rules.md section 5.1).
+    pub gun_timer: f64,
+    /// Enemy the tank gun is currently shelling (rules.md section 5.1).
+    /// Kept so the renderer can train the barrel on the same target the
+    /// simulation shoots at; `None` when the gun is idle.
+    pub gun_target: Option<u64>,
     /// Wall-attack shot cooldown progress.
     pub wall_timer: f64,
     /// Tile of the wall being shot.
@@ -278,6 +284,8 @@ impl Vehicle {
             combat_target: None,
             last_opponent: None,
             fire_timer: 0.0,
+            gun_timer: 0.0,
+            gun_target: None,
             wall_timer: 0.0,
             wall_target: None,
             wall_shots: 0,
