@@ -11,7 +11,7 @@ use crate::hexgrid::{self, Tile};
 /// A static obstacle standing on a tile (rules.md sections 1, 4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Obstacle {
-    /// Obstacle kind string: wall, mine, mine_water, trap_fire, trap_ice.
+    /// Obstacle kind string: wall, mine, trap_fire, trap_ice.
     pub kind: ObstacleKind,
     /// Only walls have hit points.
     pub hp: i32,
@@ -22,10 +22,8 @@ pub struct Obstacle {
 pub enum ObstacleKind {
     /// 20 hp, blocks ground vehicles until destroyed.
     Wall,
-    /// 25 damage once, then removed (land).
+    /// 25 damage once, then removed; stands on land and on water alike.
     Mine,
-    /// Mine on water.
-    MineWater,
     /// 1 dmg/s while on it, never removed.
     TrapFire,
     /// Halves speed while on it, never removed.
@@ -48,7 +46,6 @@ impl Obstacle {
         match self.kind {
             ObstacleKind::Wall => "wall",
             ObstacleKind::Mine => "mine",
-            ObstacleKind::MineWater => "mine_water",
             ObstacleKind::TrapFire => "trap_fire",
             ObstacleKind::TrapIce => "trap_ice",
         }

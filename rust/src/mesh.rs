@@ -2469,7 +2469,7 @@ fn push_obstacle(
     let z = tile_top_z(&game.board, tile);
     match o.kind {
         ObstacleKind::Wall => push_box(mesh, cx, cy, z, 30.0, 26.0, 18.0, [120, 100, 80]),
-        ObstacleKind::Mine | ObstacleKind::MineWater => {
+        ObstacleKind::Mine => {
             // Flat marker floats just above the tile top: a coplanar opaque
             // disc loses the depth race against the terrain and flickers.
             let dz = z + constants::OBSTACLE_LIFT;

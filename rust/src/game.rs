@@ -737,7 +737,7 @@ impl Game {
             .tiles
             .get(&tile)
             .and_then(|t| t.obstacle.as_ref())
-            .map(|o| o.kind == ObstacleKind::Mine || o.kind == ObstacleKind::MineWater)
+            .map(|o| o.kind == ObstacleKind::Mine)
             .unwrap_or(false);
         if !is_mine {
             return;
@@ -1427,6 +1427,49 @@ mod tests {
         );
         assert!(game.board.tiles.get(&mine_tile).unwrap().obstacle.is_none()); // mine exploded once
         assert!(game.board.tiles.get(&fire_tile).unwrap().obstacle.is_some()); // fire trap remains
+    }
+    #[test]
+    fn mine_hits_on_land_and_water_alike() {
+        // rules.md section 1: one mine kind, standing on land and on water
+        // alike; section 4: it deals MINE_DAMAGE once to the first
+        // non-helicopter vehicle reaching its centre, then disappears.
+        for (label, height) in [("land", 1), ("water", 0)] {
+            let mut game = make_game(flat_board(20, 12, height));
+            let route = game
+                .board
+                .find_path((2, 5), (12, 5), VehicleKind::Hovercraft)
+                .unwrap();
+            let mine_tile = route[3];
+            game.board.tiles.get_mut(&mine_tile).unwrap().obstacle =
+                Some(Obstacle::new(ObstacleKind::Mine));
+            let (sx, sy) = game.board.center_world((2, 5));
+            game.vehicles.push(Vehicle::new(
+                VehicleKind::Hovercraft,
+                0,
+                40.0,
+                route,
+                (sx, sy),
+                None,
+            ));
+            let mut units_after = None;
+            for _ in 0..(8.0 / constants::SIM_DT).round() as usize {
+                game.update(constants::SIM_DT);
+                if units_after.is_none()
+                    && game.board.tiles.get(&mine_tile).unwrap().obstacle.is_none()
+                {
+                    units_after = game.vehicles.first().map(|v| v.units);
+                }
+            }
+            assert!(
+                game.board.tiles.get(&mine_tile).unwrap().obstacle.is_none(),
+                "mine on {label} never exploded"
+            );
+            let units = units_after.unwrap_or_else(|| panic!("no reading on {label}"));
+            assert!(
+                (units - (40.0 - constants::MINE_DAMAGE)).abs() < 1e-6,
+                "mine on {label}: units={units}"
+            );
+        }
     }
     #[test]
     fn ice_trap_stays() {

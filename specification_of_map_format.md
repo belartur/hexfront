@@ -59,11 +59,11 @@ Rodzaje budynków opisuje [rules.md](rules.md), sekcja 3. Po typie zapisywane s�
 ### Utrudnienia (typy 26 i wyższe)
 | typ | rodzaj utrudnienia |
 |---|---|
-| 26 | ściana |
-| 27 | mina lądowa |
-| 28 | mina wodna |
-| 29 | pułapka ogniowa |
-| 30 | pułapka lodowa |
+| 26 | ściana (także na wodzie) |
+| 27 | mina (także na wodzie) |
+| 28 | zarezerwowany (nieużywany) |
+| 29 | pułapka ogniowa (tylko na lądzie) |
+| 30 | pułapka lodowa (tylko na lądzie) |
 | 31 i wyższe | zarezerwowane (nieznany typ jest przy odczycie pomijany z ostrzeżeniem) |
 
 Utrudnienia opisuje [rules.md](rules.md), sekcja 1.

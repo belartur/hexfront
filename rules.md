@@ -18,7 +18,7 @@ Na każdym polu z lądem może się znajdować jedno z:
 * podjazd,
 * fragment mostu,
 * ściana,
-* mina lądowa,
+* mina,
 * pułapka (ogniowa lub lodowa).
 
 Na polu z wodą (o wysokości 0) może się znajdować jedno z:
@@ -26,7 +26,7 @@ Na polu z wodą (o wysokości 0) może się znajdować jedno z:
 * podjazd,
 * fragment mostu,
 * ściana,
-* mina wodna.
+* mina.
 Pojazd jest na polu, gdy środek jego grafiki znajduje się w granicach tego pola. Mina wybucha dopiero, gdy środek grafiki pojazdu znajduje się na środku pola z tą miną.
 
 Każdy z budynków przynależy do dokładnie jednego z graczy albo jest neutralny.

@@ -61,7 +61,6 @@ pub fn obstacle_kind_of(code: u8) -> Option<ObstacleKind> {
     match code {
         26 => Some(ObstacleKind::Wall),
         27 => Some(ObstacleKind::Mine),
-        28 => Some(ObstacleKind::MineWater),
         29 => Some(ObstacleKind::TrapFire),
         30 => Some(ObstacleKind::TrapIce),
         _ => None,
@@ -74,7 +73,6 @@ pub fn obstacle_code_of(kind: ObstacleKind) -> u8 {
     match kind {
         ObstacleKind::Wall => 26,
         ObstacleKind::Mine => 27,
-        ObstacleKind::MineWater => 28,
         ObstacleKind::TrapFire => 29,
         ObstacleKind::TrapIce => 30,
     }
@@ -289,9 +287,11 @@ pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>), String> {
                 continue;
             }
             let t = board.tiles.get(&tile).unwrap();
+            // Walls and mines stand on land and on water alike; only the
+            // traps are restricted to land (rules.md section 1).
             let ok = match kind {
-                ObstacleKind::MineWater => t.height == 0,
-                _ => t.height > 0,
+                ObstacleKind::TrapFire | ObstacleKind::TrapIce => t.height > 0,
+                _ => true,
             };
             if !ok {
                 warn(path, "obstacle on wrong terrain ignored");
@@ -485,8 +485,11 @@ mod tests {
         assert!(board.add_bridge((5, 2), (5, 5), 1).is_some());
         board.tiles.get_mut(&(5, 0)).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Wall));
         board.tiles.get_mut(&(6, 0)).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::TrapIce));
-        board.tiles.get_mut(&(0, 0)).unwrap().obstacle =
-            Some(Obstacle::new(ObstacleKind::MineWater));
+        // A mine on water and a wall on water: both are legal (rules.md
+        // section 1) and both survive the round trip.
+        board.tiles.get_mut(&(0, 0)).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Mine));
+        board.tiles.get_mut(&(1, 0)).unwrap().height = 0;
+        board.tiles.get_mut(&(1, 0)).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Wall));
         board.tiles.get_mut(&(6, 5)).unwrap().obstacle =
             Some(Obstacle::new(ObstacleKind::TrapFire));
         let buildings = vec![
@@ -499,11 +502,11 @@ mod tests {
         let path = dir.join("hexfront_roundtrip_test.map");
         save_map(&path, &board, &buildings).unwrap();
         // 2 header bytes + ceil(48/2) height bytes + 4 building records
-        // (2+1+2 B each) + 1 ramp + 2 bridge fragments + 4 obstacles
+        // (2+1+2 B each) + 1 ramp + 2 bridge fragments + 5 obstacles
         // (2+1 B each) — one obstacle slot is taken by the bridge end.
         assert_eq!(
             std::fs::metadata(&path).unwrap().len(),
-            (2 + 24 + 4 * 5 + 7 * 3) as u64
+            (2 + 24 + 4 * 5 + 8 * 3) as u64
         );
         let (loaded_board, loaded_buildings) = load_board(&path).unwrap();
         assert_eq!((loaded_board.cols, loaded_board.rows), (8, 6));
@@ -538,6 +541,45 @@ mod tests {
         assert_eq!(by_tile[&(4, 1)].owner, Some(1));
         assert_eq!(by_tile[&(6, 1)].owner, None);
         assert_eq!(by_tile[&(7, 0)].owner, Some(3));
+        let _ = std::fs::remove_file(&path);
+    }
+    /// Write a 6x1 map by hand: heights `[1, 0, 1, 0, 1, 0]` and one
+    /// obstacle record per entry of `entries` (field index, type code).
+    fn write_raw_obstacle_map(name: &str, entries: &[(u8, u8)]) -> std::path::PathBuf {
+        let mut bytes: Vec<u8> = vec![6, 1];
+        // Three 4-bit pairs, lower nibble first: 1, 0, 1, 0, 1, 0.
+        bytes.extend([0x01, 0x01, 0x01]);
+        for (field, code) in entries {
+            bytes.push(*field);
+            bytes.push(0);
+            bytes.push(*code);
+        }
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+    #[test]
+    fn obstacle_terrain_rules() {
+        // rules.md section 1: walls and mines stand on land and on water
+        // alike, traps only on land. Code 28 is unassigned and skipped.
+        let path = write_raw_obstacle_map(
+            "hexfront_obstacle_terrain_test.map",
+            &[(0, 26), (1, 27), (2, 29), (3, 30), (4, 28), (5, 26)],
+        );
+        let (board, _) = load_board(&path).unwrap();
+        let kind = |q: i32| {
+            board
+                .tiles
+                .get(&(q, 0))
+                .and_then(|t| t.obstacle.as_ref())
+                .map(|o| o.kind)
+        };
+        assert_eq!(kind(0), Some(ObstacleKind::Wall), "wall on land");
+        assert_eq!(kind(1), Some(ObstacleKind::Mine), "mine on water");
+        assert_eq!(kind(2), Some(ObstacleKind::TrapFire), "fire trap on land");
+        assert_eq!(kind(3), None, "ice trap on water rejected");
+        assert_eq!(kind(4), None, "unassigned code 28 skipped");
+        assert_eq!(kind(5), Some(ObstacleKind::Wall), "wall on water");
         let _ = std::fs::remove_file(&path);
     }
     #[test]

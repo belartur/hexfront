@@ -35,10 +35,9 @@ pub const BUILDING_ORDER: [BuildingKind; 8] = [
 pub const OWNER_ORDER: [Option<usize>; 5] = [None, Some(0), Some(1), Some(2), Some(3)];
 
 /// Obstacle kinds behind the `t` key, in cycling order.
-pub const OBSTACLE_ORDER: [ObstacleKind; 5] = [
+pub const OBSTACLE_ORDER: [ObstacleKind; 4] = [
     ObstacleKind::Wall,
     ObstacleKind::Mine,
-    ObstacleKind::MineWater,
     ObstacleKind::TrapFire,
     ObstacleKind::TrapIce,
 ];
