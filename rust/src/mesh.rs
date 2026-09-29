@@ -1516,15 +1516,22 @@ fn push_building(
     let color = building_color(b);
     // Every building stands on the same dark hexagonal foundation slab, so
     // the eight kinds share one visual family and none of them floats on the
-    // bare grey tile top. The slab floats like the flat obstacle markers:
-    // coplanar with the tile top it would lose the depth race against the
-    // terrain (see `constants::OBSTACLE_LIFT`).
+    // bare grey tile top. The slim healing mast gets a narrower plinth,
+    // because a wide empty pad under it would swallow the tower. The slab
+    // floats like the flat obstacle markers: coplanar with the tile top it
+    // would lose the depth race against the terrain (see
+    // `constants::OBSTACLE_LIFT`).
+    let found_r = if b.kind == BuildingKind::HealTower {
+        BLD_HEAL_FOUND_R
+    } else {
+        BLD_FOUND_R
+    };
     push_hex_prism(
         mesh,
         cx,
         cy,
         z + constants::OBSTACLE_LIFT,
-        BLD_FOUND_R,
+        found_r,
         BLD_FOUND_H,
         constants::shade(color, BLD_DARK),
     );
@@ -1551,6 +1558,9 @@ fn push_building(
 /// Smaller than the field inradius, so the slab never spills into a
 /// neighbouring field.
 const BLD_FOUND_R: f64 = 21.0;
+/// Radius of the (smaller) foundation slab of the slim healing mast in px;
+/// a wide empty pad under a 6-px shaft would read as a plaza, not a plinth.
+const BLD_HEAL_FOUND_R: f64 = 14.0;
 /// Height of the foundation slab in px.
 const BLD_FOUND_H: f64 = 2.5;
 /// Shade factor of the foundation and other dark structural parts.
@@ -1583,10 +1593,10 @@ const BLD_TANK_HALL_X: f64 = 24.0;
 const BLD_TANK_HALL_Y: f64 = 21.0;
 /// Height of the assembly hall in px.
 const BLD_TANK_HALL_H: f64 = 11.0;
-/// Width of the dark gate on the front wall in px.
+/// Width of the dark gate along its wall in px.
 const BLD_TANK_GATE_W: f64 = 9.0;
-/// Thickness of the gate box in px. A thin plate just proud of the wall: it
-/// reads as an opening, and being this flat its side faces never show.
+/// Thickness of the gate plate in px. Just proud of the wall: it reads as an
+/// opening, and being this flat its side faces never show.
 const BLD_TANK_GATE_OUT: f64 = 0.4;
 /// Height of the gate in px.
 const BLD_TANK_GATE_H: f64 = 7.0;
@@ -1852,15 +1862,16 @@ fn push_base_tank(
         BLD_TANK_HALL_H,
         color,
     );
-    // Dark gate on the front wall: a little proud of it, so it reads as an
-    // opening instead of as a painted rectangle.
+    // Dark gate on the +x wall: the ramp at the front would hide it on the
+    // +y wall, and a thin plate proud of the wall reads as an opening
+    // instead of as a painted rectangle.
     push_box(
         mesh,
-        cx,
-        front,
+        cx + BLD_TANK_HALL_X / 2.0 + BLD_TANK_GATE_OUT / 2.0,
+        cy,
         slab,
-        BLD_TANK_GATE_W,
         BLD_TANK_GATE_OUT,
+        BLD_TANK_GATE_W,
         BLD_TANK_GATE_H,
         constants::shade(color, 0.25),
     );
@@ -4467,141 +4478,6 @@ mod tests {
             rapid > rocket,
             "the rocket rack reaches past the twin guns: {rapid} vs {rocket}"
         );
-    }
-
-    #[ignore]
-    #[test]
-    fn preview_buildings_to_ppm() {
-        // Temporary developer preview: software-rasterise the isometric scene
-        // into a PPM file so the models can be eyeballed without a GPU.
-        use crate::entities::{Building, Player};
-        use crate::game::Game;
-        let kinds = all_building_kinds();
-        for (i, kind) in kinds.iter().enumerate() {
-            let mut board = Board::new(8, 8);
-            for t in board.tiles.clone().keys() {
-                board.tiles.get_mut(t).unwrap().height = 1;
-            }
-            let game = Game::new(
-                board,
-                vec![Player::new(0, true)],
-                vec![Building::new(*kind, Some(0), 3, 3, 40.0)],
-                1,
-            );
-            let terrain = build_terrain(&game.board);
-            let mut dynamic = DynamicMesh::default();
-            build_dynamic(&game, 1.0, &mut dynamic);
-
-            struct Tri {
-                p: [(f64, f64, f64); 3],
-                c: [u8; 3],
-                d: f64,
-            }
-            let mut tris: Vec<Tri> = Vec::new();
-            let collect = |soup: &TriangleSoup, tris: &mut Vec<Tri>| {
-                for i in (0..soup.indices.len()).step_by(3) {
-                    let v: Vec<&GpuVertex> = (0..3)
-                        .map(|k| &soup.vertices[soup.indices[i + k] as usize])
-                        .collect();
-                    let p = [
-                        (f64::from(v[0].x), f64::from(v[0].y), f64::from(v[0].z)),
-                        (f64::from(v[1].x), f64::from(v[1].y), f64::from(v[1].z)),
-                        (f64::from(v[2].x), f64::from(v[2].y), f64::from(v[2].z)),
-                    ];
-                    let d = p
-                        .iter()
-                        .map(|q| (q.0 + q.1) * constants::ISO_SIN + q.2)
-                        .sum::<f64>()
-                        / 3.0;
-                    tris.push(Tri {
-                        p,
-                        c: v[0].color,
-                        d,
-                    });
-                }
-            };
-            for chunk in terrain.chunks.iter() {
-                collect(&chunk.soup, &mut tris);
-            }
-            // Index of the first building triangle: the preview is fitted to the
-            // buildings only, so the models fill the frame.
-            let building_start = tris.len();
-            collect(&dynamic.opaque, &mut tris);
-
-            let (w, h) = (640usize, 640usize);
-            let proj = |p: (f64, f64, f64)| -> (f64, f64) {
-                (
-                    (p.0 - p.1) * constants::ISO_COS,
-                    (p.0 + p.1) * constants::ISO_SIN - p.2,
-                )
-            };
-            let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
-            let (mut x1, mut y1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-            for t in tris[building_start..].iter() {
-                for p in t.p.iter() {
-                    let (sx, sy) = proj(*p);
-                    x0 = x0.min(sx);
-                    y0 = y0.min(sy);
-                    x1 = x1.max(sx);
-                    y1 = y1.max(sy);
-                }
-            }
-            // A little padding around the building keeps the field under it (and
-            // its slab) visible.
-            let (x0, y0, x1, y1) = (x0 - 12.0, y0 - 12.0, x1 + 12.0, y1 + 12.0);
-            let scale = ((w as f64 - 40.0) / (x1 - x0)).min((h as f64 - 40.0) / (y1 - y0));
-            let to_px = |p: (f64, f64, f64)| -> (f64, f64) {
-                let (sx, sy) = proj(p);
-                ((sx - x0) * scale + 20.0, (sy - y0) * scale + 20.0)
-            };
-            tris.sort_by(|a, b| a.d.partial_cmp(&b.d).unwrap_or(std::cmp::Ordering::Equal));
-            let mut img = vec![[110u8, 170, 225]; w * h];
-            for t in tris.iter() {
-                let a = to_px(t.p[0]);
-                let b = to_px(t.p[1]);
-                let c = to_px(t.p[2]);
-                let area = (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1);
-                if area.abs() < 1e-9 {
-                    continue;
-                }
-                let minx = a.0.min(b.0).min(c.0).floor().max(0.0) as usize;
-                let maxx = (a.0.max(b.0).max(c.0).ceil() as usize).min(w - 1);
-                let miny = a.1.min(b.1).min(c.1).floor().max(0.0) as usize;
-                let maxy = (a.1.max(b.1).max(c.1).ceil() as usize).min(h - 1);
-                for py in miny..=maxy {
-                    for px in minx..=maxx {
-                        let (x, y) = (px as f64 + 0.5, py as f64 + 0.5);
-                        let wa = ((b.0 - x) * (c.1 - y) - (c.0 - x) * (b.1 - y)) / area;
-                        let wb = ((c.0 - x) * (a.1 - y) - (a.0 - x) * (c.1 - y)) / area;
-                        if wa >= 0.0 && wb >= 0.0 && 1.0 - wa - wb >= 0.0 {
-                            img[py * w + px] = t.c;
-                        }
-                    }
-                }
-            }
-            // Detail strokes on top (approximate: no depth test in the preview).
-            for (l0, l1) in dynamic.lines.iter() {
-                let a = to_px((f64::from(l0.x), f64::from(l0.y), f64::from(l0.z)));
-                let b = to_px((f64::from(l1.x), f64::from(l1.y), f64::from(l1.z)));
-                let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs())).ceil() as usize + 1;
-                for i in 0..=steps {
-                    let f = i as f64 / steps as f64;
-                    let (px, py) = (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
-                    for (dx, dy) in [(0isize, 0isize), (1, 0), (0, 1)] {
-                        let (xx, yy) = (px as isize + dx, py as isize + dy);
-                        if xx >= 0 && yy >= 0 && (xx as usize) < w && (yy as usize) < h {
-                            img[yy as usize * w + xx as usize] =
-                                [l0.color[0], l0.color[1], l0.color[2]];
-                        }
-                    }
-                }
-            }
-            let mut out = format!("P6\n{w} {h}\n255\n").into_bytes();
-            for px in img.iter() {
-                out.extend_from_slice(px);
-            }
-            std::fs::write(format!("/tmp/hexfront_kind_{i}.ppm"), &out).unwrap();
-        }
     }
 
     #[test]
