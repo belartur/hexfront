@@ -433,12 +433,27 @@ fn mq_line_vertex(v: &crate::mesh::LineVertex) -> macroquad::models::Vertex {
 /// `window_conf`, so no further slicing happens at draw time.
 pub const DRAW_BATCH_VERTICES: usize = 16_000;
 
+/// End index of the next draw batch that starts at `vi`.
+///
+/// The batch limit is not a multiple of three, so a full batch is pulled back
+/// to a triangle boundary: a batch cutting a triangle in half would draw a
+/// broken triangle at the seam and a stray one at the start of the next batch.
+/// Only a full batch is rounded, so the tail batch keeps every vertex it has
+/// and the walk always makes progress.
+fn batch_end(vi: usize, len: usize) -> usize {
+    let mut vend = (vi + DRAW_BATCH_VERTICES).min(len);
+    if vend < len {
+        vend -= (vend - vi) % 3;
+    }
+    vend
+}
+
 /// Draw one triangle soup in chunks fitting the u16 batch limits.
 fn draw_soup(vertices: &[crate::mesh::GpuVertex], indices: &[u16]) {
     use macroquad::prelude as mq;
     let mut vi = 0;
     while vi < vertices.len() {
-        let vend = (vi + DRAW_BATCH_VERTICES).min(vertices.len());
+        let vend = batch_end(vi, vertices.len());
         let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(vend - vi);
         for v in &vertices[vi..vend] {
             verts.push(mq_vertex(v));
@@ -469,7 +484,8 @@ fn draw_range_soup(vertices: &[crate::mesh::RangeVertex], indices: &[u16]) {
     use macroquad::prelude as mq;
     let mut vi = 0;
     while vi < vertices.len() {
-        let vend = (vi + DRAW_BATCH_VERTICES).min(vertices.len());
+        // Split on a triangle boundary, like [`draw_soup`].
+        let vend = batch_end(vi, vertices.len());
         let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(vend - vi);
         for v in &vertices[vi..vend] {
             verts.push(mq_range_vertex(v));
@@ -597,5 +613,31 @@ fn draw_selection_2d(
             }
             prev = Some(cur);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DRAW_BATCH_VERTICES, batch_end};
+
+    #[test]
+    fn draw_batches_end_on_triangle_boundaries() {
+        // The batch limit (u16 index batches) is not a multiple of three, so a
+        // naive split would cut a triangle in half at every seam. The walk has
+        // to stay on triangle boundaries, make progress and keep the tail.
+        let len = DRAW_BATCH_VERTICES * 3;
+        let mut vi = 0;
+        let mut batches = 0;
+        while vi < len {
+            let end = batch_end(vi, len);
+            assert!(end > vi, "batch does not progress: {vi}..{end}");
+            assert_eq!((end - vi) % 3, 0, "batch cuts a triangle: {vi}..{end}");
+            vi = end;
+            batches += 1;
+        }
+        assert!(batches >= 3, "expected several full batches, got {batches}");
+        // A soup shorter than one batch is drawn in a single call, untouched.
+        let short = 3 * 7;
+        assert_eq!(batch_end(0, short), short);
     }
 }
