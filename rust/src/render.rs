@@ -8,6 +8,42 @@
 //! by the orthographic [`crate::iso`] camera; occlusion is resolved by the
 //! hardware depth buffer. UI text is drawn on top with macroquad's
 //! built-in font (see [`crate::app`]).
+//!
+//! # Pass order
+//!
+//! [`Renderer::draw_gpu`] walks a fixed list of passes. Only the opaque ones
+//! write depth, so the list is what decides what may cover what:
+//!
+//! 1. opaque terrain chunks (tile tops, cliff skirts, ramps, bridge decks),
+//! 2. translucent bridge shadows on the fields below the decks,
+//! 3. terrain grid lines,
+//! 4. opaque dynamic objects (buildings, obstacles, vehicles, projectiles),
+//! 5. translucent helicopter shadows,
+//! 6. translucent explosion particles,
+//! 7. 3D strokes (routes, detail lines),
+//! 8. range fills, composited from offscreen masks,
+//! 9. range outlines,
+//! 10. 2D overlays (selection outline, hovered route preview),
+//! 11. text.
+//!
+//! Coplanar fragments are resolved by this order: terrain first, then details
+//! and outlines, so a stroke never z-fights with the surface it lies on. No
+//! depth key is ever fudged and no pass is repeated at the end to force ramps
+//! or badges in front of everything.
+//!
+//! The three translucent vehicle-shadow passes (2, 5) and the particle pass
+//! (6) draw without a depth write, so they are painted from the farthest to
+//! the nearest translucent fragment and never dim what stands in front of
+//! them. The two range passes (8, 9) run with the depth test switched off
+//! entirely, so nothing can hide a range.
+//!
+//! # Why the ranges need their own buffers
+//!
+//! Range fills and range outlines live apart from the ordinary geometry
+//! ([`crate::mesh::DynamicMesh::range_turret`], `range_heal`, `range_lines`)
+//! only because of the two passes above: the fills are coverage masks that get
+//! composited once, and the outlines have to land *after* that composite so a
+//! stroke stays readable where ranges overlap. See [`Renderer::draw_range_fills`].
 
 use crate::camera::Camera;
 use crate::constants;
@@ -26,7 +62,8 @@ pub struct Renderer {
     pub rotor_phase: f64,
     /// Converted static terrain buffers, uploaded once per level.
     terrain: Option<GpuTerrain>,
-    /// Offscreen masks holding the range fills, see [`draw_range_fills`].
+    /// Offscreen masks holding the range fills, see
+    /// [`Renderer::draw_range_fills`].
     range_masks: Option<RangeMasks>,
 }
 
@@ -35,7 +72,8 @@ pub struct Renderer {
 /// Turret ranges and heal ranges are masked separately and composited one
 /// after the other, so a pixel covered by two ranges of the **same** kind
 /// keeps the coverage of a single range, while a turret range overlapping a
-/// heal range shows both tints at once (specification.md, graphics).
+/// heal range shows both tints at once. The contract asks for exactly this:
+/// overlapping ranges of one kind must not stack their transparency.
 struct RangeMasks {
     /// Mask of the turret range discs.
     turret: macroquad::prelude::RenderTarget,
@@ -133,16 +171,16 @@ impl Renderer {
     }
     /// Render one frame of the running game.
     ///
-    /// Pass order: opaque terrain chunks -> terrain grid lines -> opaque
-    /// dynamic objects -> translucent helicopter shadows -> explosion
-    /// particles -> 3D strokes (routes, details) -> range fills (offscreen
-    /// masks, composited) -> range outlines -> 2D overlays. The range passes
+    /// Walks the pass order listed in the module docs. The two range passes
     /// run last and with the depth test off, so a range is never clipped by
     /// terrain, a bridge deck, a building or a vehicle. Unit badges and
     /// floating texts are drawn by [`crate::app`] on top, never occluded.
+    ///
     /// Terrain chunks outside the viewport are culled before they are
     /// submitted (their world boxes are tested against the visible world box),
-    /// which keeps huge boards bounded by the view size.
+    /// which keeps huge boards bounded by the view size. Nothing is culled per
+    /// primitive inside a chunk and nothing is culled on the CPU before
+    /// projection: macroquad's own clipping does the rest.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_gpu(
         &mut self,
@@ -177,7 +215,7 @@ impl Renderer {
             // after the opaque terrain so the depth test trims them against
             // nearer cliffs, and before the dynamic objects so a vehicle
             // standing under the bridge is drawn on top of its own shadow
-            // (specification_rust.md pass order).
+            // (pass 2 of the module docs).
             for (mesh, bbox) in terrain.shadows.iter() {
                 if !bbox_hits(bbox, &view_bounds) {
                     continue;
@@ -194,21 +232,21 @@ impl Renderer {
         draw_soup(&dynamic.opaque.vertices, &dynamic.opaque.indices);
         // Translucent helicopter shadows: flat dark discs just above the
         // receiving surface, drawn right after the opaque pass
-        // (specification_rust.md pass order). The depth test keeps them from
+        // (pass 5 of the module docs). The depth test keeps them from
         // darkening hulls, buildings or nearer cliffs.
         draw_range_soup(&dynamic.shadow.vertices, &dynamic.shadow.indices);
         // Explosion particles: camera-facing billboards, a flat ground wave and
         // shards, all translucent and drawn without a depth write, so nearer
         // puffs blend over farther ones. They go after the helicopter shadows
         // and before the range fills, so a blast is never dimmed by a range
-        // disc lying over the same tile (specification_rust.md pass order).
+        // disc lying over the same tile (pass 6 of the module docs).
         draw_range_soup(&dynamic.fx.vertices, &dynamic.fx.indices);
         // 3D strokes (routes, details). Range outlines live in a separate
         // buffer, because they are drawn after the range fills instead.
         draw_line_soup(&dynamic.lines);
         // Range fills: masked offscreen and composited, then the outlines on
         // top of them. Both ignore the depth buffer, so a range stays fully
-        // visible (specification.md, graphics).
+        // visible.
         self.draw_range_fills(matrix, dynamic);
         mq::set_camera(&GpuIsoCamera::flat(matrix));
         draw_line_soup(&dynamic.range_lines);

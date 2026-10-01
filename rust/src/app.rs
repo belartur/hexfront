@@ -3,6 +3,45 @@
 //! Implements the controls from specification.md, section "Sterowanie":
 //! view pan/zoom, source selection (RMB/LMB), vehicle sending, route
 //! preview, Esc and pause.
+//!
+//! # States
+//!
+//! The application is a small state machine over [`State`]: the level menu, a
+//! loading pause, the game, and the editor. Pause is a flag of the game state
+//! rather than a state of its own; the editor has no pause, because nothing
+//! simulates while editing. The game and the editor share the renderer, the
+//! camera and the picking helpers, so a change in one is visible in the other
+//! immediately.
+//!
+//! # Window and resizing
+//!
+//! The window is created with macroquad's default configuration: no size is
+//! hardcoded, so the user can resize it, and the render size is read fresh
+//! every frame from `screen_width()`/`screen_height()` rather than cached at
+//! startup. A resize therefore invalidates the rasterisation buffers and the
+//! cached terrain mesh, which `ensure_buffers` and the terrain fingerprint
+//! detect.
+//!
+//! # Text and HUD
+//!
+//! UI text (menu, unit badges, floating combat numbers) is drawn last, on top
+//! of the isometric scene, with macroquad's built-in font. Unit badges
+//! ([`Application::draw_badges`]) are anchored to the lower right of the object
+//! they belong to and are deliberately exempt from the depth buffer, so a
+//! number is never hidden by terrain; the badge disc holds the unit count, a
+//! `MAX` label sits under it for a full building, and a base draws a spawn
+//! progress ring beside it. Badges outside the viewport are skipped, so a
+//! large board costs no HUD work off-screen.
+//!
+//! # Level menu
+//!
+//! [`Application::draw_menu`] lays the levels of the `maps` directory out in
+//! a compact grid ([`constants::MENU_COLUMNS`] columns) and reports the cell
+//! rectangles it built, so input and drawing agree on what is clickable. When
+//! the rows do not fit on screen the grid scrolls with the mouse wheel or the
+//! arrow / page keys, clamped to the content height, and a scrollbar is drawn
+//! on the right while it is scrollable. Long level names are ellipsised to the
+//! column width.
 
 use std::path::PathBuf;
 
@@ -729,7 +768,7 @@ impl Application {
                 );
             }
             if crate::entities::is_base(b.kind) && b.owner.is_some() && b.units < b.capacity {
-                // Spawn progress ring (specification.md graphics): a base
+                // Spawn progress ring: a base
                 // shows a thin white arc completing one full circle over
                 // the spawn interval.
                 let frac = (b.production_timer / constants::BASE_SPAWN_INTERVAL).clamp(0.0, 1.0);

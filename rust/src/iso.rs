@@ -11,6 +11,23 @@
 //! in the row-vector layout (`out[j] = Σ_i m[i][j] * v[i]`), which is
 //! exactly what the shader needs — see the `gpu_matrix_matches_2d_projection`
 //! test, which reproduces that arithmetic.
+//!
+//! # Depth
+//!
+//! Occlusion is decided per pixel, not per object, so the whole scene shares
+//! one depth buffer keyed by the world point's *ray depth*
+//!
+//! ```text
+//! D = (x + y) * ISO_SIN + z
+//! ```
+//!
+//! where `ISO_SIN` is the sine of the isometric pitch and `z` the real
+//! rendered elevation in world px. Along one view ray a larger `D` is nearer
+//! the observer, and this module carries `D` on the GPU depth axis, so the
+//! hardware resolves visibility exactly as the old software buffer did —
+//! including which side wins a tie (see the pass order in [`crate::render`]).
+//! `d_min`/`d_max` come from [`crate::mesh::depth_span`], which accounts for
+//! bridge decks and object heights so nothing falls outside the clip volume.
 
 use crate::camera::Camera;
 use crate::constants;

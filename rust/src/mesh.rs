@@ -136,8 +136,9 @@ pub fn depth_span(board: &Board) -> (f64, f64) {
 }
 
 /// Highest rendered elevation of a board in px (view-culling padding and the
-/// fixed helicopter altitude). A deck can sit a [`BRIDGE_DECK_LIFT`] above a
-/// board's highest field, so the lift is added whenever a bridge exists.
+/// fixed helicopter altitude). A deck can sit a
+/// [`crate::constants::BRIDGE_DECK_LIFT`] above a board's highest field, so
+/// the lift is added whenever a bridge exists.
 pub fn max_height(board: &Board) -> f64 {
     let h = board.tiles.values().map(|t| t.height).max().unwrap_or(0);
     let terrain = h as f64 * constants::ELEVATION_PX;
@@ -675,8 +676,8 @@ fn push_bridge_deck(board: &Board, soup: &mut TriangleSoup, br: &Bridge, frag: T
 /// surface for depth. Vertical projection matches the helicopter shadow
 /// ([`push_helicopter_shadow`]), so the light in the scene reads as coming
 /// from straight above; the colour and alpha are the shared shadow values of
-/// specification.md. The shadow is static like the deck, so it is built once
-/// with the terrain instead of every frame.
+/// the contract in specification.md. The shadow is static like the deck, so it
+/// is built once with the terrain instead of every frame.
 fn push_bridge_shadow(board: &Board, shadows: &mut RangeSoup, br: &Bridge, frag: Tile) {
     let deck = bridge_deck_quad(board, br, frag);
     let ground = board.height(frag) as f64 * constants::ELEVATION_PX;
@@ -804,6 +805,21 @@ fn push_skirts(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
     }
 }
 
+/// Rendered ramp: a narrower earth-coloured strip across the tile, with no
+/// arrows painted on it.
+///
+/// The strip runs edge to edge along the a->b axis of the ramp, its two short
+/// edges sitting on the midpoints of the hex edges that face the two joined
+/// neighbours, at those neighbours' heights. The long edges stay parallel to
+/// the a->b axis, so the tilt of the top face is proportional to the height
+/// difference of the joined tiles (a ramp between two tiles of equal height is
+/// flat, even though the game rules forbid it). The body is solid: both sides
+/// are filled from the tilted top edges down to the base elevation in a darker
+/// earth tone, so no empty space is visible underneath.
+///
+/// Rendering it as a full hexagon would hide the two edges of the tile that
+/// still carry ordinary terrain, and the strip is what tells the player which
+/// way a vehicle can leave this tile.
 fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
     let (a, b) = match board.ramps.get(&tile) {
         Some(v) => *v,
@@ -3399,8 +3415,8 @@ fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
 ///
 /// The flight altitude does not follow the terrain (rules.md section 5.2),
 /// so the isometric view alone cannot tell which tile a helicopter is over;
-/// the dark silhouette marks it (specification.md, section "Grafika i
-/// interfejs użytkownika"). Instead of one plain disc it traces the parts of
+/// the dark silhouette marks it (the shared contract in specification.md).
+/// Instead of one plain disc it traces the parts of
 /// the airframe, all at the same elevation so the light reads as coming from
 /// straight above: the two main rotor blades at their current `rotor_phase` —
 /// the very phase the airframe used this frame, so a helicopter and its
@@ -3409,8 +3425,9 @@ fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
 /// parts, so the shadow follows a redesign of the airframe for free.
 ///
 /// All pieces share one flat elevation, so no part of the silhouette fights
-/// another in the depth buffer; they sit [`SHADOW_LIFT`] above the receiving
-/// surface (a bridge deck when the helicopter crosses one), high enough to
+/// another in the depth buffer; they sit
+/// [`crate::constants::SHADOW_LIFT`] above the receiving surface (a bridge
+/// deck when the helicopter crosses one), high enough to
 /// win the depth race against the terrain (no flicker) yet low enough to
 /// read as lying on the ground. They go into the translucent pass: the GPU
 /// depth test keeps them from darkening the hull, other vehicles or nearer
@@ -3792,8 +3809,7 @@ fn push_tank_oriented(
 }
 
 /// Outline colour of one range: the owner colour, white when the building
-/// belongs to no player (specification.md, graphics: range outlines are drawn
-/// in the player colour, white when neutral).
+/// belongs to no player.
 fn range_outline_color(b: &crate::entities::Building) -> [u8; 3] {
     match b.owner {
         Some(id) => constants::player_color(id),

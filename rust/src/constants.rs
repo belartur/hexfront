@@ -66,8 +66,15 @@ pub const ISO_COS: f64 = 0.8660254037844387;
 /// Vertical squash factor of the isometric projection (2:1 isometric).
 pub const ISO_SIN: f64 = 0.5;
 /// Radius of an ordinary turret projectile in screen px.
+///
+/// Projectiles are drawn as discs in *screen* space, so the radius does not
+/// grow with zoom: a shot stays readable when the board is pulled back and
+/// does not swamp a vehicle when the camera moves in.
 pub const PROJECTILE_RADIUS: f32 = 3.0;
 /// Radius of a rocket projectile in screen px.
+///
+/// A rocket is a heavier, slower projectile than a gun shell, so it is drawn
+/// visibly larger at the same zoom.
 pub const ROCKET_RADIUS: f32 = 5.0;
 /// Visual deck thickness; the bridge deck and shadows share one surface.
 pub const BRIDGE_DECK_LIFT: f64 = 5.0 * UNIT_J_TO_PX;
@@ -81,12 +88,15 @@ pub const OBSTACLE_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
 /// ignore tile heights, so they do not bob up and down over hills). The
 /// clearance is larger than the whole rotor stack (15 px in `mesh.rs`), so
 /// even the blades stay above the tallest peak and a helicopter never
-/// disappears behind a hill. Its shadow disc (see [`SHADOW_RADIUS`]) marks
-/// the tile it flies over.
+/// disappears behind a hill. Its shadow silhouette (drawn by
+/// `push_helicopter_shadow` in [`crate::mesh`]) marks the tile it flies over.
 pub const HELICOPTER_ALTITUDE_PX: f64 = 2.0 * ELEVATION_PX;
-/// Colour of the translucent shadow decal (specification.md).
+/// Colour of the translucent shadow decal (specification.md, graphics).
 pub const SHADOW_COLOR: [u8; 3] = [0, 0, 0];
-/// Alpha of the translucent shadow decal, 70/255 (specification.md).
+/// Alpha of the translucent shadow decal, 70/255 (specification.md, graphics).
+///
+/// Dark enough to read as a shadow on both grey land and light blue water,
+/// light enough that the ground texture underneath stays visible.
 pub const SHADOW_ALPHA: u8 = 70;
 /// Lift of the helicopter shadow silhouette above the receiving surface in
 /// px (rendering only; rules.md has no shadows). Just high enough that the
@@ -469,13 +479,18 @@ pub const DRAG_THRESHOLD: f32 = 5.0;
 pub const LOADING_TIME: f64 = 1.0;
 /// Cursor snap radius in j: hover and clicks snap to the nearest building
 /// tile within this distance of its centre (UI choice, no rules.md section).
+///
+/// Large enough that pointing at a building is forgiving on a zoomed-out board,
+/// small enough that an empty field between two buildings snaps to nothing.
+/// The distance is measured in world space at the building's own height, so it
+/// does not change with zoom.
 pub const HOVER_SNAP_RADIUS: f64 = 150.0;
-// Floating combat text (specification.md, graphics)
+// Floating combat text
 /// Seconds a -x / +x number stays visible.
 pub const FLOAT_TEXT_LIFETIME: f64 = 2.0;
 /// Px/s of upward drift.
 pub const FLOAT_TEXT_SPEED: f32 = 26.0;
-// Colours (specification.md: land grey, water light blue; players differ)
+// Colours (land grey, water light blue; players differ)
 /// Water fill colour.
 pub const WATER_COLOR: [u8; 3] = [110, 170, 225];
 /// Water edge colour.
@@ -508,8 +523,8 @@ pub const PLAYER_COLORS: [[u8; 3]; 4] = [
 ];
 /// Colour of objects that belong to no player.
 pub const NEUTRAL_COLOR: [u8; 3] = [165, 165, 165];
-/// Alpha of a white turret range fill on the GPU path (specification.md,
-/// graphics: ranges are mostly transparent).
+/// Alpha of a white turret range fill once its mask is composited. Kept low
+/// because ranges are meant to be mostly transparent.
 pub const RANGE_TURRET_FILL_ALPHA: u8 = 26;
 /// Alpha of a light-green heal range fill.
 pub const RANGE_HEAL_FILL_ALPHA: u8 = 30;
@@ -520,11 +535,11 @@ pub const RANGE_OUTLINE_ALPHA: u8 = 130;
 /// from a mask, never blended on the scene itself, so the mask vertices are
 /// fully opaque: a second overlapping mask overwrites the first one instead of
 /// stacking its alpha, which keeps two overlapping ranges of one kind at the
-/// coverage of a single range (specification.md, graphics: overlapping ranges
-/// must not darken).
+/// coverage of a single range (the shared contract asks that overlapping
+/// ranges of one kind must not darken).
 pub const RANGE_MASK_ALPHA: u8 = 255;
-/// Outline colour of a range owned by no player (specification.md, graphics:
-/// range outlines are drawn in the player colour, white when neutral).
+/// Outline colour of a range owned by no player: outlines are drawn in the
+/// owner colour, white when the building belongs to nobody.
 pub const RANGE_OUTLINE_NEUTRAL: [u8; 3] = [255, 255, 255];
 /// Fill colour of a turret range once its mask is composited onto the scene.
 pub const RANGE_TURRET_FILL_COLOR: [u8; 3] = [255, 255, 255];
@@ -554,7 +569,7 @@ pub const UI_TEXT_COLOR: [u8; 3] = [235, 235, 235];
 #[allow(dead_code)]
 /// UI background colour.
 pub const UI_BACKGROUND: [u8; 3] = [24, 26, 34];
-/// Level-menu grid layout (specification.md; UI only).
+/// Number of level-menu columns (UI only).
 pub const MENU_COLUMNS: usize = 3;
 /// Menu font size.
 pub const MENU_FONT_SIZE: u16 = 26;
@@ -579,6 +594,11 @@ pub const MAP_DEFAULT_AI_DIFFICULTY: &str = "normal";
 // Board editor (specification_rust.md, section "Edytor plansz"; rules.md
 // section 1 for the 0..15 heights and player bases).
 /// Seconds after which an unfinished 1- or 2-digit units entry commits.
+///
+/// A third digit commits immediately (the value cannot grow any further), so
+/// this delay only applies to a short entry the editor is waiting on. It has
+/// to be long enough to type the next digit and short enough not to surprise
+/// the user with a value they were still editing.
 pub const EDITOR_DIGIT_COMMIT_DELAY: f64 = 1.0;
 /// Columns of a newly created editor board (mostly water).
 pub const EDITOR_NEW_COLS: i32 = 256;

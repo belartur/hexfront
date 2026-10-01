@@ -1,13 +1,40 @@
 //! In-game board editor: headless editing model plus macroquad UI state.
 //!
-//! The editor implements the behaviour described in specification_rust.md,
-//! section "Edytor plansz" (keys, validation, trim/pad); it is a
-//! state of the same application rather than a separate program (see
-//! specification_rust.md, section "Edytor plansz").
+//! The editor is a state of the same application rather than a separate
+//! program (see specification_rust.md, section "Edytor plansz"). It shares
+//! the game's renderer, camera and tile picking with the game itself, so a
+//! change to how a board looks or is picked applies to both at once.
 //!
 //! The pure editing operations live on [`EditorState`] and deliberately do
 //! not depend on macroquad, so the unit tests below run headlessly. The
 //! keyboard/mouse handling lives in [`crate::app`].
+//!
+//! # Keys
+//!
+//! Editing is key-driven: the mouse only picks a tile, a key acts on it. The
+//! on-screen legend ([`LEGEND`]) is the authoritative list, and the code is
+//! the source of truth for the cycling orders ([`BUILDING_ORDER`],
+//! [`OWNER_ORDER`], [`OBSTACLE_ORDER`]). `p` starts a test run of the level
+//! being edited; `r` is therefore free for ramps.
+//!
+//! # Validation
+//!
+//! [`EditorState::validate`] returns the rule violations of rules.md as human
+//! readable strings: a building on water, a bridge over too high land or
+//! joining two different heights, a ramp joining tiles of the same height or
+//! sitting at the wrong height, a missing player base, and a missing opponent
+//! base. The editor lists them on screen but never blocks a save, so a map
+//! can be stored and fixed later.
+//!
+//! # Board size
+//!
+//! A new board starts at [`constants::EDITOR_NEW_COLS`] x
+//! [`constants::EDITOR_NEW_ROWS`], mostly water with a small land rectangle in
+//! the middle. [`trim_map`] drops empty borders when saving and [`pad_map`]
+//! grows a smaller map back up when loading, so a stored level keeps only the
+//! area it really uses while the editor still works on a full-size board. Both
+//! operations are documented where they are implemented; the odd-q grid forces
+//! the column shift of a trim/pad to be even.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -268,6 +295,11 @@ impl EditorState {
     }
 
     /// Advance the digit-entry commit timer (call every frame).
+    ///
+    /// A pending entry is committed once the user stops typing for
+    /// [`constants::EDITOR_DIGIT_COMMIT_DELAY`]; a full three-digit entry
+    /// commits on the third key instead, so a completed value is never delayed
+    /// (see [`EditorState::type_digit`]).
     pub fn tick(&mut self, dt: f64) {
         if !self.digit_buf.is_empty() {
             self.digit_age += dt;

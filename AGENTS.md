@@ -7,12 +7,14 @@ Ten plik zawiera wyłącznie instrukcje pracy dla asystenta AI. Nie powiela zasa
 | Dokument | Co zawiera | Kiedy czytać |
 |---|---|---|
 | `rules.md` | Zasady gry (plansza, budynki, pojazdy, walka, działka, wieże, AI). Jednostki odległości (j). | Zawsze przed zmianą logiki gry. Nie kopiuj stąd liczb do innych plików — odwołuj się linkiem. |
-| `specification.md` | Część wspólna specyfikacji implementacji: struktura repozytorium, kod, kontrakt wizualny, sterowanie, parametry (1 j = 1 px, bok hexu), plansze. | Przed zmianą wyglądu, sterowania lub parametrów wspólnych dla wszystkich implementacji. |
-| `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — układ modułów, uruchamianie i testy, renderowanie, edytor plansz, determinizm. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
+| `specification.md` | Część wspólna specyfikacji implementacji: struktura repozytorium, kontrakt wizualny, sterowanie, parametry (1 j = 1 px, bok hexu), plansze. Tylko decyzje i kontrakt — bez szczegółów implementacji. | Przed zmianą wyglądu, sterowania lub parametrów wspólnych dla wszystkich implementacji. |
+| `specification_rust.md` | Specyfikacja implementacji Rust (stabilny rustc/cargo + macroquad) — wybór języka i bibliotek, mapa modułów, uruchamianie i testy, decyzje renderowania, dźwięku, edytora plansz, determinizmu. Tylko decyzje — bez szczegółów implementacji. | Przed rozpoczęciem lub rozwojem kodu w `rust/`. |
 | `specification_of_map_format.md` | Binarny format pliku planszy: układ bajtów, tabele typów budynków i utrudnień, kodowanie mostów i podjazdów. Wspólny dla wszystkich implementacji (bez odwołań do kodu). | Przed zmianą formatu `.map` oraz jego implementacji (`rust/src/mapfile.rs`). |
 | `README.md` | Skrócony opis uruchomienia i sterowania dla gracza. | Przy zmianie UX / dodawaniu poziomu. |
 
 Zasada: nie przepisuj liczb ani reguł z `rules.md` / `specification*.md` do kodu ani do tego pliku. W każdej implementacji trzymaj wartości liczbowe w jej module stałych (nazwę modułu i pliku podaje specyfikacja tego języka); w dokumentacji dawaj odnośniki do sekcji źródłowych, a nie kopie wartości.
+
+Zasada zakresu specyfikacji: pliki `specification*.md` opisują **co** i **dlaczego** — kontrakt, decyzje architektoniczne i najważniejsze wybory. Nie opisują **jak** to zrobiono. Szczegóły implementacji (nazwy buforów i pól, pojedyncze funkcje wewnętrzne, wartości w px, opisy algorytmów, rozpiski modeli) należą do dokumentacji kodu — patrz punkt 10 sekcji 4.
 
 Język: dokumenty (`rules.md`, `specification*.md`, ten plik) są po polsku. Kod, komentarze i dokumentacja API (docstringi / doc-commenty) są po angielsku — nowe funkcje/metody/klasy/pola też pisz po angielsku z dokumentacją. Commity gita opisuj po angielsku.
 
@@ -73,6 +75,8 @@ Katalog `maps` jest listowany dynamicznie — nazwa pliku jest wyświetlaną naz
 7. Respektuj `.gitignore` — to on jest źródłem prawdy, co commitować; nie dodawaj na siłę plików ignorowanych. Pliki `maps/*.map` są wersjonowane.
 8. Po każdej zmianie logiki/formatu uruchom testy (polecenia w sekcji 5) i dopisz test przy nowej regule.
 9. Pilnuj zgodności kodu ze specyfikacją: jeśli zadanie zmienia zachowanie, parametr lub format opisany w `specification.md` (część wspólna) / `specification_rust.md` (specyfikacja implementacji, w tym edytor plansz) / `specification_of_map_format.md` / `rules.md`, zaktualizuj w tym samym commicie i kod, i odpowiedni dokument, żeby pozostały zgodne. Zmiana kontraktu wspólnego (wygląd, sterowanie, parametry) wymaga edycji `specification.md`, a nie tylko specyfikacji języka; format mapy zmieniaj tylko wraz z `specification_of_map_format.md` i tabelami kodów w `rust/src/mapfile.rs` (w `specification_of_map_format.md` nie umieszczaj odwołań do kodu).
+10. **Poziom szczegółowości specyfikacji.** W `specification.md` i `specification_rust.md` zapisuj wyłącznie: kontrakt wspólny dla wszystkich implementacji, decyzje architektoniczne, wybór technologii i uzasadnienie wyboru. Nie zapisuj tam: nazw wewnętrznych buforów, pól i pojedynczych funkcji, wartości w px i segmentach, opisów algorytmów, rozpisek modeli brył i parametrów przeliczeniowych — to są szczegóły implementacji. Wyjątek: element kontraktu wspólnego, którego nie opisuje `rules.md` (np. sposób komponowania zasięgów albo wzór głębokości), zostaje w `specification.md`, ale w jednym–dwóch zdaniach, bez opisu wykonania. Wartości liczbowe wyłącznie w module stałych implementacji.
+11. **Szczegóły przenosisz do kodu, nie kasujesz.** Gdy usuwasz szczegół ze specyfikacji, przenieś go do dokumentacji kodu (moduł stałych, doc-komentarz modułu lub funkcji) w tym samym commicie — w języku angielskim, z uzasadnieniem. Jeśli dany szczegół jest już udokumentowany w kodzie, wystarczy poprawić specyfikację i sprawdzić, że odwołanie w kodzie nadal wskazuje właściwe miejsce. Dopiero potem usuń szczegół z pliku `.md`.
 
 ## 5. Implementacja Rust (obecna)
 
