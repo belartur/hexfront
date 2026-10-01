@@ -61,7 +61,7 @@ Wspólny kontrakt ([specification.md](specification.md), sekcja „Grafika i int
 
 **Podział na partie** buforów trójkątów robimy na granicach trójkątów, bo limit partii (indeksy `u16`) nie jest wielokrotnością trzech, a cięcie w środku trójkąta zostawiłoby uszkodzony trójkąt na każdym szwie.
 
-**Teren statyczny** budujemy raz na poziom, obiekty dynamiczne co klatkę. Przebudowa terenu następuje tylko przy zmianie planszy (w edytorze: przy każdej zmianie terenu, rampy lub mostu). Jawne odrzucanie prymitywów na CPU nie ma — clipping realizuje sprzęt. Pomiar kosztu budowy meshy daje `rust/src/render_baseline.rs` (test `render_baseline`, `cargo test --release render_baseline -- --nocapture`). Twardych wymagań czasowych nie stawia żadna specyfikacja — pętlę klatki steruje macroquad (`next_frame`).
+**Teren statyczny** budujemy raz na poziom, obiekty dynamiczne co klatkę. Przebudowa terenu następuje tylko przy zmianie planszy (w edytorze: przy każdej zmianie terenu, rampy lub mostu). Jawne odrzucanie prymitywów na CPU nie ma — clipping realizuje sprzęt. Pomiar kosztu budowy meshy daje `rust/src/render_baseline.rs` (ignorowany test `render_baseline`, `cargo test --release render_baseline -- --ignored --nocapture`). Twardych wymagań czasowych nie stawia żadna specyfikacja — pętlę klatki steruje macroquad (`next_frame`).
 
 **Modele obiektów** (budynki, pojazdy, utrudnienia, mosty) są bryłami budowanymi z kodu, bez assetów rastrowych, z rozmiarami w px trzymanymi przy kodzie budowy meshy w katalogu `mesh/`. Szczegóły każdego modelu, mostów, cieni i cząstek opisuje dokumentacja modułów katalogu `mesh/` i `fx.rs`; to element wyłącznie tej implementacji. Wygląd celowo nie musi być zgodny piksel w piksel — wiąże kontrakt, nie piksele.
 

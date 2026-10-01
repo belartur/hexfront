@@ -64,21 +64,30 @@ exit), and `p` starts a playtest game on the edited level (see
 
 ## Code layout
 
-```
+```text
 rust/                           the implementation (macroquad; this repository
                                 root holds rules.md, specification*.md and maps/)
   src/main.rs           entry point (cd rust && cargo run --release)
-  src/constants.rs      every tunable value (documented; rules.md units "j")
+  src/constants.rs      values shared by several modules (rules.md units "j";
+                        single-module constants live next to their code)
   src/hexgrid.rs        flat-top hex geometry (odd-q offset coordinates)
+  src/math.rs           scalar helpers shared by simulation and mesh builders
   src/board.rs          tiles, obstacles, ramps, bridges, path-finding, picking
   src/entities.rs       players, buildings, vehicles
   src/game.rs           real-time simulation (production, combat, turrets, ...)
   src/ai.rs             AI decision loop (rules.md sec. 13)
   src/rng.rs            deterministic PRNG for the AI noise (no extra crates)
   src/mapfile.rs        binary map file format: save / load / list maps
+  src/fx.rs             explosion particle system (presentation only, headless)
+  src/sound.rs          sound catalogue: event -> Ogg Vorbis file (headless)
+  src/decode.rs         sound decoding and resampling to 44100 Hz (headless)
+  src/audio.rs          sound playback through the macroquad backend
   src/camera.rs         isometric projection and view transforms
   src/iso.rs            orthographic GPU camera reproducing the 2D projection
-  src/mesh.rs           CPU mesh building: static terrain + per-frame objects
+  src/mesh/             CPU mesh building without macroquad, split by subject:
+                        mod (vertex types, solid primitives, DynamicMesh,
+                        fx particle geometry), terrain, surface, buildings,
+                        obstacles, vehicles, overlays, tests
   src/render.rs         code-drawn isometric renderer (no raster assets)
   src/editor.rs         map editor as a game state (no separate program)
   src/app.rs            menu, input handling, HUD
@@ -90,5 +99,5 @@ The conversion **1 j = 1 px** at 1:1 zoom is defined once in
 rendering only.  The hexagon side is 36 j (flat-top layout).
 
 The cost of building the meshes is measured by `src/render_baseline.rs`
-(`cd rust && cargo test --release render_baseline -- --nocapture`).  These
-are measurements, not timing assertions or a guarantee of interactive FPS.
+(`cd rust && cargo test --release render_baseline -- --ignored --nocapture`).
+These are measurements, not timing assertions or a guarantee of interactive FPS.

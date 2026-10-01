@@ -1,16 +1,18 @@
 //! Headless mesh-build baseline of the GPU path.
 //!
 //! Measures pure CPU cost of [`build_terrain`] (once per map) plus
-//! [`build_dynamic`] (every frame) per repository map. Run with:
+//! [`build_dynamic`] (every frame) per repository map. It only prints numbers,
+//! never asserts, so plain `cargo test` skips it; run explicitly with:
 //!
 //! ```bash
-//! cd rust && cargo test --release render_baseline -- --nocapture
+//! cd rust && cargo test --release render_baseline -- --ignored --nocapture
 //! ```
 
 use crate::mapfile;
 use crate::mesh::{DynamicMesh, build_dynamic, build_terrain};
 
 #[test]
+#[ignore = "prints a timing baseline, run explicitly with -- --nocapture"]
 fn render_baseline() {
     let frames = 10;
     for path in mapfile::list_maps(None) {

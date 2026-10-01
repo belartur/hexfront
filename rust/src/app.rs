@@ -277,11 +277,14 @@ impl Application {
         } else if self.state == State::Menu {
             if is_mouse_button_pressed(MouseButton::Left) {
                 let (mx, my) = mouse_position();
-                for (rect, path) in self.menu_rects.clone() {
-                    if rect.contains(vec2(mx, my)) {
-                        self.start_map(&path);
-                        break;
-                    }
+                // Only the winning path is cloned; `start_map` needs `&mut`.
+                let picked = self
+                    .menu_rects
+                    .iter()
+                    .find(|(rect, _)| rect.contains(vec2(mx, my)))
+                    .map(|(_, path)| path.clone());
+                if let Some(path) = picked {
+                    self.start_map(&path);
                 }
             }
             if is_key_pressed(KeyCode::Up) {
@@ -978,7 +981,8 @@ impl Application {
         let scroll = self.menu_scroll;
         let (mx, my) = mouse_position();
         self.menu_rects.clear();
-        for (i, path) in self.maps.clone().iter().enumerate() {
+        let maps = std::mem::take(&mut self.maps);
+        for (i, path) in maps.iter().enumerate() {
             let col = i % cols;
             let row = i / cols;
             let cx = constants::MENU_SIDE_MARGIN + col as f32 * col_w + col_w / 2.0;
@@ -1039,6 +1043,7 @@ impl Application {
                 WHITE,
             );
         }
+        self.maps = maps;
         // "add map" button opens a fresh editor board (specification_rust.md).
         let add_rect = Rect::new(w / 2.0 - 90.0, h * 0.08 + 118.0, 180.0, 40.0);
         draw_rectangle(
@@ -1073,11 +1078,15 @@ impl Application {
         }
         // RMB on a map cell edits that map (specification_rust.md).
         if is_mouse_button_pressed(MouseButton::Right) {
-            for (rect, path) in self.menu_rects.clone() {
-                if rect.contains(vec2(mx, my)) {
-                    self.enter_editor_path(&path);
-                    return;
-                }
+            // Only the winning path is cloned; entering the editor needs `&mut`.
+            let picked = self
+                .menu_rects
+                .iter()
+                .find(|(rect, _)| rect.contains(vec2(mx, my)))
+                .map(|(_, path)| path.clone());
+            if let Some(path) = picked {
+                self.enter_editor_path(&path);
+                return;
             }
         }
         if max_scroll > 0.0 {
@@ -1261,7 +1270,7 @@ impl Application {
         }
         if ctrl && is_key_pressed(KeyCode::S) {
             let opened = {
-                let ed = self.editor.as_mut().unwrap();
+                let ed = self.editor.as_mut().expect("editor open while saving");
                 match ed.quick_save() {
                     Ok(true) => false,
                     Ok(false) => true,
@@ -1438,7 +1447,7 @@ impl Application {
                         .and_then(|e| e.overlay_items.get(e.overlay_cursor).cloned());
                     if let Some(path) = path {
                         let ok = {
-                            let ed = self.editor.as_mut().unwrap();
+                            let ed = self.editor.as_mut().expect("editor open while loading");
                             ed.load_path(&path).is_ok()
                         };
                         if ok {
@@ -1749,7 +1758,7 @@ impl Application {
                 }
             } else if !is_save {
                 let ok = {
-                    let ed = self.editor.as_mut().unwrap();
+                    let ed = self.editor.as_mut().expect("editor open while loading");
                     ed.load_path(&path).is_ok()
                 };
                 if ok {
