@@ -119,8 +119,9 @@ pub const FPS: f64 = 60.0;
 pub const SIM_DT: f64 = 1.0 / FPS;
 /// Angular speed of the helicopter rotor animation in rad/s (rendering
 /// only; rules.md has no rotor state). The same phase drives the airframe
-/// blades and their shadow, so both stay in lockstep, and the tail rotor
-/// uses [`crate::mesh`]'s faster multiplier.
+/// blades and their shadow, so both stay in lockstep; the tail rotor and the
+/// hovercraft lift fan read that phase through their own faster multipliers,
+/// so neither spins in visible lockstep with the main rotor.
 pub const ROTOR_SPIN_RAD_PER_S: f64 = 12.0;
 
 // ---------------------------------------------------------------------------

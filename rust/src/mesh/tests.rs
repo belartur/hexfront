@@ -648,6 +648,159 @@ fn buffer_shares_the_tank_chassis_without_a_gun() {
 }
 
 #[test]
+fn hovercraft_floats_on_a_skirt_with_a_spinning_fan() {
+    use crate::constants::VehicleKind;
+    use crate::entities::{Player, Vehicle};
+    use crate::game::Game;
+    let mut board = Board::new(10, 10);
+    for t in board.tiles.clone().keys() {
+        board.tiles.get_mut(t).unwrap().height = 1;
+    }
+    let (sx, sy) = hexgrid::hex_to_world(4, 4, board.side);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    game.vehicles.push(Vehicle::new(
+        VehicleKind::Hovercraft,
+        0,
+        30.0,
+        Vec::new(),
+        (sx, sy),
+        None,
+    ));
+    let mut first = DynamicMesh::default();
+    build_dynamic(&game, 0.0, &mut first);
+    // Skirt + hull + bow + cockpit + fan duct + fan plate + rudder: far more
+    // than the two plain discs the craft used to be (24 triangles = 72
+    // vertices).
+    assert!(
+        first.opaque.vertices.len() > 300,
+        "hovercraft lost its details: {} vertices",
+        first.opaque.vertices.len()
+    );
+    // Two deck rails + three fan blades.
+    assert_eq!(
+        first.lines.len(),
+        2 + HOVER_FAN_BLADES,
+        "rail/fan strokes: {}",
+        first.lines.len()
+    );
+    // Low and wide: the flared skirt makes the craft clearly wider across than
+    // it is tall, which is what separates it from the boxy tank at a glance.
+    let (mut lo, mut hi) = (
+        [f64::INFINITY, f64::INFINITY, f64::INFINITY],
+        [f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY],
+    );
+    for vert in first.opaque.vertices.iter() {
+        let p = [f64::from(vert.x), f64::from(vert.y), f64::from(vert.z)];
+        for (k, v) in p.iter().enumerate() {
+            lo[k] = lo[k].min(*v);
+            hi[k] = hi[k].max(*v);
+        }
+    }
+    let (wide, tall) = ((hi[0] - lo[0]).max(hi[1] - lo[1]), hi[2] - lo[2]);
+    assert!(
+        wide > 2.0 * tall,
+        "hovercraft not low and wide: {wide} across by {tall} tall"
+    );
+    // The skirt is the widest ring of all, so the craft spans its full
+    // diameter and it overhangs the hull.
+    assert!(
+        (wide - 2.0 * HOVER_SKIRT_R).abs() < 1e-3,
+        "the skirt does not set the width: {wide} vs {}",
+        2.0 * HOVER_SKIRT_R
+    );
+    assert!(
+        wide > HOVER_HULL_LEN,
+        "the skirt does not overhang the hull: {wide}"
+    );
+    // The fan blades are the light strokes; advancing the rotor phase turns
+    // them, so the craft visibly hovers while it stands still.
+    let blades = |mesh: &DynamicMesh| -> Vec<(f32, f32, f32, f32)> {
+        mesh.lines
+            .iter()
+            .filter(|(a, _)| a.color[..3] == [200, 200, 200])
+            .map(|(a, b)| (a.x, a.y, b.x, b.y))
+            .collect()
+    };
+    let first_blades = blades(&first);
+    assert_eq!(
+        first_blades.len(),
+        HOVER_FAN_BLADES,
+        "expected a {} blade lift fan",
+        HOVER_FAN_BLADES
+    );
+    for (ax, ay, bx, by) in first_blades.iter().copied() {
+        let len = (f64::from(ax) - f64::from(bx)).hypot(f64::from(ay) - f64::from(by));
+        assert!((len - HOVER_FAN_R).abs() < 1e-3, "fan blade length {len}");
+    }
+    let mut second = DynamicMesh::default();
+    build_dynamic(&game, 0.5, &mut second);
+    assert_ne!(
+        first_blades,
+        blades(&second),
+        "the lift fan does not spin with the phase"
+    );
+}
+
+#[test]
+fn hovercraft_bow_and_fan_follow_the_travel_heading() {
+    use crate::constants::VehicleKind;
+    use crate::entities::{Player, Vehicle};
+    use crate::game::Game;
+    let mut board = Board::new(10, 10);
+    for t in board.tiles.clone().keys() {
+        board.tiles.get_mut(t).unwrap().height = 1;
+    }
+    let start = (4, 4);
+    let dest = (8, 4);
+    let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    game.vehicles.push(Vehicle::new(
+        VehicleKind::Hovercraft,
+        0,
+        30.0,
+        vec![dest],
+        (sx, sy),
+        Some(start),
+    ));
+    let (vx, vy) = (game.vehicles[0].x, game.vehicles[0].y);
+    let (fx, fy) = vehicle_heading(&game, &game.vehicles[0]);
+    let mut dynamic = DynamicMesh::default();
+    build_dynamic(&game, 0.0, &mut dynamic);
+    // Distance of a world point along the travel heading.
+    let along = |x: f64, y: f64| (x - vx) * fx + (y - vy) * fy;
+    // The glazed cockpit (its own fixed tint) is on the foredeck, so it sits
+    // ahead of the hull centre: a hovercraft drives bow first.
+    let canopy: Vec<&GpuVertex> = dynamic
+        .opaque
+        .vertices
+        .iter()
+        .filter(|p| p.color == HOVER_CANOPY_COLOR)
+        .collect();
+    assert!(!canopy.is_empty(), "no glazed cockpit found");
+    let n = canopy.len() as f64;
+    let cockpit = canopy
+        .iter()
+        .map(|p| along(f64::from(p.x), f64::from(p.y)))
+        .sum::<f64>()
+        / n;
+    assert!(
+        cockpit > 1.0,
+        "cockpit {cockpit} does not face the heading {fx},{fy}"
+    );
+    // The lift fan is the rearmost stroke: its duct trails the bow.
+    let fan = dynamic
+        .lines
+        .iter()
+        .filter(|(a, _)| a.color[..3] == [200, 200, 200])
+        .map(|(a, _)| along(f64::from(a.x), f64::from(a.y)))
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        fan < cockpit - 8.0,
+        "fan at {fan} does not trail the cockpit at {cockpit}"
+    );
+}
+
+#[test]
 fn range_fills_are_opaque_masks_and_outlines_use_owner_colour() {
     use crate::entities::{Building, BuildingKind, Player};
     use crate::game::Game;

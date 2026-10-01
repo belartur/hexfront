@@ -55,10 +55,11 @@ use crate::hexgrid::Tile;
 /// The rotor animation phase ([`Renderer::rotor_phase`]) is shared by the
 /// airframe blades and the rotor blades of the shadow
 /// ([`crate::mesh::build_dynamic`]), so a helicopter and its shadow always
-/// spin together; [`crate::app`] advances it by
+/// spin together, and the hovercraft lift fan reads the same phase through its
+/// own ratio; [`crate::app`] advances it by
 /// [`crate::constants::ROTOR_SPIN_RAD_PER_S`] every frame.
 pub struct Renderer {
-    /// Phase of the helicopter rotor animation.
+    /// Phase of the rotor (helicopter) and fan (hovercraft) animations.
     pub rotor_phase: f64,
     /// Converted static terrain buffers, uploaded once per level.
     terrain: Option<GpuTerrain>,

@@ -61,7 +61,7 @@ Katalog `maps` jest listowany dynamicznie — nazwa pliku jest wyświetlaną naz
   - `rust/src/mesh/surface.rs` — wysokość, po której jedzie pojazd, i tryb przejazdu przez most: `vehicle_ground_z()`, `deck_z_of()`, `route_crossings()`, `vehicle_crossing()`, `vehicle_surface_z()`, `waypoint_z()`.
   - `rust/src/mesh/buildings.rs` — modele ośmiu rodzajów budynków (rules.md sekcja 3) i ich stałe rozmiarów w px (blok `BLD_*`).
   - `rust/src/mesh/obstacles.rs` — modele utrudnień i stałe rozmiarów w px (blok `OBS_*`: ściana, mina — z osobną bryłą dla lądu i dla wody, wybieraną wg wysokości pola — oraz pułapki ogniowa i lodowa).
-  - `rust/src/mesh/vehicles.rs` — modele pojazdów (czołg, helikopter, poduszkowiec) i ich stałe rozmiarów w px (bloki `TANK_*` i `HELI_*`), `vehicle_heading()`/`tank_aim()`, `vehicle_z()`/`wreck_z()`, cień helikoptera.
+  - `rust/src/mesh/vehicles.rs` — modele pojazdów (czołg, helikopter, poduszkowiec) i ich stałe rozmiarów w px (bloki `TANK_*`, `HELI_*` i `HOVER_*`), `vehicle_heading()`/`tank_aim()`, `vehicle_z()`/`wreck_z()`, cień helikoptera.
   - `rust/src/mesh/overlays.rs` — maski wypełnień zasięgów i ich obrysy (`push_ranges()`), rysowane trasy pojazdów (`push_paths()`), pociski (`push_projectiles()`).
   - `rust/src/mesh/tests.rs` — testy budownic meshy (`#[cfg(test)]`): trzymane w jednym pliku, bo większość mierzy całą klatkę z `build_dynamic()`.
 - `rust/src/render.rs` — rysowanie z kodu na GPU (bez assetów rastrowych): `Renderer::draw_gpu()` (chunki terenu, przezroczyste cienie mostów, linie siatki, obiekty, przezroczyste cienie helikopterów, cząstki wybuchów, maski i kompozycja zasięgów `Renderer::draw_range_fills()` z `RangeMasks`, kreski 3D, nakładki 2D); `snap_to_building()` deleguje do `Board`.

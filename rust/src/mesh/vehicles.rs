@@ -141,23 +141,99 @@ pub(super) fn helicopter_altitude(game: &Game) -> f64 {
 
 // ---------------------------------------------------------------------------
 // Hovercraft (rules.md section 5.3: crosses water and land alike) and the
-// buffer badge. Both are rendering-only sizes in px, like the tank and
-// helicopter constants below; the hull takes the owner colour.
+// buffer badge. Every size below is a rendering-only value in px, like the
+// tank and helicopter constants; the hull takes the owner colour, the skirt
+// and the fan duct are its dark shades, and only the cockpit glass has a fixed
+// tint. The craft is deliberately built along the travel heading, because its
+// boat-like bow, its stern fan and its rudder all have a front and a back.
 // ---------------------------------------------------------------------------
 
-/// Radius of the hovercraft hull skirt in px.
-const HOVER_HULL_R: f64 = 13.0;
-/// Facets of the hull skirt. It is the widest part of the craft, so it gets
-/// the most facets of the two discs.
-const HOVER_HULL_SEGMENTS: usize = 14;
-/// Radius of the hovercraft deck in px, well inside the skirt.
-const HOVER_DECK_R: f64 = 7.0;
-/// Facets of the deck.
-const HOVER_DECK_SEGMENTS: usize = 12;
-/// Height of the deck above the skirt in px.
-const HOVER_DECK_LIFT: f64 = 4.0;
-/// Shade factor of the deck, darkening it so the two discs read as separate.
-const HOVER_DECK_SHADE: f64 = 0.7;
+/// Bottom radius of the inflated skirt in px: the widest part of the craft
+/// and what makes it read as a hovering, low platform instead of a hull.
+pub(super) const HOVER_SKIRT_R: f64 = 15.0;
+/// Top radius of the skirt in px. Smaller than the bottom one, so the cylinder
+/// leans inwards and the skirt reads as an inflated cushion rather than a
+/// second deck stacked on the first.
+const HOVER_SKIRT_TOP_R: f64 = 12.5;
+/// Height of the skirt in px (the cushion the hull floats on).
+const HOVER_SKIRT_H: f64 = 3.0;
+/// Facets of the skirt: it is the widest ring of the craft, so it gets the
+/// most facets of the three cylinders.
+const HOVER_SKIRT_SEGMENTS: usize = 16;
+/// Shade factor of the skirt: dark rubber, not another player-coloured deck.
+const HOVER_SKIRT_SHADE: f64 = 0.45;
+/// Length of the hull along the travel heading in px. Clearly longer than it
+/// is wide, so the craft reads as a boat whose bow points somewhere.
+pub(super) const HOVER_HULL_LEN: f64 = 24.0;
+/// Width of the hull across the heading in px.
+const HOVER_HULL_WID: f64 = 12.0;
+/// Height of the hull box in px (it sits on the skirt).
+const HOVER_HULL_H: f64 = 4.0;
+/// Length of the raked bow wedge in px.
+const HOVER_BOW_LEN: f64 = 6.0;
+/// Width of the bow wedge in px.
+const HOVER_BOW_WID: f64 = 9.0;
+/// Height of the bow wedge at its rear edge in px. Its front edge stays flush
+/// with the deck, so the wedge *is* the foredeck sloping down to the bow
+/// instead of a block glued onto the hull front.
+const HOVER_BOW_H: f64 = 2.5;
+/// Length of the glazed cockpit box in px.
+const HOVER_CANOPY_LEN: f64 = 7.0;
+/// Width of the cockpit box in px.
+const HOVER_CANOPY_WID: f64 = 8.0;
+/// Height of the cockpit box in px.
+const HOVER_CANOPY_H: f64 = 3.0;
+/// Forward shift of the cockpit centre from the hull centre in px: it sits on
+/// the foredeck, so the windscreen faces the direction of travel.
+const HOVER_CANOPY_SHIFT: f64 = 4.0;
+/// Elevation of the cockpit base relative to the hull top in px (slightly
+/// sunk into it, so no gap opens at any heading).
+const HOVER_CANOPY_SINK: f64 = -0.4;
+/// Fixed tint of the cockpit glass: the same dark canopy tint the helicopter
+/// uses, so both windscreens read as glass instead of a glaring white box.
+pub(super) const HOVER_CANOPY_COLOR: [u8; 3] = [72, 106, 126];
+/// Outer radius of the stern fan duct in px. Smaller than half the hull width,
+/// so the duct sits on the deck instead of overhanging it.
+const HOVER_DUCT_R: f64 = 5.8;
+/// Roof radius of the fan duct in px (barely tapered, so the housing is a drum
+/// rather than a cone).
+const HOVER_DUCT_TOP_R: f64 = 5.2;
+/// Height of the duct housing wall in px.
+const HOVER_DUCT_H: f64 = 2.5;
+/// Facets of the fan duct.
+const HOVER_DUCT_SEGMENTS: usize = 12;
+/// Rearward shift of the fan duct from the hull centre in px: over the stern.
+const HOVER_DUCT_SHIFT: f64 = -7.0;
+/// Radius of the fan plate recessed in the duct in px.
+pub(super) const HOVER_FAN_R: f64 = 4.6;
+/// Lift of the fan plate above the duct top in px: enough that the recessed
+/// plate never z-fights the drum top it lies in.
+const HOVER_FAN_PLATE_LIFT: f64 = 0.3;
+/// Lift of the spinning fan blades above the duct top in px.
+const HOVER_FAN_BLADE_LIFT: f64 = 0.6;
+/// Shade factor of the fan plate: darker than the duct wall, so the recess
+/// reads as a shadowed opening.
+const HOVER_FAN_PLATE_SHADE: f64 = 0.35;
+/// Number of lift-fan blades.
+pub(super) const HOVER_FAN_BLADES: usize = 3;
+/// Phase multiplier of the lift fan. It shares the rotor phase with the
+/// helicopter rotor, and spins a little faster, so a hovercraft idling next
+/// to a helicopter does not look like two copies of one animation.
+const HOVER_FAN_SPIN_RATIO: f64 = 1.4;
+/// Length of the stern rudder fin along the heading in px.
+const HOVER_FIN_LEN: f64 = 3.6;
+/// Thickness of the rudder fin across the heading in px.
+const HOVER_FIN_WID: f64 = 1.6;
+/// Height of the rudder fin in px.
+const HOVER_FIN_H: f64 = 5.0;
+/// Base of the rudder fin relative to the hull top in px (sunk into it, so the
+/// fin emerges from the duct and the deck instead of floating behind them).
+const HOVER_FIN_SINK: f64 = -0.2;
+/// Rearward shift of the rudder fin from the hull centre in px. It is derived
+/// so the fin's front edge stays tucked into the rear of the duct (derived:
+/// duct shift - duct radius + a little overlap): the silhouette then ends in
+/// a tail instead of a flat stern cut.
+const HOVER_FIN_SHIFT: f64 = HOVER_DUCT_SHIFT - HOVER_DUCT_R + HOVER_FIN_LEN / 2.0 - 0.8;
 /// Colour of the healing cross on a buffer hull. It repeats the medical green
 /// of the buffer base roof, which is what identifies the support role.
 const BUFFER_CROSS_COLOR: [u8; 3] = [130, 235, 140];
@@ -178,21 +254,7 @@ pub(super) fn push_vehicle(
             push_helicopter(game, v, mesh, lines, x, y, z, rotor_phase, color);
         }
         constants::VehicleKind::Hovercraft => {
-            // Hull sits flat on the ground: lift it like the flat obstacle
-            // markers so it does not z-fight with the tile top. Two stacked
-            // discs (a skirt and a deck) are all this hull needs to read as a
-            // low, wide craft against the boxy tank and the pod helicopter.
-            let dz = z + constants::OBSTACLE_LIFT;
-            push_disc(mesh, x, y, dz, HOVER_HULL_R, HOVER_HULL_SEGMENTS, color);
-            push_disc(
-                mesh,
-                x,
-                y,
-                dz + HOVER_DECK_LIFT,
-                HOVER_DECK_R,
-                HOVER_DECK_SEGMENTS,
-                constants::shade(color, HOVER_DECK_SHADE),
-            );
+            push_hovercraft(game, v, mesh, lines, x, y, z, rotor_phase, color);
         }
         constants::VehicleKind::Buffer => {
             // Same chassis as a tank (rules.md section 5.4: a buffer drives
@@ -204,6 +266,187 @@ pub(super) fn push_vehicle(
             push_cross(lines, x, y, deck_top + 4.0, BUFFER_CROSS_COLOR);
         }
     }
+}
+
+/// Detailed hovercraft (rules.md section 5.3): an inflated dark skirt carrying
+/// a boat-like hull with a raked bow, a glazed cockpit, a pair of deck rails,
+/// a stern fan duct whose blades spin with `rotor_phase` and a rudder fin.
+///
+/// Unlike the tank and the helicopter, the model is built along the travel
+/// heading (see [`vehicle_heading`]): the bow points at the next waypoint and
+/// the fan duct with the rudder trail behind it, so the craft visibly drives
+/// forwards. Being the only amphibious vehicle, it also has to stay *low and
+/// wide*: the skirt is the widest part of the craft and the whole model is
+/// flatter than the tank, so a hovercraft is never mistaken for a ground
+/// vehicle at a glance -- it is the silhouette, not the colour, that carries
+/// that.
+#[allow(clippy::too_many_arguments)]
+fn push_hovercraft(
+    game: &Game,
+    v: &crate::entities::Vehicle,
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    rotor_phase: f64,
+    color: [u8; 3],
+) {
+    let (fx, fy) = vehicle_heading(game, v);
+    push_hovercraft_oriented(mesh, lines, x, y, z, rotor_phase, color, fx, fy);
+}
+
+/// Hovercraft parts in an explicit heading frame (unit tests drive this).
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
+fn push_hovercraft_oriented(
+    mesh: &mut TriangleSoup,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
+    x: f64,
+    y: f64,
+    z: f64,
+    rotor_phase: f64,
+    color: [u8; 3],
+    fx: f64,
+    fy: f64,
+) {
+    let (px, py) = (-fy, fx);
+    let dark = constants::shade(color, 0.7);
+    let darker = constants::shade(color, 0.5);
+    // Skirt: one flared dark cylinder, lifted like the flat obstacle markers
+    // so it never z-fights the tile top. Its bottom rim is the widest ring of
+    // the craft, which is what makes the whole model read as low and wide.
+    let skirt_base = z + constants::OBSTACLE_LIFT;
+    push_cylinder(
+        mesh,
+        x,
+        y,
+        skirt_base,
+        HOVER_SKIRT_R,
+        HOVER_SKIRT_TOP_R,
+        HOVER_SKIRT_H,
+        HOVER_SKIRT_SEGMENTS,
+        constants::shade(color, HOVER_SKIRT_SHADE),
+    );
+    // Hull: a boat, not a box -- clearly longer along the heading than across
+    // it, so its bow can point at the waypoint.
+    let hull_base = skirt_base + HOVER_SKIRT_H;
+    push_oriented_box(
+        mesh,
+        x,
+        y,
+        hull_base,
+        HOVER_HULL_LEN,
+        HOVER_HULL_WID,
+        HOVER_HULL_H,
+        fx,
+        fy,
+        color,
+    );
+    let hull_top = hull_base + HOVER_HULL_H;
+    // Foredeck: a wedge whose front edge stays flush with the deck, so the bow
+    // slopes down to the skirt instead of ending in a square corner.
+    let bow_mid = HOVER_HULL_LEN / 2.0 - HOVER_BOW_LEN / 2.0;
+    push_oriented_slope(
+        mesh,
+        x + fx * bow_mid,
+        y + fy * bow_mid,
+        hull_top,
+        HOVER_BOW_LEN,
+        HOVER_BOW_WID,
+        HOVER_BOW_H,
+        0.2,
+        fx,
+        fy,
+        dark,
+    );
+    // Glazed cockpit on the foredeck, behind the bow, so the windscreen faces
+    // the direction of travel.
+    push_oriented_box(
+        mesh,
+        x + fx * HOVER_CANOPY_SHIFT,
+        y + fy * HOVER_CANOPY_SHIFT,
+        hull_top + HOVER_CANOPY_SINK,
+        HOVER_CANOPY_LEN,
+        HOVER_CANOPY_WID,
+        HOVER_CANOPY_H,
+        fx,
+        fy,
+        HOVER_CANOPY_COLOR,
+    );
+    // Rails along both deck edges: two thin strokes keep the wide hull from
+    // reading as one flat plate. They run from the cockpit back to the duct.
+    let rail_from = HOVER_CANOPY_SHIFT - HOVER_CANOPY_LEN / 2.0 - 1.0;
+    let rail_to = HOVER_DUCT_SHIFT + 1.0;
+    for side in [-1.0, 1.0] {
+        push_beam(
+            lines,
+            x + fx * rail_from + px * side * HOVER_HULL_WID / 2.0,
+            y + fy * rail_from + py * side * HOVER_HULL_WID / 2.0,
+            hull_top + 0.15,
+            x + fx * rail_to + px * side * HOVER_HULL_WID / 2.0,
+            y + fy * rail_to + py * side * HOVER_HULL_WID / 2.0,
+            hull_top + 0.15,
+            darker,
+        );
+    }
+    // Stern fan duct: a dark housing drum on the deck whose recessed plate
+    // carries the lift fan. The blades spin with `rotor_phase` (a little
+    // faster than the helicopter rotor), so the craft is visibly hovering
+    // even while it stands still.
+    let (dx, dy) = (x + fx * HOVER_DUCT_SHIFT, y + fy * HOVER_DUCT_SHIFT);
+    push_cylinder(
+        mesh,
+        dx,
+        dy,
+        hull_top,
+        HOVER_DUCT_R,
+        HOVER_DUCT_TOP_R,
+        HOVER_DUCT_H,
+        HOVER_DUCT_SEGMENTS,
+        darker,
+    );
+    let duct_top = hull_top + HOVER_DUCT_H;
+    push_disc(
+        mesh,
+        dx,
+        dy,
+        duct_top + HOVER_FAN_PLATE_LIFT,
+        HOVER_FAN_R,
+        HOVER_DUCT_SEGMENTS,
+        constants::shade(color, HOVER_FAN_PLATE_SHADE),
+    );
+    let fan_z = duct_top + HOVER_FAN_BLADE_LIFT;
+    let phase = rotor_phase * HOVER_FAN_SPIN_RATIO;
+    let blade = [200, 200, 200];
+    for k in 0..HOVER_FAN_BLADES {
+        let a = phase + std::f64::consts::TAU * k as f64 / HOVER_FAN_BLADES as f64;
+        push_beam(
+            lines,
+            dx,
+            dy,
+            fan_z,
+            dx + HOVER_FAN_R * a.cos(),
+            dy + HOVER_FAN_R * a.sin(),
+            fan_z,
+            blade,
+        );
+    }
+    // Rudder fin trailing at the stern: thin across the heading, tall. It is
+    // sunken into the hull top, so it emerges from the duct instead of
+    // floating behind it, and its rear edge gives the silhouette a tail.
+    push_oriented_box(
+        mesh,
+        x + fx * HOVER_FIN_SHIFT,
+        y + fy * HOVER_FIN_SHIFT,
+        hull_top + HOVER_FIN_SINK,
+        HOVER_FIN_LEN,
+        HOVER_FIN_WID,
+        HOVER_FIN_H,
+        fx,
+        fy,
+        darker,
+    );
 }
 
 /// Detailed helicopter: slender pod hull with a glazed cockpit, tail boom
