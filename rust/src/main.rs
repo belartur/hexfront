@@ -44,8 +44,9 @@ fn window_conf() -> macroquad::conf::Conf {
             window_resizable: true,
             ..Default::default()
         },
-        draw_call_vertex_capacity: 16_384,
-        draw_call_index_capacity: 16_384,
+        // Above DRAW_BATCH_VERTICES, so a full batch always fits.
+        draw_call_vertex_capacity: constants::DRAW_BATCH_VERTICES + 384,
+        draw_call_index_capacity: constants::DRAW_BATCH_VERTICES + 384,
         ..Default::default()
     }
 }

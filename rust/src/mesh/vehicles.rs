@@ -14,6 +14,7 @@ use super::{
 };
 use crate::constants;
 use crate::game::Game;
+use crate::math::dist2;
 
 /// Flight heading of a vehicle as a unit `(fx, fy)` vector in world space.
 ///
@@ -22,18 +23,9 @@ use crate::game::Game;
 /// came from, and finally to east (+x), so parked helicopters still face a
 /// deterministic direction instead of snapping arbitrarily.
 pub(super) fn vehicle_heading(game: &Game, v: &crate::entities::Vehicle) -> (f64, f64) {
-    let aim_at = |tx: f64, ty: f64| {
-        let (dx, dy) = (tx - v.x, ty - v.y);
-        let len = (dx * dx + dy * dy).sqrt();
-        if len > 1e-6 {
-            Some((dx / len, dy / len))
-        } else {
-            None
-        }
-    };
     if v.route_index < v.route.len() {
         let (wx, wy) = game.board.center_world(v.route[v.route_index]);
-        if let Some(h) = aim_at(wx, wy) {
+        if let Some(h) = unit_dir(v, wx, wy) {
             return h;
         }
     }
@@ -42,21 +34,28 @@ pub(super) fn vehicle_heading(game: &Game, v: &crate::entities::Vehicle) -> (f64
         let (wx, wy) = game.board.center_world(prev);
         // Heading is where we came *from* reversed: from the previous
         // waypoint towards the current position.
-        let (dx, dy) = (v.x - wx, v.y - wy);
-        let len = (dx * dx + dy * dy).sqrt();
-        if len > 1e-6 {
-            return (dx / len, dy / len);
+        if let Some(h) = unit_dir(v, wx, wy) {
+            return h;
         }
     }
     if let Some(src) = v.src_tile {
         let (wx, wy) = game.board.center_world(src);
-        let (dx, dy) = (v.x - wx, v.y - wy);
-        let len = (dx * dx + dy * dy).sqrt();
-        if len > 1e-6 {
-            return (dx / len, dy / len);
+        if let Some(h) = unit_dir(v, wx, wy) {
+            return h;
         }
     }
     (1.0, 0.0)
+}
+
+/// Unit vector from `v` towards the world point `(tx, ty)`.
+///
+/// `None` when the target sits on top of the vehicle, where the direction is
+/// undefined; the caller then falls back to the next candidate instead of
+/// drawing a hull or a gun barrel at a random angle.
+fn unit_dir(v: &crate::entities::Vehicle, tx: f64, ty: f64) -> Option<(f64, f64)> {
+    let (dx, dy) = (tx - v.x, ty - v.y);
+    let len = dist2((v.x, v.y), (tx, ty)).sqrt();
+    (len > 1e-6).then(|| (dx / len, dy / len))
 }
 
 /// Aim direction of a tank turret as a unit `(ax, ay)` vector in world space.
@@ -72,18 +71,9 @@ pub(super) fn tank_aim(
     v: &crate::entities::Vehicle,
     heading: (f64, f64),
 ) -> (f64, f64) {
-    let aim_at = |tx: f64, ty: f64| {
-        let (dx, dy) = (tx - v.x, ty - v.y);
-        let len = (dx * dx + dy * dy).sqrt();
-        if len > 1e-6 {
-            Some((dx / len, dy / len))
-        } else {
-            None
-        }
-    };
     if let Some(tid) = v.combat_target
         && let Some(enemy) = game.vehicles.iter().find(|x| x.id == tid && !x.dead)
-        && let Some(dir) = aim_at(enemy.x, enemy.y)
+        && let Some(dir) = unit_dir(v, enemy.x, enemy.y)
     {
         return dir;
     }
@@ -91,13 +81,13 @@ pub(super) fn tank_aim(
     // its gun still points at the enemy it is shooting (rules.md section 5.1).
     if let Some(tid) = v.gun_target
         && let Some(enemy) = game.vehicles.iter().find(|x| x.id == tid && !x.dead)
-        && let Some(dir) = aim_at(enemy.x, enemy.y)
+        && let Some(dir) = unit_dir(v, enemy.x, enemy.y)
     {
         return dir;
     }
     if let Some(tile) = v.wall_target {
         let (wx, wy) = game.board.center_world(tile);
-        if let Some(dir) = aim_at(wx, wy) {
+        if let Some(dir) = unit_dir(v, wx, wy) {
             return dir;
         }
     }
@@ -149,6 +139,29 @@ pub(super) fn helicopter_altitude(game: &Game) -> f64 {
     max_height(&game.board) + constants::HELICOPTER_ALTITUDE_PX
 }
 
+// ---------------------------------------------------------------------------
+// Hovercraft (rules.md section 5.3: crosses water and land alike) and the
+// buffer badge. Both are rendering-only sizes in px, like the tank and
+// helicopter constants below; the hull takes the owner colour.
+// ---------------------------------------------------------------------------
+
+/// Radius of the hovercraft hull skirt in px.
+const HOVER_HULL_R: f64 = 13.0;
+/// Facets of the hull skirt. It is the widest part of the craft, so it gets
+/// the most facets of the two discs.
+const HOVER_HULL_SEGMENTS: usize = 14;
+/// Radius of the hovercraft deck in px, well inside the skirt.
+const HOVER_DECK_R: f64 = 7.0;
+/// Facets of the deck.
+const HOVER_DECK_SEGMENTS: usize = 12;
+/// Height of the deck above the skirt in px.
+const HOVER_DECK_LIFT: f64 = 4.0;
+/// Shade factor of the deck, darkening it so the two discs read as separate.
+const HOVER_DECK_SHADE: f64 = 0.7;
+/// Colour of the healing cross on a buffer hull. It repeats the medical green
+/// of the buffer base roof, which is what identifies the support role.
+const BUFFER_CROSS_COLOR: [u8; 3] = [130, 235, 140];
+
 pub(super) fn push_vehicle(
     game: &Game,
     v: &crate::entities::Vehicle,
@@ -166,10 +179,20 @@ pub(super) fn push_vehicle(
         }
         constants::VehicleKind::Hovercraft => {
             // Hull sits flat on the ground: lift it like the flat obstacle
-            // markers so it does not z-fight with the tile top.
+            // markers so it does not z-fight with the tile top. Two stacked
+            // discs (a skirt and a deck) are all this hull needs to read as a
+            // low, wide craft against the boxy tank and the pod helicopter.
             let dz = z + constants::OBSTACLE_LIFT;
-            push_disc(mesh, x, y, dz, 13.0, 14, color);
-            push_disc(mesh, x, y, dz + 4.0, 7.0, 12, constants::shade(color, 0.7));
+            push_disc(mesh, x, y, dz, HOVER_HULL_R, HOVER_HULL_SEGMENTS, color);
+            push_disc(
+                mesh,
+                x,
+                y,
+                dz + HOVER_DECK_LIFT,
+                HOVER_DECK_R,
+                HOVER_DECK_SEGMENTS,
+                constants::shade(color, HOVER_DECK_SHADE),
+            );
         }
         constants::VehicleKind::Buffer => {
             // Same chassis as a tank (rules.md section 5.4: a buffer drives
@@ -178,7 +201,7 @@ pub(super) fn push_vehicle(
             let (fx, fy) = vehicle_heading(game, v);
             // `deck_top` is already absolute (it includes the vehicle's `z`).
             let deck_top = push_tank_chassis(mesh, lines, x, y, z, color, fx, fy);
-            push_cross(lines, x, y, deck_top + 4.0, [130, 235, 140]);
+            push_cross(lines, x, y, deck_top + 4.0, BUFFER_CROSS_COLOR);
         }
     }
 }

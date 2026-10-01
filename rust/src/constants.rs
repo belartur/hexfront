@@ -10,6 +10,16 @@
 
 use std::path::PathBuf;
 
+/// Maximum vertices in one GPU draw call.
+///
+/// Three places have to agree on it: the terrain chunking in `mesh/terrain.rs`
+/// (a chunk must fit one call), the draw-time batching in `render.rs` (a soup
+/// is sliced into batches of this size), and the `draw_call_*_capacity` raised
+/// in `window_conf`. They are the same limit at three stages of one path, so
+/// it is defined here once; `main.rs` rounds it up past this value when it
+/// configures the backend.
+pub const DRAW_BATCH_VERTICES: usize = 16_000;
+
 /// Root of the repository: the rules (`rules.md`), the specifications and
 /// the `maps` directory stay there, while this Rust implementation lives in
 /// `rust/` (one directory per language implementation).

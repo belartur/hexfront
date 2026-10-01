@@ -461,11 +461,6 @@ fn draw_range_soup_mesh(mesh: &macroquad::models::Mesh) {
     mq::draw_mesh(mesh);
 }
 
-/// Maximum vertices per single `draw_mesh` batch: one mesh chunk
-/// (`CHUNK_VERTICES`) must fit a single macroquad draw call raised via
-/// `window_conf`, so no further slicing happens at draw time.
-pub const DRAW_BATCH_VERTICES: usize = 16_000;
-
 /// End index of the next draw batch that starts at `vi`.
 ///
 /// The batch limit is not a multiple of three, so a full batch is pulled back
@@ -474,7 +469,7 @@ pub const DRAW_BATCH_VERTICES: usize = 16_000;
 /// Only a full batch is rounded, so the tail batch keeps every vertex it has
 /// and the walk always makes progress.
 fn batch_end(vi: usize, len: usize) -> usize {
-    let mut vend = (vi + DRAW_BATCH_VERTICES).min(len);
+    let mut vend = (vi + constants::DRAW_BATCH_VERTICES).min(len);
     if vend < len {
         vend -= (vend - vi) % 3;
     }
@@ -622,14 +617,15 @@ fn draw_selection_2d(
 
 #[cfg(test)]
 mod tests {
-    use super::{DRAW_BATCH_VERTICES, batch_end};
+    use super::batch_end;
+    use crate::constants;
 
     #[test]
     fn draw_batches_end_on_triangle_boundaries() {
         // The batch limit (u16 index batches) is not a multiple of three, so a
         // naive split would cut a triangle in half at every seam. The walk has
         // to stay on triangle boundaries, make progress and keep the tail.
-        let len = DRAW_BATCH_VERTICES * 3;
+        let len = constants::DRAW_BATCH_VERTICES * 3;
         let mut vi = 0;
         let mut batches = 0;
         while vi < len {

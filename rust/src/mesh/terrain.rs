@@ -11,10 +11,9 @@ use crate::hexgrid::{self, Tile};
 use crate::math::dist2;
 
 /// Maximum vertices per GPU chunk: macroquad batches draw calls into
-/// `u16` index buffers, so large terrains are split into chunks. Keep the
-/// chunk at or below the `draw_call_*_capacity` raised in `window_conf`,
-/// so one chunk is one draw call.
-pub(super) const CHUNK_VERTICES: usize = 16_000;
+/// `u16` index buffers, so large terrains are split into chunks. It is the
+/// draw-call limit itself, so one chunk is one draw call.
+pub(super) const CHUNK_VERTICES: usize = constants::DRAW_BATCH_VERTICES;
 
 /// Tiles per chunk edge: the terrain is split into spatial chunks so view
 /// culling can skip whole regions (16 x 16 tiles stays well below

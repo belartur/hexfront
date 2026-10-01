@@ -20,6 +20,13 @@ pub(super) fn range_outline_color(b: &crate::entities::Building) -> [u8; 3] {
     }
 }
 
+/// Facets of one range fill disc. High enough that the mask edge is smooth at
+/// any zoom the game allows; it is a coverage mask, not a drawn circle.
+const RANGE_DISC_SEGMENTS: usize = 40;
+/// Facets of one range outline ring. Slightly more than the fill, so the
+/// outline does not cut inside the disc it frames.
+const RANGE_RING_SEGMENTS: usize = 48;
+
 /// Build the range discs and outlines of every turret, heal tower and buffer.
 ///
 /// Fills are **masks**, not the final look: they go into the offscreen buffer
@@ -39,58 +46,48 @@ pub(super) fn push_ranges(
 ) {
     use crate::entities::BuildingKind;
     for b in game.buildings.iter() {
-        if let Some(tk) = crate::entities::turret_kind_of(b.kind) {
-            let (cx, cy) = b.pos(game.board.side);
-            let z = tile_top_z(&game.board, b.tile);
-            let r = constants::turret_range(tk);
-            push_range_disc(
-                turret,
-                cx,
-                cy,
-                z + constants::RANGE_FILL_LIFT,
-                r,
-                40,
-                constants::RANGE_MASK_COLOR,
-                constants::RANGE_MASK_ALPHA,
-            );
-            push_ring(
-                outlines,
-                cx,
-                cy,
-                z + constants::RANGE_OUTLINE_LIFT,
-                r,
-                48,
-                range_outline_color(b),
-                constants::RANGE_OUTLINE_ALPHA,
-            );
+        // A range is a disc plus its ring; the only thing that differs between
+        // a turret and a heal tower is which mask it lands in and how far it
+        // reaches, so both go through the same two calls.
+        let is_turret = crate::entities::turret_kind_of(b.kind);
+        let r = if let Some(tk) = is_turret {
+            constants::turret_range(tk)
         } else if b.kind == BuildingKind::HealTower && b.owner.is_some() {
             // Neutral heal towers show no range (game rules and editor spec).
-            let (cx, cy) = b.pos(game.board.side);
-            let z = tile_top_z(&game.board, b.tile);
-            let r = b.units * constants::HEAL_TOWER_RANGE_PER_UNIT;
-            if r > 1.0 {
-                push_range_disc(
-                    heal,
-                    cx,
-                    cy,
-                    z + constants::RANGE_FILL_LIFT,
-                    r,
-                    40,
-                    constants::RANGE_MASK_COLOR,
-                    constants::RANGE_MASK_ALPHA,
-                );
-                push_ring(
-                    outlines,
-                    cx,
-                    cy,
-                    z + constants::RANGE_OUTLINE_LIFT,
-                    r,
-                    48,
-                    range_outline_color(b),
-                    constants::RANGE_OUTLINE_ALPHA,
-                );
-            }
+            b.units * constants::HEAL_TOWER_RANGE_PER_UNIT
+        } else {
+            continue;
+        };
+        if r <= 1.0 {
+            continue;
         }
+        let (cx, cy) = b.pos(game.board.side);
+        let z = tile_top_z(&game.board, b.tile);
+        let fill = if is_turret.is_some() {
+            &mut *turret
+        } else {
+            &mut *heal
+        };
+        push_range_disc(
+            fill,
+            cx,
+            cy,
+            z + constants::RANGE_FILL_LIFT,
+            r,
+            RANGE_DISC_SEGMENTS,
+            constants::RANGE_MASK_COLOR,
+            constants::RANGE_MASK_ALPHA,
+        );
+        push_ring(
+            outlines,
+            cx,
+            cy,
+            z + constants::RANGE_OUTLINE_LIFT,
+            r,
+            RANGE_RING_SEGMENTS,
+            range_outline_color(b),
+            constants::RANGE_OUTLINE_ALPHA,
+        );
     }
     for v in game.vehicles.iter() {
         if v.dead || v.kind != constants::VehicleKind::Buffer {
@@ -154,23 +151,34 @@ pub(super) fn push_paths(game: &Game, lines: &mut Vec<(AlphaVertex, AlphaVertex)
     }
 }
 
+/// Flight height of a shot at its endpoints, in px. A shot leaves the muzzle
+/// above the ground and comes down on the target, so both ends clear the
+/// terrain and the arc is visible against it.
+const PROJ_END_PX: f64 = 30.0;
+/// Extra height at the middle of the flight, in px: a parabola from
+/// [`PROJ_END_PX`] up to `2 * PROJ_END_PX`, which is what makes a long-range
+/// shot read as a lob rather than a flat streak.
+const PROJ_ARC_PX: f64 = PROJ_END_PX;
+/// Facets of one projectile dot. Small on screen, so a coarse disc is enough.
+const PROJ_SEGMENTS: usize = 10;
+/// Colour of a rocket in flight; a normal shot is near-white.
+const PROJ_ROCKET_COLOR: [u8; 3] = [255, 120, 60];
+const PROJ_SHOT_COLOR: [u8; 3] = [250, 250, 250];
+
+/// One disc per shot in flight, following the ballistic arc from muzzle to
+/// target so a long-range shot is visibly lobbed over the terrain.
 pub(super) fn push_projectiles(game: &Game, mesh: &mut TriangleSoup) {
     for p in game.projectiles.iter() {
         let t = (p.t / p.dur).clamp(0.0, 1.0);
         let x = p.from_pos.0 + (p.to.0 - p.from_pos.0) * t;
         let y = p.from_pos.1 + (p.to.1 - p.from_pos.1) * t;
-        let arc = 40.0 * (1.0 - sqr(2.0 * t - 1.0));
-        let z = 30.0 + arc;
-        let r = if p.kind == constants::TurretKind::Rocket {
-            f64::from(constants::ROCKET_RADIUS)
+        let arc = PROJ_ARC_PX * (1.0 - sqr(2.0 * t - 1.0));
+        let z = PROJ_END_PX + arc;
+        let (r, col) = if p.kind == constants::TurretKind::Rocket {
+            (f64::from(constants::ROCKET_RADIUS), PROJ_ROCKET_COLOR)
         } else {
-            f64::from(constants::PROJECTILE_RADIUS)
+            (f64::from(constants::PROJECTILE_RADIUS), PROJ_SHOT_COLOR)
         };
-        let col = if p.kind == constants::TurretKind::Rocket {
-            [255, 120, 60]
-        } else {
-            [250, 250, 250]
-        };
-        push_disc(mesh, x, y, z, r, 10, col);
+        push_disc(mesh, x, y, z, r, PROJ_SEGMENTS, col);
     }
 }
