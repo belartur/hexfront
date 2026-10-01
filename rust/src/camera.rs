@@ -14,8 +14,9 @@
 use crate::constants;
 use crate::hexgrid::SQRT3;
 
-/// Clamp `value` into [low, high].
-pub fn clamp(value: f64, low: f64, high: f64) -> f64 {
+/// Clamp `value` into [low, high]. Only the view bounds use it, so it stays
+/// private to this module.
+fn clamp(value: f64, low: f64, high: f64) -> f64 {
     value.max(low).min(high)
 }
 

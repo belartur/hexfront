@@ -229,18 +229,18 @@ impl Renderer {
                 draw_line_mesh(mesh);
             }
         }
-        draw_soup(&dynamic.opaque.vertices, &dynamic.opaque.indices);
+        draw_soup(&dynamic.opaque.vertices, mq_vertex);
         // Translucent helicopter shadows: flat dark discs just above the
         // receiving surface, drawn right after the opaque pass
         // (pass 5 of the module docs). The depth test keeps them from
         // darkening hulls, buildings or nearer cliffs.
-        draw_range_soup(&dynamic.shadow.vertices, &dynamic.shadow.indices);
+        draw_soup(&dynamic.shadow.vertices, mq_alpha_vertex);
         // Explosion particles: camera-facing billboards, a flat ground wave and
         // shards, all translucent and drawn without a depth write, so nearer
         // puffs blend over farther ones. They go after the helicopter shadows
         // and before the range fills, so a blast is never dimmed by a range
         // disc lying over the same tile (pass 6 of the module docs).
-        draw_range_soup(&dynamic.fx.vertices, &dynamic.fx.indices);
+        draw_soup(&dynamic.fx.vertices, mq_alpha_vertex);
         // 3D strokes (routes, details). Range outlines live in a separate
         // buffer, because they are drawn after the range fills instead.
         draw_line_soup(&dynamic.lines);
@@ -310,7 +310,7 @@ impl Renderer {
             }
             mq::set_camera(&GpuIsoCamera::offscreen(matrix, target.render_pass.clone()));
             mq::clear_background(mq::Color::new(0.0, 0.0, 0.0, 0.0));
-            draw_range_soup(&soup.vertices, &soup.indices);
+            draw_soup(&soup.vertices, mq_alpha_vertex);
             mq::set_default_camera();
             draw_mask_overlay(&target.texture, color, alpha);
         }
@@ -482,52 +482,23 @@ fn batch_end(vi: usize, len: usize) -> usize {
 }
 
 /// Draw one triangle soup in chunks fitting the u16 batch limits.
-fn draw_soup(vertices: &[crate::mesh::GpuVertex], indices: &[u16]) {
-    use macroquad::prelude as mq;
-    let mut vi = 0;
-    while vi < vertices.len() {
-        let vend = batch_end(vi, vertices.len());
-        let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(vend - vi);
-        for v in &vertices[vi..vend] {
-            verts.push(mq_vertex(v));
-        }
-        let mut idx: Vec<u16> = Vec::with_capacity(vend - vi);
-        for i in 0..(vend - vi) {
-            idx.push(i as u16);
-        }
-        let _ = &indices;
-        mq::draw_mesh(&macroquad::models::Mesh {
-            vertices: verts,
-            indices: idx,
-            texture: None,
-        });
-        vi = vend;
-    }
-}
-
-/// Draw one range soup with its own per-vertex alpha.
 ///
-/// Turret fills and heal fills use separate draw calls (white vs.
-/// light-green transparency); inside one kind
-/// every disc sits at a deterministic index-based lift, so coplanar
-/// blends no longer flicker while panning. Lines of one call always
-/// share one depth value, which keeps macroquad's draw batching from
-/// splitting the batch by depth (draw_line_3d state).
-fn draw_range_soup(vertices: &[crate::mesh::AlphaVertex], indices: &[u16]) {
+/// The soup stores vertices in draw order, three per triangle, so the index
+/// buffer of each batch is simply `0..n` over the slice being drawn; the mesh
+/// builders do not carry a second copy of it. `convert` turns one builder
+/// vertex into a macroquad vertex, which is the only thing that differs
+/// between the opaque soup and the translucent ones.
+fn draw_soup<V>(vertices: &[V], convert: fn(&V) -> macroquad::models::Vertex) {
     use macroquad::prelude as mq;
     let mut vi = 0;
     while vi < vertices.len() {
-        // Split on a triangle boundary, like [`draw_soup`].
+        // Split on a triangle boundary, so no batch cuts a triangle in half.
         let vend = batch_end(vi, vertices.len());
         let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(vend - vi);
         for v in &vertices[vi..vend] {
-            verts.push(mq_alpha_vertex(v));
+            verts.push(convert(v));
         }
-        let mut idx: Vec<u16> = Vec::with_capacity(vend - vi);
-        for i in 0..(vend - vi) {
-            idx.push(i as u16);
-        }
-        let _ = &indices;
+        let idx: Vec<u16> = (0..(vend - vi) as u16).collect();
         mq::draw_mesh(&macroquad::models::Mesh {
             vertices: verts,
             indices: idx,

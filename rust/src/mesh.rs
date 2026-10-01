@@ -56,19 +56,15 @@ pub struct AlphaVertex {
 /// own pass, not because the geometry differs.
 #[derive(Clone, Debug, Default)]
 pub struct RangeSoup {
-    /// All vertices, three per triangle.
+    /// All vertices, three per triangle, in draw order.
     pub vertices: Vec<AlphaVertex>,
-    /// Indices into `vertices` (always `0..len` for a soup).
-    pub indices: Vec<u16>,
 }
 
 /// Triangle soup with per-vertex colours (flat shading = 3 equal colours).
 #[derive(Clone, Debug, Default)]
 pub struct TriangleSoup {
-    /// All vertices, three per triangle.
+    /// All vertices, three per triangle, in draw order.
     pub vertices: Vec<GpuVertex>,
-    /// Indices into `vertices` (always `0..len` for a soup).
-    pub indices: Vec<u16>,
 }
 
 /// Maximum vertices per GPU chunk: macroquad batches draw calls into
@@ -177,14 +173,13 @@ fn grow_bbox(bbox: &mut (f64, f64, f64, f64), x: f64, y: f64) {
     bbox.3 = bbox.3.max(y);
 }
 
+/// Append one triangle. Vertices are stored in draw order, three per
+/// triangle, so the index buffer is always `0..vertices.len()`; the renderer
+/// generates it at draw time instead of carrying a second copy per soup.
 fn push_tri(soup: &mut TriangleSoup, a: GpuVertex, b: GpuVertex, c: GpuVertex) {
-    let base = soup.vertices.len() as u16;
     soup.vertices.push(a);
     soup.vertices.push(b);
     soup.vertices.push(c);
-    soup.indices.push(base);
-    soup.indices.push(base + 1);
-    soup.indices.push(base + 2);
 }
 
 fn push_quad(soup: &mut TriangleSoup, a: GpuVertex, b: GpuVertex, c: GpuVertex, d: GpuVertex) {
@@ -223,14 +218,11 @@ fn alpha_vert_rgba(x: f64, y: f64, z: f64, color: [u8; 4]) -> AlphaVertex {
     }
 }
 
+/// Append one translucent triangle (see [`push_tri`] for the index buffer).
 fn push_range_tri(soup: &mut RangeSoup, a: AlphaVertex, b: AlphaVertex, c: AlphaVertex) {
-    let base = soup.vertices.len() as u16;
     soup.vertices.push(a);
     soup.vertices.push(b);
     soup.vertices.push(c);
-    soup.indices.push(base);
-    soup.indices.push(base + 1);
-    soup.indices.push(base + 2);
 }
 
 /// Flat ground disc with one RGBA colour (range fills keep their own alpha).
@@ -901,11 +893,6 @@ pub struct DynamicMesh {
     /// and shards, all with their own RGBA (no depth write, drawn after the
     /// opaque pass; see [`push_fx_blob`] and [`push_fx_ring`]).
     pub fx: RangeSoup,
-    /// Flat translucent range discs (no depth write, drawn after opaque).
-    ///
-    /// Kept so older callers keep compiling; new code fills
-    /// [`DynamicMesh::range_turret`] and [`DynamicMesh::range_heal`].
-    pub translucent: TriangleSoup,
     /// 3D line segments (grid already in terrain; ranges/routes here).
     pub lines: Vec<(AlphaVertex, AlphaVertex)>,
 }
@@ -914,18 +901,11 @@ impl DynamicMesh {
     /// Remove all per-frame geometry before rebuilding the frame.
     pub fn clear(&mut self) {
         self.opaque.vertices.clear();
-        self.opaque.indices.clear();
         self.shadow.vertices.clear();
-        self.shadow.indices.clear();
         self.range_turret.vertices.clear();
-        self.range_turret.indices.clear();
         self.range_heal.vertices.clear();
-        self.range_heal.indices.clear();
         self.range_lines.clear();
         self.fx.vertices.clear();
-        self.fx.indices.clear();
-        self.translucent.vertices.clear();
-        self.translucent.indices.clear();
         self.lines.clear();
     }
 }
@@ -1464,16 +1444,10 @@ fn building_color(b: &crate::entities::Building) -> [u8; 3] {
     }
 }
 
-fn push_cross(
-    mesh: &mut TriangleSoup,
-    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
-    x: f64,
-    y: f64,
-    z: f64,
-    color: [u8; 3],
-) {
+/// Two crossing strokes in `lines`: the healing cross on a buffer roof and in
+/// the middle of a buffer hull.
+fn push_cross(lines: &mut Vec<(AlphaVertex, AlphaVertex)>, x: f64, y: f64, z: f64, color: [u8; 3]) {
     let h = 6.0;
-    let _ = mesh;
     lines.push((
         alpha_vert(x - h, y, z, color, 255),
         alpha_vert(x + h, y, z, color, 255),
@@ -1978,7 +1952,6 @@ fn push_base_buffer(
         darker,
     );
     push_cross(
-        mesh,
         lines,
         cx,
         cy + 5.5,
@@ -2436,14 +2409,7 @@ fn push_heal_tower(
         BLD_HEAL_SEGMENTS,
         constants::shade(color, 0.85),
     );
-    push_cross(
-        mesh,
-        lines,
-        cx,
-        cy,
-        dome + BLD_HEAL_DOME_H + 0.4,
-        BLD_CROSS_COLOR,
-    );
+    push_cross(lines, cx, cy, dome + BLD_HEAL_DOME_H + 0.4, BLD_CROSS_COLOR);
     // Four corner ribs along the shaft: thin strokes give the mast a profile.
     for (sx, sy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
         let (rx, ry) = (cx + sx * BLD_HEAL_RIB_OFF, cy + sy * BLD_HEAL_RIB_OFF);
@@ -3090,7 +3056,7 @@ fn push_vehicle(
             let (fx, fy) = vehicle_heading(game, v);
             // `deck_top` is already absolute (it includes the vehicle's `z`).
             let deck_top = push_tank_chassis(mesh, lines, x, y, z, color, fx, fy);
-            push_cross(mesh, lines, x, y, deck_top + 4.0, [130, 235, 140]);
+            push_cross(lines, x, y, deck_top + 4.0, [130, 235, 140]);
         }
     }
 }
@@ -5095,10 +5061,7 @@ mod tests {
                 .map(|c| c.soup.vertices.len())
                 .sum::<usize>()
         };
-        let indices =
-            |m: &TerrainMesh| m.chunks.iter().map(|c| c.soup.indices.len()).sum::<usize>();
         assert_eq!(count(&a), count(&b));
-        assert_eq!(indices(&a), indices(&b));
         // One spatial chunk; 12 tiles at height 1 surrounded by water:
         // 12 tops (4 tris each) plus outer skirts (3 edges x 2 tris each).
         assert_eq!(a.chunks.len(), 1);
@@ -5107,9 +5070,9 @@ mod tests {
         assert_eq!(grid, 12 * 6);
         for chunk in a.chunks.iter() {
             assert!(chunk.soup.vertices.len() <= CHUNK_VERTICES);
-            for (i, idx) in chunk.soup.indices.iter().enumerate() {
-                assert_eq!(*idx as usize, i);
-            }
+            // Vertices come in whole triangles, which is what lets the
+            // renderer index them as 0..len without a stored index buffer.
+            assert_eq!(chunk.soup.vertices.len() % 3, 0);
         }
     }
 
