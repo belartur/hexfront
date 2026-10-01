@@ -316,34 +316,59 @@ pub const EXPLOSION_CENTER_LIFT: f64 = 6.0;
 // rules.md gives a fire trap no appearance at all: section 4 only says that a
 // vehicle sitting on one loses one unit per second and that the trap is never
 // removed (rules.md section 1 makes it land only). The trap is really a
-// *campfire*, so instead of a static model it is drawn as a continuous particle
-// emitter ([`crate::fx`]): a living flame, a few sparks and a wisp of smoke.
-// Every number below is a pure presentation value in px or seconds and must
-// never influence the simulation.
+// *campfire*: instead of a static model it is a continuous particle emitter
+// ([`crate::fx`]) -- a cluster of fires of different sizes scattered over the
+// field, with sparks and smoke. There is no base mesh at all; the fire *is*
+// the trap. Every number below is a pure presentation value in px or seconds
+// and must never influence the simulation.
 // ---------------------------------------------------------------------------
 
 /// Upper bound of live campfire particles, on top of
 /// [`EXPLOSION_MAX_PARTICLES`] (rendering budget only): a fire scene must never
-/// starve the explosions, and a busy fight must never snuff out the fires.
-pub const CAMPFIRE_MAX_PARTICLES: usize = 320;
+/// starve the explosions, and a busy fight must never snuff out the fires. A
+/// single field now carries a whole cluster of fires, so the bound is generous.
+pub const CAMPFIRE_MAX_PARTICLES: usize = 1200;
 /// Seed of the campfire random stream, mixed into the level seed by
 /// `Fx::reseed()` (rendering only). The flame draws from its own stream so it
 /// can never perturb the reproducible sequence of the explosions.
 pub const CAMPFIRE_SEED: u64 = 0x0F1E_5EED_0000_0001;
 
-/// Flame puffs spawned per second and per burning field. Together with
+/// Offsets of the campfire spots of one field from its centre, in px. The
+/// layout is roughly even -- one fire in the middle and a ring around it -- so
+/// the whole field reads as burning without the outer fires spilling into the
+/// neighbours. `Fx::campfire_cluster` rotates the layout per field for variety.
+pub const CAMPFIRE_SPOTS: [(f64, f64); 5] = [
+    (0.0, 0.0),
+    (13.0, 7.5),
+    (-7.5, 13.0),
+    (-13.0, -7.5),
+    (7.5, -13.0),
+];
+/// Size scale of the spot sitting at the very centre of the field: the closer
+/// to the centre, the bigger the fire (see [`CAMPFIRE_SCALE_EDGE`]).
+pub const CAMPFIRE_SCALE_CENTER: f64 = 1.0;
+/// Size scale of a spot at [`CAMPFIRE_SCALE_REF_R`] px from the centre (and
+/// beyond): fires fade out towards the edge of the field.
+pub const CAMPFIRE_SCALE_EDGE: f64 = 0.72;
+/// Distance from the field centre in px at which a spot has shrunk to
+/// [`CAMPFIRE_SCALE_EDGE`].
+pub const CAMPFIRE_SCALE_REF_R: f64 = 15.0;
+
+/// Flame puffs spawned per second and per unit of fire scale
+/// (`Campfire::scale`, summed over the field's spots). Together with
 /// [`CAMPFIRE_FLAME_LIFETIME`] this sets the standing flame size.
-pub const CAMPFIRE_FLAME_RATE: f64 = 34.0;
+pub const CAMPFIRE_FLAME_RATE: f64 = 26.0;
 /// Lifetime of one flame puff in s.
 pub const CAMPFIRE_FLAME_LIFETIME: f64 = 0.55;
 /// Lifetime jitter of the flame puffs (fraction of the lifetime).
 pub const CAMPFIRE_FLAME_LIFETIME_RANDOM: f64 = 0.5;
-/// Start size of one flame puff in px.
-pub const CAMPFIRE_FLAME_SIZE: f64 = 4.6;
+/// Start size of one flame puff in px, for a scale-1.0 fire (see
+/// [`Campfire::scale`]).
+pub const CAMPFIRE_FLAME_SIZE: f64 = 7.0;
 /// Size jitter of the flame puffs (fraction of the size).
 pub const CAMPFIRE_FLAME_SIZE_RANDOM: f64 = 0.35;
-/// Growth of a flame puff over its lifetime in px.
-pub const CAMPFIRE_FLAME_GROWTH: f64 = 3.0;
+/// Growth of a flame puff over its lifetime in px, for a scale-1.0 fire.
+pub const CAMPFIRE_FLAME_GROWTH: f64 = 4.5;
 /// Horizontal drift speed of a flame puff in px/s (the flame sways).
 pub const CAMPFIRE_FLAME_DRIFT: f64 = 9.0;
 /// Upward acceleration of a flame puff in px/s^2.
@@ -357,8 +382,9 @@ pub const CAMPFIRE_FLAME_COLOR_MID: [u8; 3] = [255, 130, 40];
 /// Flame puff colour at death: dark ember.
 pub const CAMPFIRE_FLAME_COLOR_END: [u8; 3] = [96, 26, 14];
 
-/// Sparks spawned per second and per burning field (far rarer than the flame).
-pub const CAMPFIRE_SPARK_RATE: f64 = 3.0;
+/// Sparks spawned per second and per unit of fire scale (see
+/// [`Campfire::scale`]), far rarer than the flame.
+pub const CAMPFIRE_SPARK_RATE: f64 = 2.5;
 /// Lifetime of one spark in s.
 pub const CAMPFIRE_SPARK_LIFETIME: f64 = 0.7;
 /// Lifetime jitter of the sparks (fraction of the lifetime).
@@ -382,9 +408,9 @@ pub const CAMPFIRE_SPARK_COLOR_END: [u8; 3] = [140, 46, 18];
 /// Peak alpha of one spark (0..1).
 pub const CAMPFIRE_SPARK_ALPHA: f64 = 1.0;
 
-/// Smoke puffs spawned per second and per burning field (sparser than the
-/// flame, and much fainter).
-pub const CAMPFIRE_SMOKE_RATE: f64 = 6.0;
+/// Smoke puffs spawned per second and per unit of fire scale (see
+/// [`Campfire::scale`]), sparser than the flame and much fainter.
+pub const CAMPFIRE_SMOKE_RATE: f64 = 4.5;
 /// Lifetime of one smoke puff in s.
 pub const CAMPFIRE_SMOKE_LIFETIME: f64 = 1.5;
 /// Lifetime jitter of the smoke puffs (fraction of the lifetime).

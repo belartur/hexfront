@@ -132,6 +132,59 @@ pub struct EmitterConfig {
     pub shape: FxShape,
 }
 
+/// One spot of the burning field of a fire trap: a flame of `scale` times the
+/// size (and the emission rate) of the reference fire
+/// (`CAMPFIRE_SCALE_CENTER`).
+///
+/// A burning field carries a whole [`campfire_cluster`] of these: a few
+/// roughly even fires, the closest to the centre burning the biggest. They are
+/// plain world positions, already lifted to the tile top, so [`Fx`] never
+/// touches the board.
+#[derive(Clone, Copy, Debug)]
+pub struct Campfire {
+    /// World x in j.
+    pub x: f64,
+    /// World y in j.
+    pub y: f64,
+    /// Rendered elevation in px.
+    pub z: f64,
+    /// Fire size relative to the reference fire (1.0 at the field centre).
+    pub scale: f64,
+}
+
+/// Size scale of a campfire spot `radius` px from its field centre: a linear
+/// falloff from [`constants::CAMPFIRE_SCALE_CENTER`] to
+/// [`constants::CAMPFIRE_SCALE_EDGE`], clamped at both ends, so the fire is
+/// biggest in the middle and fades out towards the edge.
+fn campfire_scale(radius: f64) -> f64 {
+    let t = (radius / constants::CAMPFIRE_SCALE_REF_R).clamp(0.0, 1.0);
+    constants::CAMPFIRE_SCALE_CENTER
+        + (constants::CAMPFIRE_SCALE_EDGE - constants::CAMPFIRE_SCALE_CENTER) * t
+}
+
+/// The campfire cluster of one burning field: [`constants::CAMPFIRE_SPOTS`]
+/// laid out around the field centre `(cx, cy)` at elevation `z`, rotated by a
+/// multiple of 60 deg derived from the tile `(q, r)` so neighbouring fields do
+/// not burn in lockstep. The layout is a pure function of the tile: it is
+/// identical every frame, so the fires never jump around.
+pub fn campfire_cluster(cx: f64, cy: f64, z: f64, q: i32, r: i32) -> Vec<Campfire> {
+    let step = ((q * 7 + r * 13).rem_euclid(6)) as f64;
+    let ang = step * std::f64::consts::FRAC_PI_3;
+    let (s, c) = (ang.sin(), ang.cos());
+    constants::CAMPFIRE_SPOTS
+        .iter()
+        .map(|(dx, dy)| {
+            let radius = (dx * dx + dy * dy).sqrt();
+            Campfire {
+                x: cx + dx * c - dy * s,
+                y: cy + dx * s + dy * c,
+                z,
+                scale: campfire_scale(radius),
+            }
+        })
+        .collect()
+}
+
 /// One live particle of the effect.
 #[derive(Clone, Debug)]
 pub struct Particle {
@@ -474,60 +527,72 @@ impl Fx {
     }
     /// Keep a living flame burning on every fire trap; called once per frame.
     ///
-    /// `fires` holds the world position `(x, y, z)` of each burning field,
-    /// already lifted to its tile top ([`crate::app`] collects them from the
-    /// board). rules.md section 4 makes a fire trap permanent and land only and
-    /// says nothing about how it looks; drawing it as a static model made it
-    /// read as a plastic prop, so the trap -- really a campfire -- is a
-    /// continuous emitter here: a flame, a few sparks and a wisp of smoke.
+    /// `fires` holds the campfire spots of every burning field: the
+    /// [`campfire_cluster`] of each trap, already lifted to its tile top
+    /// ([`crate::app`] collects them from the board). rules.md section 4 makes
+    /// a fire trap permanent and land only and says nothing about how it looks;
+    /// drawing it as a static model made it read as a plastic prop, so the
+    /// trap -- really a cluster of small campfires -- is a continuous emitter
+    /// here: flames, a few sparks and a wisp of smoke. There is no base mesh at
+    /// all; the fire *is* the trap.
     ///
-    /// Emission is rate-based (`CAMPFIRE_*_RATE` particles per second and per
-    /// field) with a fractional accumulator per kind, so the standing flame
-    /// looks the same at any frame rate. The flame draws from the campfire
-    /// stream, which keeps the explosion stream reproducible. A field that
-    /// disappears (the editor removed the trap) simply stops being fed and its
-    /// particles burn out on their own.
-    pub fn maintain_campfires(&mut self, fires: &[(f64, f64, f64)], dt: f64) {
+    /// Emission is rate-based: every spot emits
+    /// `CAMPFIRE_*_RATE * scale` particles per second, with a fractional
+    /// accumulator per kind, so the standing flame looks the same at any frame
+    /// rate. The flame draws from the campfire stream, which keeps the
+    /// explosion stream reproducible. A field that disappears (the editor
+    /// removed the trap) simply stops being fed and its particles burn out on
+    /// their own.
+    pub fn maintain_campfires(&mut self, fires: &[Campfire], dt: f64) {
         if fires.is_empty() || dt <= 0.0 {
             return;
         }
-        let count = fires.len() as f64;
-        self.fire_acc[0] += constants::CAMPFIRE_FLAME_RATE * count * dt;
-        self.fire_acc[1] += constants::CAMPFIRE_SPARK_RATE * count * dt;
-        self.fire_acc[2] += constants::CAMPFIRE_SMOKE_RATE * count * dt;
+        let weight: f64 = fires.iter().map(|f| f.scale).sum();
+        self.fire_acc[0] += constants::CAMPFIRE_FLAME_RATE * weight * dt;
+        self.fire_acc[1] += constants::CAMPFIRE_SPARK_RATE * weight * dt;
+        self.fire_acc[2] += constants::CAMPFIRE_SMOKE_RATE * weight * dt;
         let flame = self.fire_acc[0].floor();
         self.fire_acc[0] -= flame;
         let spark = self.fire_acc[1].floor();
         self.fire_acc[1] -= spark;
         let smoke = self.fire_acc[2].floor();
         self.fire_acc[2] -= smoke;
-        let flame_cfg = Self::campfire_flame();
-        let spark_cfg = Self::campfire_spark();
-        let smoke_cfg = Self::campfire_smoke();
         for _ in 0..flame as usize {
-            let at = self.pick_campfire(fires);
-            self.emit_tagged(&flame_cfg, at, true);
+            let f = self.pick_campfire(fires);
+            let cfg = Self::campfire_flame(f.scale);
+            self.emit_tagged(&cfg, (f.x, f.y, f.z), true);
         }
         for _ in 0..spark as usize {
-            let at = self.pick_campfire(fires);
-            self.emit_tagged(&spark_cfg, at, true);
+            let f = self.pick_campfire(fires);
+            let cfg = Self::campfire_spark(f.scale);
+            self.emit_tagged(&cfg, (f.x, f.y, f.z), true);
         }
         for _ in 0..smoke as usize {
-            let at = self.pick_campfire(fires);
-            let lifted = (at.0, at.1, at.2 + constants::CAMPFIRE_SMOKE_LIFT);
-            self.emit_tagged(&smoke_cfg, lifted, true);
+            let f = self.pick_campfire(fires);
+            let cfg = Self::campfire_smoke(f.scale);
+            let lifted = (f.x, f.y, f.z + constants::CAMPFIRE_SMOKE_LIFT);
+            self.emit_tagged(&cfg, lifted, true);
         }
         self.trim();
     }
 
-    /// Pick one of the burning fields uniformly, from the campfire stream.
-    fn pick_campfire(&mut self, fires: &[(f64, f64, f64)]) -> (f64, f64, f64) {
-        let i = (self.fire_rng.next_f64() * fires.len() as f64) as usize;
-        fires[i.min(fires.len() - 1)]
+    /// Pick one burning spot, with a probability proportional to its `scale`
+    /// (the campfire stream): a bigger fire gets more particles *and* bigger
+    /// puffs, so it reads as the main fire of the cluster.
+    fn pick_campfire(&mut self, fires: &[Campfire]) -> Campfire {
+        let total: f64 = fires.iter().map(|f| f.scale).sum();
+        let mut lot = self.fire_rng.next_f64() * total.max(f64::MIN_POSITIVE);
+        for f in fires {
+            lot -= f.scale;
+            if lot <= 0.0 {
+                return *f;
+            }
+        }
+        fires[fires.len() - 1]
     }
 
-    /// Emitter config of one campfire flame puff.
-    fn campfire_flame() -> EmitterConfig {
+    /// Emitter config of one campfire flame puff of a `scale`-sized fire.
+    fn campfire_flame(scale: f64) -> EmitterConfig {
         EmitterConfig {
             amount: 1,
             lifetime: constants::CAMPFIRE_FLAME_LIFETIME,
@@ -535,9 +600,9 @@ impl Fx {
             explosiveness: 1.0,
             initial_velocity: constants::CAMPFIRE_FLAME_DRIFT,
             initial_velocity_randomness: 1.0,
-            size: constants::CAMPFIRE_FLAME_SIZE,
+            size: constants::CAMPFIRE_FLAME_SIZE * scale,
             size_randomness: constants::CAMPFIRE_FLAME_SIZE_RANDOM,
-            size_growth: constants::CAMPFIRE_FLAME_GROWTH,
+            size_growth: constants::CAMPFIRE_FLAME_GROWTH * scale,
             rise: constants::CAMPFIRE_FLAME_RISE,
             gravity: 0.0,
             alpha: constants::CAMPFIRE_FLAME_ALPHA,
@@ -551,8 +616,8 @@ impl Fx {
         }
     }
 
-    /// Emitter config of one campfire spark.
-    fn campfire_spark() -> EmitterConfig {
+    /// Emitter config of one campfire spark of a `scale`-sized fire.
+    fn campfire_spark(scale: f64) -> EmitterConfig {
         EmitterConfig {
             amount: 1,
             lifetime: constants::CAMPFIRE_SPARK_LIFETIME,
@@ -560,9 +625,9 @@ impl Fx {
             explosiveness: 1.0,
             initial_velocity: constants::CAMPFIRE_SPARK_SPEED,
             initial_velocity_randomness: constants::CAMPFIRE_SPARK_SPEED_RANDOM,
-            size: constants::CAMPFIRE_SPARK_SIZE,
+            size: constants::CAMPFIRE_SPARK_SIZE * scale,
             size_randomness: constants::CAMPFIRE_SPARK_SIZE_RANDOM,
-            size_growth: -constants::CAMPFIRE_SPARK_SIZE,
+            size_growth: -constants::CAMPFIRE_SPARK_SIZE * scale,
             rise: 0.0,
             gravity: constants::CAMPFIRE_SPARK_GRAVITY,
             alpha: constants::CAMPFIRE_SPARK_ALPHA,
@@ -576,8 +641,8 @@ impl Fx {
         }
     }
 
-    /// Emitter config of one campfire smoke puff.
-    fn campfire_smoke() -> EmitterConfig {
+    /// Emitter config of one campfire smoke puff of a `scale`-sized fire.
+    fn campfire_smoke(scale: f64) -> EmitterConfig {
         EmitterConfig {
             amount: 1,
             lifetime: constants::CAMPFIRE_SMOKE_LIFETIME,
@@ -585,9 +650,9 @@ impl Fx {
             explosiveness: 1.0,
             initial_velocity: constants::CAMPFIRE_SMOKE_DRIFT,
             initial_velocity_randomness: 1.0,
-            size: constants::CAMPFIRE_SMOKE_SIZE,
+            size: constants::CAMPFIRE_SMOKE_SIZE * scale,
             size_randomness: constants::CAMPFIRE_SMOKE_SIZE_RANDOM,
-            size_growth: constants::CAMPFIRE_SMOKE_GROWTH,
+            size_growth: constants::CAMPFIRE_SMOKE_GROWTH * scale,
             rise: constants::CAMPFIRE_SMOKE_RISE,
             gravity: 0.0,
             alpha: constants::CAMPFIRE_SMOKE_ALPHA,
@@ -1181,8 +1246,11 @@ mod tests {
         assert_eq!(c.sample(5.0), [255, 255, 255]);
     }
 
-    /// Position of one burning field for the campfire tests.
-    const FIRE_AT: (f64, f64, f64) = (500.0, -200.0, 12.0);
+    /// Campfire spots of one burning field for the tests: the
+    /// [`campfire_cluster`] of a single tile, every spot at the same elevation.
+    fn burning_field() -> Vec<Campfire> {
+        campfire_cluster(500.0, -200.0, 12.0, 3, 4)
+    }
 
     #[test]
     fn campfires_burn_into_a_steady_flame() {
@@ -1190,8 +1258,9 @@ mod tests {
         // Two seconds of frames at a typical rate: the flame has to reach a
         // standing size and then stop growing (the emitters replace what burns
         // out).
+        let field = burning_field();
         for _ in 0..120 {
-            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.maintain_campfires(&field, 1.0 / 60.0);
             fx.update(1.0 / 60.0);
         }
         assert!(!fx.is_empty(), "a fire trap with no flame");
@@ -1215,7 +1284,7 @@ mod tests {
         // frame.
         let settled = fx.len();
         for _ in 0..120 {
-            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.maintain_campfires(&field, 1.0 / 60.0);
             fx.update(1.0 / 60.0);
         }
         assert!(
@@ -1229,8 +1298,9 @@ mod tests {
     #[test]
     fn campfire_burns_out_when_its_field_disappears() {
         let mut fx = Fx::new();
+        let field = burning_field();
         for _ in 0..120 {
-            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.maintain_campfires(&field, 1.0 / 60.0);
             fx.update(1.0 / 60.0);
         }
         assert!(!fx.is_empty());
@@ -1245,8 +1315,9 @@ mod tests {
     #[test]
     fn campfire_geometry_is_built() {
         let mut fx = Fx::new();
+        let field = burning_field();
         for _ in 0..60 {
-            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.maintain_campfires(&field, 1.0 / 60.0);
             fx.update(1.0 / 60.0);
         }
         let mut mesh = DynamicMesh::default();
@@ -1258,9 +1329,10 @@ mod tests {
     fn campfires_and_explosions_keep_separate_budgets() {
         let mut fx = Fx::new();
         // Flood the system with both effects at once.
+        let field = burning_field();
         for _ in 0..200 {
             fx.explode(&wreck(VehicleKind::Tank), 0.0);
-            fx.maintain_campfires(&[FIRE_AT, (0.0, 0.0, 0.0)], 0.25);
+            fx.maintain_campfires(&field, 0.25);
         }
         let campfire = fx.particles.iter().filter(|p| p.campfire).count();
         let explosion = fx.len() - campfire;
@@ -1281,8 +1353,9 @@ mod tests {
             let mut fx = Fx::new();
             fx.reseed(99);
             if fires {
+                let field = burning_field();
                 for _ in 0..60 {
-                    fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+                    fx.maintain_campfires(&field, 1.0 / 60.0);
                     fx.update(1.0 / 60.0);
                 }
             }
@@ -1294,5 +1367,90 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(play(true), play(false));
+    }
+
+    #[test]
+    fn campfire_cluster_is_even_and_stays_inside_its_field() {
+        let spots = campfire_cluster(0.0, 0.0, 0.0, 3, 4);
+        assert_eq!(
+            spots.len(),
+            constants::CAMPFIRE_SPOTS.len(),
+            "the cluster must hold one spot per template offset"
+        );
+        for s in spots.iter() {
+            let radius = (s.x * s.x + s.y * s.y).sqrt();
+            assert!(
+                radius <= 20.0 + 1e-6,
+                "spot {radius} px off centre spills out of the field"
+            );
+            // The size falls off with the distance from the centre, so the
+            // middle of the field burns the biggest.
+            let expected = constants::CAMPFIRE_SCALE_CENTER
+                + (constants::CAMPFIRE_SCALE_EDGE - constants::CAMPFIRE_SCALE_CENTER)
+                    * (radius / constants::CAMPFIRE_SCALE_REF_R).clamp(0.0, 1.0);
+            assert!(
+                (s.scale - expected).abs() < 1e-9,
+                "spot at {radius} px scales {s_scale}, expected {expected}",
+                s_scale = s.scale
+            );
+        }
+        let centre = spots
+            .iter()
+            .min_by(|a, b| {
+                (a.x * a.x + a.y * a.y)
+                    .partial_cmp(&(b.x * b.x + b.y * b.y))
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(
+            spots.iter().all(|s| s.scale <= centre.scale + 1e-9),
+            "a fire further from the centre must not burn bigger"
+        );
+    }
+
+    #[test]
+    fn campfire_clusters_are_stable_but_differ_between_tiles() {
+        let again = campfire_cluster(0.0, 0.0, 0.0, 4, 4);
+        let same = campfire_cluster(0.0, 0.0, 0.0, 4, 4);
+        for (a, b) in again.iter().zip(same.iter()) {
+            assert_eq!((a.x, a.y, a.scale), (b.x, b.y, b.scale));
+        }
+        let other = campfire_cluster(0.0, 0.0, 0.0, 5, 4);
+        assert!(
+            again
+                .iter()
+                .zip(other.iter())
+                .any(|(a, b)| (a.x, a.y) != (b.x, b.y)),
+            "neighbouring fields must not burn in lockstep"
+        );
+    }
+
+    #[test]
+    fn a_bigger_fire_burns_bigger_puffs() {
+        // A fresh scale-1.0 spot, fed a full second without ageing a frame, so
+        // the accumulated puffs are all at birth size (the base size, not yet
+        // shrunk by overlap with older generations).
+        let biggest = |scale: f64| {
+            let mut fx = Fx::new();
+            fx.maintain_campfires(
+                &[Campfire {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    scale,
+                }],
+                1.0,
+            );
+            fx.particles
+                .iter()
+                .filter(|p| p.colors.start == constants::CAMPFIRE_FLAME_COLOR_START)
+                .map(|p| p.size)
+                .fold(0.0_f64, f64::max)
+        };
+        assert_eq!(biggest(1.0), biggest(1.0), "same scale burns the same");
+        assert!(
+            biggest(1.0) > biggest(constants::CAMPFIRE_SCALE_EDGE),
+            "the centre of the field must burn bigger than its edge"
+        );
     }
 }

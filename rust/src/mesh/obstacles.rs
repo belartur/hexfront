@@ -1,13 +1,12 @@
 //! Obstacle models (rules.md sections 1 and 4).
 //!
-//! The wall stays one plain block. The mine and the two traps get models, and
-//! the mine -- the only hazard rules.md section 1 allows on land *and* on
-//! water -- gets one shape per terrain: ashore a pressure plate a vehicle rolls
-//! over, afloat a moored body floating on the surface. The two traps are
-//! land-only, so a water shape for them would be dead code. The fire trap is
-//! the exception to "gets a model": its flame is a living particle emitter
-//! ([`crate::fx::Fx::maintain_campfires`]), so the mesh only leaves the
-//! scorched pad it burns on.
+//! The wall stays one plain block. The ice trap gets a model, and the mine --
+//! the only hazard rules.md section 1 allows on land *and* on water -- gets
+//! one shape per terrain: ashore a pressure plate a vehicle rolls over,
+//! afloat a moored body floating on the surface. The ice trap is land-only, so
+//! a water shape for it would be dead code. The fire trap gets no model at
+//! all: it is a cluster of living particle emitters
+//! ([`crate::fx::campfire_cluster`]), and the fire alone *is* the trap.
 
 use super::{
     AlphaVertex, TriangleSoup, push_beam, push_box, push_cylinder, push_hex_prism,
@@ -48,10 +47,11 @@ pub(super) fn push_obstacle(
                 push_mine_land(mesh, lines, cx, cy, z);
             }
         }
-        // Both traps are land-only (rules.md section 1), so neither needs a
-        // water shape. The fire trap only contributes its scorched pad here;
-        // its flame is a particle emitter in `crate::fx`.
-        ObstacleKind::TrapFire => push_fire_trap(mesh, cx, cy, z),
+        // The ice trap is land-only (rules.md section 1), so it needs no water
+        // shape. The fire trap needs no shape at all: its cluster of
+        // campfires is a particle emitter in `crate::fx`, and the fire alone
+        // *is* the trap.
+        ObstacleKind::TrapFire => {}
         ObstacleKind::TrapIce => push_ice_trap(mesh, lines, cx, cy, z),
     }
 }
@@ -59,14 +59,14 @@ pub(super) fn push_obstacle(
 // ---------------------------------------------------------------------------
 // Obstacle parts (rules.md sections 1 and 4; every value is a rendering-only
 // size in px, exactly like the building, tank and helicopter constants). The
-// wall stays one plain block; the mine and the two traps get models, and the
+// wall stays one plain block; the mine and the ice trap get models, and the
 // mine -- the only hazard rules.md section 1 allows on land *and* on water --
 // gets one shape per terrain: ashore a pressure plate a vehicle rolls over,
-// afloat a moored body floating on the surface. The two traps are land-only
-// (rules.md section 1), so a water shape for them would be dead code.
+// afloat a moored body floating on the surface. The ice trap is land-only
+// (rules.md section 1), so a water shape for it would be dead code.
 // ---------------------------------------------------------------------------
 
-/// Facets of the round obstacle parts (mine parts, trap pads).
+/// Facets of the round obstacle parts (mine parts, the ice trap).
 pub(super) const OBS_SEGMENTS: usize = 12;
 #[allow(dead_code)]
 /// Highest point any obstacle part may reach above its field in px: like
@@ -364,37 +364,10 @@ fn push_mine_water(
 }
 
 // Fire trap (rules.md section 4: 1 damage per second while a vehicle sits on
-// it; never removed; land only, per rules.md section 1). The flame itself is a
-// living particle emitter in the presentation layer
-// (`crate::fx::Fx::maintain_campfires`), not mesh geometry, so the only thing
-// modelled here is the scorched pad the fire burns on. The pad keeps the field
-// from looking barren while the flame is still ramping up, or after a trap is
-// removed in the editor and its last particles have burnt out.
-/// Radius of the scorched pad of the fire trap in px.
-pub(super) const OBS_FIRE_PAD_R: f64 = 12.0;
-/// Radius of the scorched pad at its top in px (a touch smaller, so the pad
-/// gets a rim instead of being a paper-thin disc).
-pub(super) const OBS_FIRE_PAD_TOP_R: f64 = 11.0;
-/// Height of the scorched pad in px.
-pub(super) const OBS_FIRE_PAD_H: f64 = 1.2;
-/// Colour of the scorched pad (charred ground).
-pub(super) const OBS_FIRE_PAD_COLOR: [u8; 3] = [48, 40, 34];
-
-/// Rendered fire trap (rules.md section 4): the scorched pad a campfire burns
-/// on. The flame, the sparks and the smoke are particles built by `crate::fx`.
-fn push_fire_trap(mesh: &mut TriangleSoup, cx: f64, cy: f64, z: f64) {
-    push_cylinder(
-        mesh,
-        cx,
-        cy,
-        z + constants::OBSTACLE_LIFT,
-        OBS_FIRE_PAD_R,
-        OBS_FIRE_PAD_TOP_R,
-        OBS_FIRE_PAD_H,
-        OBS_SEGMENTS,
-        OBS_FIRE_PAD_COLOR,
-    );
-}
+// it; never removed; land only, per rules.md section 1). Deliberately
+// unmodelled: the trap is a cluster of living campfires in the presentation
+// layer (`crate::fx::campfire_cluster`), and the fires alone are the trap --
+// a static base would only pin the flames to one plastic prop again.
 
 // Ice trap (rules.md section 4: halves the speed of a ground vehicle while it
 // is on the field; never removed; land only, per rules.md section 1).

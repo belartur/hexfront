@@ -890,12 +890,13 @@ fn obstacles_float_above_terrain_with_details() {
     use crate::game::Game;
     // Every modelled obstacle stands on the terrain it is legal on: on
     // land, and -- for the mine, which rules.md section 1 allows on water
-    // too -- floating on the water surface. The traps are land-only, so
-    // their water shape would be dead code and is not drawn at all.
-    let cases: [(ObstacleKind, i32); 4] = [
+    // too -- floating on the water surface. The ice trap is land-only, so its
+    // water shape would be dead code and is not drawn at all. (The fire trap
+    // is unmodelled on purpose: it is a cluster of particle fires, so it
+    // contributes no mesh here at all -- see `fire_trap_has_no_static_model`.)
+    let cases: [(ObstacleKind, i32); 3] = [
         (ObstacleKind::Mine, 1),
         (ObstacleKind::Mine, 0),
-        (ObstacleKind::TrapFire, 1),
         (ObstacleKind::TrapIce, 1),
     ];
     for (i, (kind, height)) in cases.iter().enumerate() {
@@ -924,15 +925,11 @@ fn obstacles_float_above_terrain_with_details() {
             );
         }
         // Every obstacle carries detail lines (the red mine cross or belt, the
-        // ice slashes), so the kind reads even at small zoom -- except the fire
-        // trap, whose flame is a living particle emitter now (`crate::fx`), so
-        // its mesh is only the scorched pad and has no detail strokes.
-        if *kind != ObstacleKind::TrapFire {
-            assert!(
-                !dynamic.lines.is_empty(),
-                "{kind:?} on height {height} has no detail lines"
-            );
-        }
+        // ice slashes), so the kind reads even at small zoom.
+        assert!(
+            !dynamic.lines.is_empty(),
+            "{kind:?} on height {height} has no detail lines"
+        );
         // The model stays inside its field and below the height cap.
         let (cx, cy) = game.board.center_world(tile);
         let (mut reach, mut high) = (0.0_f64, 0.0_f64);
@@ -968,6 +965,34 @@ fn obstacles_float_above_terrain_with_details() {
         .iter()
         .any(|v| (v.z as f64) > top + 1.0);
     assert!(raised, "wall box has no height");
+}
+
+#[test]
+fn fire_trap_has_no_static_model() {
+    use crate::board::Obstacle;
+    use crate::board::ObstacleKind;
+    use crate::entities::Player;
+    use crate::game::Game;
+    // The fire trap is a cluster of living campfires (`crate::fx`) and nothing
+    // else: its field must stay empty in the mesh passes, so the flames never
+    // fight a base mesh for the same pixels.
+    let mut board = Board::new(8, 8);
+    for t in board.tiles.clone().keys() {
+        board.tiles.get_mut(t).unwrap().height = 1;
+    }
+    let tile = (2, 2);
+    board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::TrapFire));
+    let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut dynamic = DynamicMesh::default();
+    build_dynamic(&game, 0.0, &mut dynamic);
+    assert!(
+        dynamic.opaque.vertices.is_empty(),
+        "a fire trap must not leave an opaque base behind"
+    );
+    assert!(
+        dynamic.lines.is_empty(),
+        "a fire trap must not leave detail strokes behind"
+    );
 }
 
 #[test]
