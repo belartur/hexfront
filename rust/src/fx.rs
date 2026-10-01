@@ -741,7 +741,7 @@ mod tests {
                 p.x,
                 p.y
             );
-            let surface = crate::mesh::vehicle_ground_z(&game, p.x, p.y);
+            let surface = crate::mesh::surface::vehicle_ground_z(&game, p.x, p.y);
             let d_particle = (p.x + p.y) * crate::constants::ISO_SIN + p.z;
             let d_surface = (p.x + p.y) * crate::constants::ISO_SIN + surface;
             assert!(
