@@ -133,7 +133,7 @@ impl Renderer {
             let mut sverts: Vec<macroquad::models::Vertex> =
                 Vec::with_capacity(chunk.shadows.vertices.len());
             for v in chunk.shadows.vertices.iter() {
-                sverts.push(mq_range_vertex(v));
+                sverts.push(mq_alpha_vertex(v));
             }
             let sidx: Vec<u16> = (0..sverts.len() as u16).collect();
             shadows.push((
@@ -433,8 +433,13 @@ fn mq_vertex(v: &crate::mesh::GpuVertex) -> macroquad::models::Vertex {
     }
 }
 
-/// Convert one translucent range vertex (carries its own alpha).
-fn mq_range_vertex(v: &crate::mesh::RangeVertex) -> macroquad::models::Vertex {
+/// Convert one translucent vertex (carries its own alpha).
+///
+/// The single entry point for every pass that blends: range fills, range
+/// outlines, 3D strokes, bridge and helicopter shadows and explosion
+/// particles all arrive as [`crate::mesh::AlphaVertex`] and leave as the same
+/// RGBA the GPU expects.
+fn mq_alpha_vertex(v: &crate::mesh::AlphaVertex) -> macroquad::models::Vertex {
     macroquad::models::Vertex {
         position: macroquad::prelude::glam::vec3(v.x, v.y, v.z),
         uv: macroquad::prelude::glam::vec2(0.0, 0.0),
@@ -454,16 +459,6 @@ fn draw_range_soup_mesh(mesh: &macroquad::models::Mesh) {
         return;
     }
     mq::draw_mesh(mesh);
-}
-
-/// Convert one 3D line endpoint (carries its own alpha).
-fn mq_line_vertex(v: &crate::mesh::LineVertex) -> macroquad::models::Vertex {
-    macroquad::models::Vertex {
-        position: macroquad::prelude::glam::vec3(v.x, v.y, v.z),
-        uv: macroquad::prelude::glam::vec2(0.0, 0.0),
-        color: [v.color[0], v.color[1], v.color[2], v.color[3]],
-        normal: macroquad::prelude::glam::vec4(0.0, 0.0, 0.0, 0.0),
-    }
 }
 
 /// Maximum vertices per single `draw_mesh` batch: one mesh chunk
@@ -518,7 +513,7 @@ fn draw_soup(vertices: &[crate::mesh::GpuVertex], indices: &[u16]) {
 /// blends no longer flicker while panning. Lines of one call always
 /// share one depth value, which keeps macroquad's draw batching from
 /// splitting the batch by depth (draw_line_3d state).
-fn draw_range_soup(vertices: &[crate::mesh::RangeVertex], indices: &[u16]) {
+fn draw_range_soup(vertices: &[crate::mesh::AlphaVertex], indices: &[u16]) {
     use macroquad::prelude as mq;
     let mut vi = 0;
     while vi < vertices.len() {
@@ -526,7 +521,7 @@ fn draw_range_soup(vertices: &[crate::mesh::RangeVertex], indices: &[u16]) {
         let vend = batch_end(vi, vertices.len());
         let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(vend - vi);
         for v in &vertices[vi..vend] {
-            verts.push(mq_range_vertex(v));
+            verts.push(mq_alpha_vertex(v));
         }
         let mut idx: Vec<u16> = Vec::with_capacity(vend - vi);
         for i in 0..(vend - vi) {
@@ -574,13 +569,13 @@ fn chunked_lines(vertices: &[macroquad::models::Vertex], indices: &[u16]) {
 ///
 /// Segments of one call always share one depth value, which keeps macroquad's
 /// draw batching from splitting the batch by depth (draw_line_3d state).
-fn draw_line_soup(lines: &[(crate::mesh::LineVertex, crate::mesh::LineVertex)]) {
+fn draw_line_soup(lines: &[(crate::mesh::AlphaVertex, crate::mesh::AlphaVertex)]) {
     let mut verts: Vec<macroquad::models::Vertex> = Vec::with_capacity(lines.len() * 2);
     let mut idx: Vec<u16> = Vec::with_capacity(lines.len() * 2);
     for (a, b) in lines.iter() {
         let base = verts.len() as u16;
-        verts.push(mq_line_vertex(a));
-        verts.push(mq_line_vertex(b));
+        verts.push(mq_alpha_vertex(a));
+        verts.push(mq_alpha_vertex(b));
         idx.push(base);
         idx.push(base + 1);
     }

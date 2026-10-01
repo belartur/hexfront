@@ -26,13 +26,17 @@ pub struct GpuVertex {
     pub color: [u8; 3],
 }
 
-/// One translucent range vertex: world position plus RGBA colour.
+/// One translucent vertex: world position plus RGBA colour.
 ///
-/// Range fills (and only they) carry their own alpha, so white turret
-/// fills and light-green heal fills keep distinct transparencies instead
-/// of sharing one value.
+/// Shared by every pass that carries its own transparency, which is why it is
+/// a single type: range fills, range outlines, 3D strokes, vehicle shadows and
+/// explosion particles all need exactly a position and an RGBA, and all of them
+/// reach the GPU through the same conversion in [`crate::render`]. Storing the
+/// alpha per vertex is what lets one buffer hold passes that need different
+/// transparencies — white turret fills and light-green heal fills, or a range
+/// outline that shares the fill hue but is clearly less transparent.
 #[derive(Clone, Copy, Debug)]
-pub struct RangeVertex {
+pub struct AlphaVertex {
     /// World x in distance units (j).
     pub x: f32,
     /// World y in distance units (j).
@@ -43,27 +47,17 @@ pub struct RangeVertex {
     pub color: [u8; 4],
 }
 
-/// One 3D line endpoint: world position plus RGBA colour.
+/// Triangle soup of translucent [`AlphaVertex`] triangles.
 ///
-/// Range outlines share the fill hue but are clearly less transparent;
-/// storing the alpha per line lets the two passes use one buffer.
-#[derive(Clone, Copy, Debug)]
-pub struct LineVertex {
-    /// World x in distance units (j).
-    pub x: f32,
-    /// World y in distance units (j).
-    pub y: f32,
-    /// Rendered elevation in px.
-    pub z: f32,
-    /// RGBA colour bytes.
-    pub color: [u8; 4],
-}
-
-/// Triangle soup with per-vertex RGBA colours for one range kind.
+/// The name comes from the range fills it was introduced for, and it also
+/// carries the other blended passes: bridge and helicopter shadows, range
+/// fills of one kind, and the explosion particles of [`crate::fx`]. They are
+/// separate fields of the mesh structs only because each one is drawn in its
+/// own pass, not because the geometry differs.
 #[derive(Clone, Debug, Default)]
 pub struct RangeSoup {
     /// All vertices, three per triangle.
-    pub vertices: Vec<RangeVertex>,
+    pub vertices: Vec<AlphaVertex>,
     /// Indices into `vertices` (always `0..len` for a soup).
     pub indices: Vec<u16>,
 }
@@ -207,8 +201,9 @@ fn vert(x: f64, y: f64, z: f64, color: [u8; 3]) -> GpuVertex {
     }
 }
 
-fn range_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> RangeVertex {
-    RangeVertex {
+/// One translucent vertex from an RGB colour plus a separate alpha.
+fn alpha_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> AlphaVertex {
+    AlphaVertex {
         x: x as f32,
         y: y as f32,
         z: z as f32,
@@ -216,11 +211,11 @@ fn range_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> RangeVertex 
     }
 }
 
-/// Same as [`range_vert`], but with the alpha channel given outright: the
+/// Same as [`alpha_vert`], but with the alpha channel given outright: the
 /// explosion particles of [`crate::fx`] fade a colour and its transparency
 /// independently, so both components come from the particle itself.
-fn range_vert_rgba(x: f64, y: f64, z: f64, color: [u8; 4]) -> RangeVertex {
-    RangeVertex {
+fn alpha_vert_rgba(x: f64, y: f64, z: f64, color: [u8; 4]) -> AlphaVertex {
+    AlphaVertex {
         x: x as f32,
         y: y as f32,
         z: z as f32,
@@ -228,16 +223,7 @@ fn range_vert_rgba(x: f64, y: f64, z: f64, color: [u8; 4]) -> RangeVertex {
     }
 }
 
-fn line_vert(x: f64, y: f64, z: f64, color: [u8; 3], alpha: u8) -> LineVertex {
-    LineVertex {
-        x: x as f32,
-        y: y as f32,
-        z: z as f32,
-        color: [color[0], color[1], color[2], alpha],
-    }
-}
-
-fn push_range_tri(soup: &mut RangeSoup, a: RangeVertex, b: RangeVertex, c: RangeVertex) {
+fn push_range_tri(soup: &mut RangeSoup, a: AlphaVertex, b: AlphaVertex, c: AlphaVertex) {
     let base = soup.vertices.len() as u16;
     soup.vertices.push(a);
     soup.vertices.push(b);
@@ -259,11 +245,11 @@ fn push_range_disc(
     color: [u8; 3],
     alpha: u8,
 ) {
-    let center = range_vert(x, y, z, color, alpha);
-    let mut prev = range_vert(x + r, y, z, color, alpha);
+    let center = alpha_vert(x, y, z, color, alpha);
+    let mut prev = alpha_vert(x + r, y, z, color, alpha);
     for i in 1..=n {
         let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
-        let next = range_vert(x + r * a.cos(), y + r * a.sin(), z, color, alpha);
+        let next = alpha_vert(x + r * a.cos(), y + r * a.sin(), z, color, alpha);
         push_range_tri(mesh, center, prev, next);
         prev = next;
     }
@@ -308,7 +294,7 @@ pub fn push_fx_blob(
 ) {
     let (right, up) = billboard_axes();
     let at = |a: f64, b: f64, c: [u8; 4]| {
-        range_vert_rgba(
+        alpha_vert_rgba(
             x + a * right.0 + b * up.0,
             y + a * right.1 + b * up.1,
             z + a * right.2 + b * up.2,
@@ -357,7 +343,7 @@ pub fn push_fx_ring(
     let inner_c = [color[0], color[1], color[2], inner_alpha];
     let outer_c = [color[0], color[1], color[2], outer_alpha];
     let n = constants::FX_RING_SEGMENTS;
-    let at = |r: f64, a: f64, c: [u8; 4]| range_vert_rgba(x + r * a.cos(), y + r * a.sin(), z, c);
+    let at = |r: f64, a: f64, c: [u8; 4]| alpha_vert_rgba(x + r * a.cos(), y + r * a.sin(), z, c);
     for i in 0..n {
         let a0 = std::f64::consts::TAU * i as f64 / n as f64;
         let a1 = std::f64::consts::TAU * (i + 1) as f64 / n as f64;
@@ -387,7 +373,7 @@ pub fn push_fx_shard(
     let at = |along: f64, across: f64| {
         let a = along * c - across * s;
         let b = along * s + across * c;
-        range_vert_rgba(
+        alpha_vert_rgba(
             x + a * right.0 + b * up.0,
             y + a * right.1 + b * up.1,
             z + a * right.2 + b * up.2,
@@ -423,7 +409,7 @@ fn push_range_rect(
     let (px, py) = (-fy, fx);
     let (hl, hw) = (len / 2.0, wid / 2.0);
     let corner = |along: f64, across: f64| {
-        range_vert(
+        alpha_vert(
             cx + fx * along + px * across,
             cy + fy * along + py * across,
             z,
@@ -487,9 +473,9 @@ fn push_range_rect_on_deck(
         }
     }
     for k in 1..poly.len() - 1 {
-        let a = range_vert(poly[0].0, poly[0].1, z, color, alpha);
-        let b = range_vert(poly[k].0, poly[k].1, z, color, alpha);
-        let c = range_vert(poly[k + 1].0, poly[k + 1].1, z, color, alpha);
+        let a = alpha_vert(poly[0].0, poly[0].1, z, color, alpha);
+        let b = alpha_vert(poly[k].0, poly[k].1, z, color, alpha);
+        let c = alpha_vert(poly[k + 1].0, poly[k + 1].1, z, color, alpha);
         push_range_tri(soup, a, b, c);
     }
 }
@@ -910,7 +896,7 @@ pub struct DynamicMesh {
     /// [`DynamicMesh::lines`] so they can be drawn after the composited range
     /// fills, in the owner colour and without a depth test (see
     /// [`push_ranges`]).
-    pub range_lines: Vec<(LineVertex, LineVertex)>,
+    pub range_lines: Vec<(AlphaVertex, AlphaVertex)>,
     /// Explosion particles: camera-facing billboard quads, flat ground rings
     /// and shards, all with their own RGBA (no depth write, drawn after the
     /// opaque pass; see [`push_fx_blob`] and [`push_fx_ring`]).
@@ -921,7 +907,7 @@ pub struct DynamicMesh {
     /// [`DynamicMesh::range_turret`] and [`DynamicMesh::range_heal`].
     pub translucent: TriangleSoup,
     /// 3D line segments (grid already in terrain; ranges/routes here).
-    pub lines: Vec<(LineVertex, LineVertex)>,
+    pub lines: Vec<(AlphaVertex, AlphaVertex)>,
 }
 
 impl DynamicMesh {
@@ -1418,7 +1404,7 @@ fn tank_aim(game: &Game, v: &crate::entities::Vehicle, heading: (f64, f64)) -> (
 /// Thick 3D segment as a camera-facing box strip (grid-free strokes).
 #[allow(clippy::too_many_arguments)]
 pub fn push_beam(
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x0: f64,
     y0: f64,
     z0: f64,
@@ -1428,8 +1414,8 @@ pub fn push_beam(
     color: [u8; 3],
 ) {
     lines.push((
-        line_vert(x0, y0, z0, color, 255),
-        line_vert(x1, y1, z1, color, 255),
+        alpha_vert(x0, y0, z0, color, 255),
+        alpha_vert(x1, y1, z1, color, 255),
     ));
 }
 
@@ -1480,7 +1466,7 @@ fn building_color(b: &crate::entities::Building) -> [u8; 3] {
 
 fn push_cross(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -1489,18 +1475,18 @@ fn push_cross(
     let h = 6.0;
     let _ = mesh;
     lines.push((
-        line_vert(x - h, y, z, color, 255),
-        line_vert(x + h, y, z, color, 255),
+        alpha_vert(x - h, y, z, color, 255),
+        alpha_vert(x + h, y, z, color, 255),
     ));
     lines.push((
-        line_vert(x, y - h, z, color, 255),
-        line_vert(x, y + h, z, color, 255),
+        alpha_vert(x, y - h, z, color, 255),
+        alpha_vert(x, y + h, z, color, 255),
     ));
 }
 
 #[allow(clippy::too_many_arguments)]
 fn push_ring(
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -1514,8 +1500,8 @@ fn push_ring(
         let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
         let next = (x + r * a.cos(), y + r * a.sin());
         lines.push((
-            line_vert(prev.0, prev.1, z, color, alpha),
-            line_vert(next.0, next.1, z, color, alpha),
+            alpha_vert(prev.0, prev.1, z, color, alpha),
+            alpha_vert(next.0, next.1, z, color, alpha),
         ));
         prev = next;
     }
@@ -1525,7 +1511,7 @@ fn push_building(
     game: &Game,
     b: &crate::entities::Building,
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
 ) {
     use crate::entities::BuildingKind;
     let (cx, cy) = b.pos(game.board.side);
@@ -1843,7 +1829,7 @@ fn turret_aim(b: &crate::entities::Building, cx: f64, cy: f64) -> (f64, f64) {
 /// apart from the low hovercraft dock and the flat helicopter pad.
 fn push_base_tank(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     slab: f64,
@@ -1937,7 +1923,7 @@ fn push_base_tank(
 /// speaks the colour of the healing vehicle it produces).
 fn push_base_buffer(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     slab: f64,
@@ -2017,7 +2003,7 @@ fn push_base_buffer(
 /// The landing mark makes the kind unmistakable even at the smallest zoom.
 fn push_base_helicopter(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     slab: f64,
@@ -2111,7 +2097,7 @@ fn push_base_helicopter(
 /// tall, so it never reads like a tank plant.
 fn push_base_hovercraft(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     slab: f64,
@@ -2188,7 +2174,7 @@ fn push_base_hovercraft(
 /// short barrels with an ammo drum, or a tilted rack of four rocket tubes.
 fn push_turret(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     b: &crate::entities::Building,
     cx: f64,
     cy: f64,
@@ -2396,7 +2382,7 @@ fn push_turret(
 /// emplacements, which also stand on a round base.
 fn push_heal_tower(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     slab: f64,
@@ -2469,7 +2455,7 @@ fn push_obstacle(
     game: &Game,
     tile: Tile,
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
 ) {
     use crate::board::ObstacleKind;
     let t = match game.board.tiles.get(&tile) {
@@ -2584,7 +2570,7 @@ const OBS_MINE_MARK_R: f64 = 3.0;
 /// closed volume, so the mine keeps a silhouette in the isometric view.
 fn push_mine_land(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     z: f64,
@@ -2693,7 +2679,7 @@ const OBS_MINE_CAP_MARK_R: f64 = 2.0;
 /// waits ashore or afloat.
 fn push_mine_water(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     z: f64,
@@ -2857,7 +2843,7 @@ const OBS_FIRE_CORE_COLOR: [u8; 3] = [255, 226, 120];
 /// volumes, so a burning field reads as a hazard from across the map.
 fn push_fire_trap(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     z: f64,
@@ -2960,7 +2946,7 @@ const OBS_ICE_SLASH_COLOR: [u8; 3] = [240, 250, 255];
 /// slips on, not a flat blue disc with two strokes on it.
 fn push_ice_trap(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     cx: f64,
     cy: f64,
     z: f64,
@@ -3080,7 +3066,7 @@ fn push_vehicle(
     v: &crate::entities::Vehicle,
     rotor_phase: f64,
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
 ) {
     let color = constants::player_color(v.owner);
     let z = vehicle_z(game, v);
@@ -3127,7 +3113,7 @@ fn push_helicopter(
     game: &Game,
     v: &crate::entities::Vehicle,
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -3217,7 +3203,7 @@ const HELI_TAIL_ROTOR_Z: f64 = HELI_FIN_BASE + HELI_FIN_H + 1.0;
 #[allow(clippy::too_many_lines)]
 fn push_helicopter_oriented(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -3596,7 +3582,7 @@ const TANK_BARREL_REACH: f64 = TANK_BARREL_GAP + TANK_BARREL_LEN + TANK_MUZZLE_L
 #[allow(clippy::too_many_arguments)]
 fn push_tank_chassis(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -3697,7 +3683,7 @@ fn push_tank(
     game: &Game,
     v: &crate::entities::Vehicle,
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -3712,7 +3698,7 @@ fn push_tank(
 #[allow(clippy::too_many_arguments)]
 fn push_tank_oriented(
     mesh: &mut TriangleSoup,
-    lines: &mut Vec<(LineVertex, LineVertex)>,
+    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
     x: f64,
     y: f64,
     z: f64,
@@ -3833,7 +3819,7 @@ fn push_ranges(
     game: &Game,
     turret: &mut RangeSoup,
     heal: &mut RangeSoup,
-    outlines: &mut Vec<(LineVertex, LineVertex)>,
+    outlines: &mut Vec<(AlphaVertex, AlphaVertex)>,
 ) {
     use crate::entities::BuildingKind;
     for b in game.buildings.iter() {
@@ -3927,7 +3913,7 @@ fn route_start_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     }
 }
 
-fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
+fn push_paths(game: &Game, lines: &mut Vec<(AlphaVertex, AlphaVertex)>) {
     for v in game.vehicles.iter() {
         if v.dead || v.route.is_empty() {
             continue;
@@ -3944,8 +3930,8 @@ fn push_paths(game: &Game, lines: &mut Vec<(LineVertex, LineVertex)>) {
             let (wx, wy) = game.board.center_world(seq[i]);
             let wz = waypoint_z(&game.board, seq, i, modes[i + 1]);
             lines.push((
-                line_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
-                line_vert(wx, wy, wz, [255, 255, 255], 255),
+                alpha_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
+                alpha_vert(wx, wy, wz, [255, 255, 255], 255),
             ));
             prev = (wx, wy, wz);
         }
@@ -4091,7 +4077,7 @@ mod tests {
         assert!(long > 1.6 * wide, "hull not slender: {long} x {wide}");
         // Two main-rotor blades are the highest strokes: they span the full
         // rotor diameter and their midpoint is the mast above the hull.
-        let blades = |mesh: &DynamicMesh| -> Vec<(LineVertex, LineVertex)> {
+        let blades = |mesh: &DynamicMesh| -> Vec<(AlphaVertex, AlphaVertex)> {
             let top = mesh
                 .lines
                 .iter()
@@ -4169,7 +4155,7 @@ mod tests {
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, &mut dynamic);
         // Distance of a stroke midpoint along the heading.
-        let along = |p: &(LineVertex, LineVertex)| {
+        let along = |p: &(AlphaVertex, AlphaVertex)| {
             let (mx, my) = (
                 f64::from(p.0.x + p.1.x) / 2.0,
                 f64::from(p.0.y + p.1.y) / 2.0,
