@@ -524,7 +524,9 @@ pub fn push_box(
     sz: f64,
     color: [u8; 3],
 ) {
-    let c000 = vert(x - sx / 2.0, y - sy / 2.0, z, color);
+    // The two sides facing away from the viewer are not drawn: the isometric
+    // camera never sees them, and skipping them halves the triangles of every
+    // box in the scene. Only the corners those two sides need are named.
     let c100 = vert(x + sx / 2.0, y - sy / 2.0, z, color);
     let c110 = vert(x + sx / 2.0, y + sy / 2.0, z, color);
     let c010 = vert(x - sx / 2.0, y + sy / 2.0, z, color);
@@ -533,7 +535,7 @@ pub fn push_box(
     let c101 = vert(x + sx / 2.0, y - sy / 2.0, z + sz, top);
     let c111 = vert(x + sx / 2.0, y + sy / 2.0, z + sz, top);
     let c011 = vert(x - sx / 2.0, y + sy / 2.0, z + sz, top);
-    // Top plus the two viewer-facing sides (same shading as before).
+    // Top plus the two viewer-facing sides.
     push_quad(mesh, c001, c101, c111, c011);
     let side_a = constants::shade(color, 0.85);
     let mut q = [c010, c110, c111, c011];
@@ -546,7 +548,6 @@ pub fn push_box(
     for v in q.iter_mut() {
         v.color = side_b;
     }
-    let _ = (c000, c100, c110, c010);
     push_quad(mesh, q[0], q[1], q[2], q[3]);
 }
 
