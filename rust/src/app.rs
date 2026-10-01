@@ -487,12 +487,7 @@ impl Application {
                     }
                 }
                 self.camera = Camera::new((screen_width(), screen_height()));
-                self.camera.limit_to_board(&game.board);
-                // Center on the board.
-                let cx = 1.5 * game.board.side * (game.board.cols - 1) as f64 / 2.0;
-                let cy =
-                    crate::hexgrid::SQRT3 * game.board.side * (game.board.rows - 1) as f64 / 2.0;
-                self.camera.center_on_world(cx, cy, 0.0);
+                self.camera.focus_board(&game.board);
                 self.terrain = mesh::build_terrain(&game.board);
                 self.renderer.set_terrain(&self.terrain);
                 self.terrain_board_key = Some((game.board.cols, game.board.rows));
@@ -1167,10 +1162,7 @@ impl Application {
     fn enter_editor_new(&mut self) {
         let ed = EditorState::new_board();
         self.camera = Camera::new((screen_width(), screen_height()));
-        self.camera.limit_to_board(&ed.board);
-        let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
-        let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64 / 2.0;
-        self.camera.center_on_world(cx, cy, 0.0);
+        self.camera.focus_board(&ed.board);
         self.editor = Some(ed);
         self.editor_game = None;
         self.editor_clean = false;
@@ -1187,10 +1179,7 @@ impl Application {
         match ed.load_path(path) {
             Ok(()) => {
                 self.camera = Camera::new((screen_width(), screen_height()));
-                self.camera.limit_to_board(&ed.board);
-                let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
-                let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64 / 2.0;
-                self.camera.center_on_world(cx, cy, 0.0);
+                self.camera.focus_board(&ed.board);
                 self.editor = Some(ed);
                 self.editor_game = None;
                 self.editor_clean = false;
@@ -1265,10 +1254,7 @@ impl Application {
         if ctrl && is_key_pressed(KeyCode::N) {
             if let Some(ed) = self.editor.as_mut() {
                 ed.new_map();
-                self.camera.limit_to_board(&ed.board);
-                let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
-                let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64 / 2.0;
-                self.camera.center_on_world(cx, cy, 0.0);
+                self.camera.focus_board(&ed.board);
                 self.editor_clean = false;
             }
             return;
@@ -1457,13 +1443,7 @@ impl Application {
                         };
                         if ok {
                             if let Some(ed) = self.editor.as_ref() {
-                                self.camera.limit_to_board(&ed.board);
-                                let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
-                                let cy = crate::hexgrid::SQRT3
-                                    * ed.board.side
-                                    * (ed.board.rows - 1) as f64
-                                    / 2.0;
-                                self.camera.center_on_world(cx, cy, 0.0);
+                                self.camera.focus_board(&ed.board);
                             }
                             self.editor_clean = false;
                         }
@@ -1774,11 +1754,7 @@ impl Application {
                 };
                 if ok {
                     if let Some(ed) = self.editor.as_ref() {
-                        self.camera.limit_to_board(&ed.board);
-                        let cx = 1.5 * ed.board.side * (ed.board.cols - 1) as f64 / 2.0;
-                        let cy = crate::hexgrid::SQRT3 * ed.board.side * (ed.board.rows - 1) as f64
-                            / 2.0;
-                        self.camera.center_on_world(cx, cy, 0.0);
+                        self.camera.focus_board(&ed.board);
                     }
                     self.editor_clean = false;
                 }
