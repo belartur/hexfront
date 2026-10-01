@@ -13,15 +13,12 @@ use crate::entities::{
     vehicle_kind_of,
 };
 use crate::hexgrid::Tile;
+use crate::math::{dist, dist2, sqr};
 use crate::sound::SoundKind;
 
-/// Euclidean distance between two world points (rules.md section 9).
+/// World position of a tile (the hex grid owns the odd-q offset layout).
 fn hexgrid_pos(tile: Tile, side: f64) -> (f64, f64) {
     crate::hexgrid::hex_to_world(tile.0, tile.1, side)
-}
-
-fn dist(a: (f64, f64), b: (f64, f64)) -> f64 {
-    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
 }
 
 /// One turret shot in flight, resolved on impact (rules.md section 10).
@@ -707,7 +704,7 @@ impl Game {
             let (wx, wy) = self.board.center_world(wp_tile);
             let (vx, vy) = (self.vehicles[idx].x, self.vehicles[idx].y);
             let (dx, dy) = (wx - vx, wy - vy);
-            let d = (dx * dx + dy * dy).sqrt();
+            let d = dist2((vx, vy), (wx, wy)).sqrt();
             if d <= step {
                 self.vehicles[idx].x = wx;
                 self.vehicles[idx].y = wy;
@@ -743,12 +740,14 @@ impl Game {
             return;
         }
         let (cx, cy) = self.board.center_world(tile);
+        // Squared reach test: no square root per vehicle, and the radius is
+        // squared once instead of compared against a distance.
+        let trigger = sqr(constants::MINE_TRIGGER_RADIUS);
         let mut hit: Option<u64> = None;
         for v in self.vehicles.iter() {
             if !v.dead
                 && v.kind != VehicleKind::Helicopter
-                && ((v.x - cx).powi(2) + (v.y - cy).powi(2)).sqrt()
-                    <= constants::MINE_TRIGGER_RADIUS
+                && dist2((v.x, v.y), (cx, cy)) <= trigger
             {
                 hit = Some(v.id);
                 break;

@@ -18,6 +18,7 @@ use crate::constants::{self, AiDifficulty, VehicleKind};
 use crate::entities::{BuildingKind, is_base, is_turret, turret_kind_of, vehicle_kind_of};
 use crate::game::Game;
 use crate::hexgrid::Tile;
+use crate::math::{dist2, sqr};
 use crate::rng::Rng;
 
 /// Decision loop of a single AI player.
@@ -98,9 +99,7 @@ impl AiController {
                     continue;
                 }
                 let bp = b.pos(board.side);
-                if ((bp.0 - pos.0).powi(2) + (bp.1 - pos.1).powi(2)).sqrt()
-                    <= constants::turret_range(tk)
-                {
+                if dist2(bp, pos) <= sqr(constants::turret_range(tk)) {
                     danger += 1.0;
                     hit = true;
                     break;
@@ -137,9 +136,7 @@ impl AiController {
                     continue;
                 }
                 let bp = b.pos(board.side);
-                if ((bp.0 - pos.0).powi(2) + (bp.1 - pos.1).powi(2)).sqrt()
-                    <= constants::turret_range(tk)
-                {
+                if dist2(bp, pos) <= sqr(constants::turret_range(tk)) {
                     counted.insert(b.tile);
                     let covered = (2.0 * constants::turret_range(tk)).min(route_length);
                     let shots = (covered / (speed * constants::turret_cooldown(tk))).ceil();

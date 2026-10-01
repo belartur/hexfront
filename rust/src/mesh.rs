@@ -11,6 +11,7 @@ use crate::board::{Board, Bridge, Crossing};
 use crate::constants;
 use crate::game::Game;
 use crate::hexgrid::{self, Tile};
+use crate::math::{dist2, sqr};
 
 /// One flat-shaded GPU vertex: world position plus RGB colour.
 #[derive(Clone, Copy, Debug)]
@@ -840,7 +841,7 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
         let mut best = 0;
         let mut best_d = f64::INFINITY;
         for (k, m) in mids.iter().enumerate() {
-            let d = (m.0 - tx).powi(2) + (m.1 - ty).powi(2);
+            let d = dist2(*m, (tx, ty));
             if d < best_d {
                 best_d = d;
                 best = k;
@@ -1829,7 +1830,7 @@ const BLD_HEAL_RIB_OFF: f64 = 5.6;
 fn turret_aim(b: &crate::entities::Building, cx: f64, cy: f64) -> (f64, f64) {
     match b.last_target_pos {
         Some((tx, ty)) => {
-            let d = ((tx - cx).powi(2) + (ty - cy).powi(2)).sqrt().max(1e-6);
+            let d = dist2((tx, ty), (cx, cy)).sqrt().max(1e-6);
             ((tx - cx) / d, (ty - cy) / d)
         }
         None => (1.0, 0.0),
@@ -3956,7 +3957,7 @@ fn push_projectiles(game: &Game, mesh: &mut TriangleSoup) {
         let t = (p.t / p.dur).clamp(0.0, 1.0);
         let x = p.from_pos.0 + (p.to.0 - p.from_pos.0) * t;
         let y = p.from_pos.1 + (p.to.1 - p.from_pos.1) * t;
-        let arc = 40.0 * (1.0 - (2.0 * t - 1.0).powi(2));
+        let arc = 40.0 * (1.0 - sqr(2.0 * t - 1.0));
         let z = 30.0 + arc;
         let r = if p.kind == constants::TurretKind::Rocket {
             f64::from(constants::ROCKET_RADIUS)
@@ -5073,7 +5074,7 @@ mod tests {
             let mut best = 0;
             let mut best_d = f64::INFINITY;
             for (k, m) in mids.iter().enumerate() {
-                let d = (m.0 - tx).powi(2) + (m.1 - ty).powi(2);
+                let d = dist2(*m, (tx, ty));
                 if d < best_d {
                     best_d = d;
                     best = k;
@@ -5090,7 +5091,7 @@ mod tests {
         for edge in [edge_a, edge_b] {
             let mut best = f64::INFINITY;
             for v in soup.iter() {
-                let d = ((v.x as f64 - edge.0).powi(2) + (v.y as f64 - edge.1).powi(2)).sqrt();
+                let d = dist2((f64::from(v.x), f64::from(v.y)), edge).sqrt();
                 best = best.min(d);
             }
             assert!(best <= hw + 1e-3, "edge {edge:?} far: {best}");
@@ -5285,7 +5286,7 @@ mod tests {
             // The axis points at the next field along the bridge...
             let nxt = hexgrid::neighbor(frag.0, frag.1, br.direction);
             let (nx, ny) = board.center_world(nxt);
-            let len = ((nx - cx).powi(2) + (ny - cy).powi(2)).sqrt();
+            let len = dist2((nx, ny), (cx, cy)).sqrt();
             assert!(
                 (deck.axis.0 * (nx - cx) + deck.axis.1 * (ny - cy) - len).abs() < 1e-6,
                 "axis does not follow the bridge direction"

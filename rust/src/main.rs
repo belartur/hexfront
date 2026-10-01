@@ -17,6 +17,7 @@ mod game;
 mod hexgrid;
 mod iso;
 mod mapfile;
+mod math;
 mod mesh;
 mod render;
 #[cfg(test)]

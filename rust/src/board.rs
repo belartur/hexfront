@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::constants::{self, VehicleKind};
 use crate::hexgrid::{self, Tile};
+use crate::math::dist;
 
 /// A static obstacle standing on a tile (rules.md sections 1, 4).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,7 +300,7 @@ impl Board {
                 self.height(b.tile) as f64 * constants::ELEVATION_PX
             };
             let (wx, wy) = camera.screen_to_world(sx, sy, wz);
-            let dist = ((wx - cx).powi(2) + (wy - cy).powi(2)).sqrt();
+            let dist = dist((wx, wy), (cx, cy));
             if dist > constants::HOVER_SNAP_RADIUS + 1e-9 {
                 continue;
             }
@@ -615,7 +616,7 @@ impl Board {
         for t in path.iter() {
             let pos = self.center_world(*t);
             if let Some(p) = prev {
-                total += ((pos.0 - p.0).powi(2) + (pos.1 - p.1).powi(2)).sqrt();
+                total += dist(pos, p);
             }
             prev = Some(pos);
         }

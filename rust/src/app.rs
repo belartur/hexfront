@@ -56,6 +56,7 @@ use crate::game::Game;
 use crate::hexgrid::Tile;
 use crate::iso::IsoCamera;
 use crate::mapfile::{self, level_seed};
+use crate::math;
 use crate::mesh::{self, DynamicMesh, TerrainMesh};
 use crate::render::Renderer;
 
@@ -254,14 +255,8 @@ impl Application {
             self.pan_view(dt, true);
             let (mx, my) = mouse_position();
             if is_mouse_button_down(MouseButton::Left) {
-                if let Some((dx0, dy0)) = self.down_pos {
-                    if !self.dragging
-                        && ((mx - dx0).powi(2) + (my - dy0).powi(2)).sqrt()
-                            > constants::DRAG_THRESHOLD
-                    {
-                        self.dragging = true;
-                    }
-                    if self.dragging {
+                if self.down_pos.is_some() {
+                    if self.drag_started(mx, my) {
                         self.camera
                             .pan(mx - self.last_mouse.0, my - self.last_mouse.1);
                     }
@@ -368,6 +363,26 @@ impl Application {
         if dx != 0.0 || dy != 0.0 {
             self.camera.pan(dx, dy);
         }
+    }
+    /// True once the held left button has moved further than
+    /// [`constants::DRAG_THRESHOLD`] from the point it went down on.
+    ///
+    /// A press that stays inside the threshold counts as a click, not as a
+    /// view pan, so the game and the editor both have to ask this question
+    /// before they pan. Latched on the first frame that answers yes, which is
+    /// why the caller only asks while `dragging` is still false.
+    fn drag_started(&mut self, mx: f32, my: f32) -> bool {
+        if self.dragging {
+            return true;
+        }
+        if let Some((dx0, dy0)) = self.down_pos {
+            // Compared squared, so the per-frame threshold test needs no root.
+            let d2 = math::sqr(f64::from(mx - dx0)) + math::sqr(f64::from(my - dy0));
+            if d2 > math::sqr(f64::from(constants::DRAG_THRESHOLD)) {
+                self.dragging = true;
+            }
+        }
+        self.dragging
     }
     fn enter_menu(&mut self) {
         self.state = State::Menu;
@@ -1201,13 +1216,8 @@ impl Application {
         // LMB drag pans; a click without drag edits via Delete/RMB path below
         // (keys do the editing, clicks only delete with RMB).
         if is_mouse_button_down(MouseButton::Left) {
-            if let Some((dx0, dy0)) = self.down_pos {
-                if !self.dragging
-                    && ((mx - dx0).powi(2) + (my - dy0).powi(2)).sqrt() > constants::DRAG_THRESHOLD
-                {
-                    self.dragging = true;
-                }
-                if self.dragging {
+            if self.down_pos.is_some() {
+                if self.drag_started(mx, my) {
                     self.camera
                         .pan(mx - self.last_mouse.0, my - self.last_mouse.1);
                 }

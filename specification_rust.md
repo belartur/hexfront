@@ -23,6 +23,7 @@ rust/Cargo.toml        manifest crate'a (Cargo.lock wersjonowany; target/ w .git
 rust/src/main.rs       punkt wejścia gry (cargo run --release)
 rust/src/constants.rs  stałe gry: UNIT_J_TO_PX jako jedyne miejsce przelicznika j → px, FPS i SIM_DT (prędkość klatki — decyzja tej implementacji), współczynniki rzutu izometrycznego, REPO_ROOT, MAPS_DIR, MAP_EXTENSION; każda stała z komentarzem wskazującym sekcję rules.md lub specification.md
 rust/src/hexgrid.rs    geometria sześciokątów flat-top (odd-q) bez logiki gry
+rust/src/math.rs       skalarne helpery wspólne dla symulacji i budowy meshy (kwadrat, odległość, odległość kwadratowa)
 rust/src/board.rs      plansza: pola, utrudnienia, podjazdy, mosty, tryb przejazdu przez most, wyszukiwanie drogi, wskazywanie pola kursorem (tryb „płaski” z klawiszem Alt)
 rust/src/entities.rs   rodzaje budynków, gracze, budynki, pojazdy i ich pojemności
 rust/src/game.rs       symulacja czasu rzeczywistego o stałym kroku SIM_DT, bez zależności od macroquad
