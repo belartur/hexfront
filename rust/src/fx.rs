@@ -176,6 +176,11 @@ pub struct Particle {
     pub angle: f64,
     /// Spin of a [`FxShape::Shard`] in rad/s.
     pub spin: f64,
+    /// True for the continuous flame of a fire trap
+    /// ([`Fx::maintain_campfires`]), false for the one-shot explosion of a
+    /// destroyed vehicle ([`Fx::explode`]). Only used to keep the two budgets
+    /// apart in [`Fx::trim`].
+    pub campfire: bool,
 }
 
 impl Particle {
@@ -206,11 +211,13 @@ impl Particle {
     }
 }
 
-/// All live explosion particles of one match (presentation state only).
+/// All live effect particles of one match (presentation state only).
 ///
-/// Kept out of [`crate::game::Game`] on purpose: the simulation must stay
-/// free of rendering state, and the effect must never influence gameplay or
-/// the determinism of the simulation.
+/// Carries both the one-shot explosions of destroyed vehicles and the
+/// continuous flames of the fire traps ([`Fx::maintain_campfires`]). Kept out
+/// of [`crate::game::Game`] on purpose: the simulation must stay free of
+/// rendering state, and the effects must never influence gameplay or the
+/// determinism of the simulation.
 #[derive(Clone, Debug)]
 pub struct Fx {
     /// All live particles, in spawn order.
@@ -224,6 +231,18 @@ pub struct Fx {
     /// random enough to stay lively, reproducible enough to be testable and to
     /// replay a match identically.
     rng: Rng,
+    /// Random stream the campfires draw from.
+    ///
+    /// Kept apart from `rng` on purpose: the flame is fed every frame, so
+    /// sharing one stream would make the explosion sequence depend on the frame
+    /// rate. The flame is instead its own, deliberately non-reproducible
+    /// presentation detail (like the rotor phase), and the explosions stay
+    /// replayable.
+    fire_rng: Rng,
+    /// Fractional spawn accumulators of the three campfire emitters, in
+    /// particles: `[flame, spark, smoke]`. The fractional part carries over to
+    /// the next frame, so the emission rate does not depend on the frame rate.
+    fire_acc: [f64; 3],
 }
 
 impl Default for Fx {
@@ -239,22 +258,30 @@ impl Fx {
         Self {
             particles: Vec::new(),
             rng: Rng::new(constants::FX_DEFAULT_SEED),
+            fire_rng: Rng::new(constants::CAMPFIRE_SEED),
+            fire_acc: [0.0; 3],
         }
     }
 
-    /// Drop every particle and restart the random stream from `seed`.
+    /// Drop every particle and restart the random streams from `seed`.
     ///
     /// Called with the level seed whenever a match or an editor playtest
     /// starts: the explosions of one level are then reproducible, while every
-    /// explosion inside it still differs from the previous one.
+    /// explosion inside it still differs from the previous one. The campfire
+    /// stream is seeded from the same level seed too, but is never meant to be
+    /// replayed bit for bit (the flame is fed every frame, so its randomness
+    /// depends on the frame rate).
     pub fn reseed(&mut self, seed: u64) {
         self.particles.clear();
         self.rng = Rng::new(seed ^ constants::FX_DEFAULT_SEED);
+        self.fire_rng = Rng::new(seed ^ constants::CAMPFIRE_SEED);
+        self.fire_acc = [0.0; 3];
     }
 
     /// Drop every particle (new match, new level, leaving a playtest).
     pub fn clear(&mut self) {
         self.particles.clear();
+        self.fire_acc = [0.0; 3];
     }
 
     /// True while no particle is alive.
@@ -445,16 +472,155 @@ impl Fx {
         );
         self.trim();
     }
-    /// Spawn one burst of `cfg` at `(x, y, z)`, drawing every random value
-    /// from the shared stream of [`Fx`].
+    /// Keep a living flame burning on every fire trap; called once per frame.
+    ///
+    /// `fires` holds the world position `(x, y, z)` of each burning field,
+    /// already lifted to its tile top ([`crate::app`] collects them from the
+    /// board). rules.md section 4 makes a fire trap permanent and land only and
+    /// says nothing about how it looks; drawing it as a static model made it
+    /// read as a plastic prop, so the trap -- really a campfire -- is a
+    /// continuous emitter here: a flame, a few sparks and a wisp of smoke.
+    ///
+    /// Emission is rate-based (`CAMPFIRE_*_RATE` particles per second and per
+    /// field) with a fractional accumulator per kind, so the standing flame
+    /// looks the same at any frame rate. The flame draws from the campfire
+    /// stream, which keeps the explosion stream reproducible. A field that
+    /// disappears (the editor removed the trap) simply stops being fed and its
+    /// particles burn out on their own.
+    pub fn maintain_campfires(&mut self, fires: &[(f64, f64, f64)], dt: f64) {
+        if fires.is_empty() || dt <= 0.0 {
+            return;
+        }
+        let count = fires.len() as f64;
+        self.fire_acc[0] += constants::CAMPFIRE_FLAME_RATE * count * dt;
+        self.fire_acc[1] += constants::CAMPFIRE_SPARK_RATE * count * dt;
+        self.fire_acc[2] += constants::CAMPFIRE_SMOKE_RATE * count * dt;
+        let flame = self.fire_acc[0].floor();
+        self.fire_acc[0] -= flame;
+        let spark = self.fire_acc[1].floor();
+        self.fire_acc[1] -= spark;
+        let smoke = self.fire_acc[2].floor();
+        self.fire_acc[2] -= smoke;
+        let flame_cfg = Self::campfire_flame();
+        let spark_cfg = Self::campfire_spark();
+        let smoke_cfg = Self::campfire_smoke();
+        for _ in 0..flame as usize {
+            let at = self.pick_campfire(fires);
+            self.emit_tagged(&flame_cfg, at, true);
+        }
+        for _ in 0..spark as usize {
+            let at = self.pick_campfire(fires);
+            self.emit_tagged(&spark_cfg, at, true);
+        }
+        for _ in 0..smoke as usize {
+            let at = self.pick_campfire(fires);
+            let lifted = (at.0, at.1, at.2 + constants::CAMPFIRE_SMOKE_LIFT);
+            self.emit_tagged(&smoke_cfg, lifted, true);
+        }
+        self.trim();
+    }
+
+    /// Pick one of the burning fields uniformly, from the campfire stream.
+    fn pick_campfire(&mut self, fires: &[(f64, f64, f64)]) -> (f64, f64, f64) {
+        let i = (self.fire_rng.next_f64() * fires.len() as f64) as usize;
+        fires[i.min(fires.len() - 1)]
+    }
+
+    /// Emitter config of one campfire flame puff.
+    fn campfire_flame() -> EmitterConfig {
+        EmitterConfig {
+            amount: 1,
+            lifetime: constants::CAMPFIRE_FLAME_LIFETIME,
+            lifetime_randomness: constants::CAMPFIRE_FLAME_LIFETIME_RANDOM,
+            explosiveness: 1.0,
+            initial_velocity: constants::CAMPFIRE_FLAME_DRIFT,
+            initial_velocity_randomness: 1.0,
+            size: constants::CAMPFIRE_FLAME_SIZE,
+            size_randomness: constants::CAMPFIRE_FLAME_SIZE_RANDOM,
+            size_growth: constants::CAMPFIRE_FLAME_GROWTH,
+            rise: constants::CAMPFIRE_FLAME_RISE,
+            gravity: 0.0,
+            alpha: constants::CAMPFIRE_FLAME_ALPHA,
+            fade_power: 1.1,
+            colors: ColorCurve {
+                start: constants::CAMPFIRE_FLAME_COLOR_START,
+                mid: constants::CAMPFIRE_FLAME_COLOR_MID,
+                end: constants::CAMPFIRE_FLAME_COLOR_END,
+            },
+            shape: FxShape::Blob,
+        }
+    }
+
+    /// Emitter config of one campfire spark.
+    fn campfire_spark() -> EmitterConfig {
+        EmitterConfig {
+            amount: 1,
+            lifetime: constants::CAMPFIRE_SPARK_LIFETIME,
+            lifetime_randomness: constants::CAMPFIRE_SPARK_LIFETIME_RANDOM,
+            explosiveness: 1.0,
+            initial_velocity: constants::CAMPFIRE_SPARK_SPEED,
+            initial_velocity_randomness: constants::CAMPFIRE_SPARK_SPEED_RANDOM,
+            size: constants::CAMPFIRE_SPARK_SIZE,
+            size_randomness: constants::CAMPFIRE_SPARK_SIZE_RANDOM,
+            size_growth: -constants::CAMPFIRE_SPARK_SIZE,
+            rise: 0.0,
+            gravity: constants::CAMPFIRE_SPARK_GRAVITY,
+            alpha: constants::CAMPFIRE_SPARK_ALPHA,
+            fade_power: 1.6,
+            colors: ColorCurve {
+                start: constants::CAMPFIRE_SPARK_COLOR_START,
+                mid: constants::CAMPFIRE_SPARK_COLOR_MID,
+                end: constants::CAMPFIRE_SPARK_COLOR_END,
+            },
+            shape: FxShape::Shard,
+        }
+    }
+
+    /// Emitter config of one campfire smoke puff.
+    fn campfire_smoke() -> EmitterConfig {
+        EmitterConfig {
+            amount: 1,
+            lifetime: constants::CAMPFIRE_SMOKE_LIFETIME,
+            lifetime_randomness: constants::CAMPFIRE_SMOKE_LIFETIME_RANDOM,
+            explosiveness: 1.0,
+            initial_velocity: constants::CAMPFIRE_SMOKE_DRIFT,
+            initial_velocity_randomness: 1.0,
+            size: constants::CAMPFIRE_SMOKE_SIZE,
+            size_randomness: constants::CAMPFIRE_SMOKE_SIZE_RANDOM,
+            size_growth: constants::CAMPFIRE_SMOKE_GROWTH,
+            rise: constants::CAMPFIRE_SMOKE_RISE,
+            gravity: 0.0,
+            alpha: constants::CAMPFIRE_SMOKE_ALPHA,
+            fade_power: 1.3,
+            colors: ColorCurve {
+                start: constants::CAMPFIRE_SMOKE_COLOR_START,
+                mid: constants::CAMPFIRE_SMOKE_COLOR_MID,
+                end: constants::CAMPFIRE_SMOKE_COLOR_END,
+            },
+            shape: FxShape::Blob,
+        }
+    }
+
+    /// Spawn one burst of `cfg` at `(x, y, z)` from the explosion stream.
+    fn emit(&mut self, cfg: &EmitterConfig, at: (f64, f64, f64)) {
+        self.emit_tagged(cfg, at, false);
+    }
+
+    /// Spawn one burst of `cfg` at `(x, y, z)`, drawing every random value from
+    /// the explosion stream (or, for a campfire, from the campfire stream) and
+    /// tagging the particles so [`Fx::trim`] keeps the two budgets apart.
     ///
     /// Directions are uniform over the full circle (an isotropic burst, as in
     /// the `initial_direction_spread: 2 * PI` of `macroquad-particles`), and
     /// `explosiveness` decides how much of the burst is delayed: the share
     /// `1 - explosiveness` of a particle's lifetime becomes its spawn delay, so
     /// a high value fires everything at once and a low value trickles it out.
-    fn emit(&mut self, cfg: &EmitterConfig, at: (f64, f64, f64)) {
-        let rng = &mut self.rng;
+    fn emit_tagged(&mut self, cfg: &EmitterConfig, at: (f64, f64, f64), campfire: bool) {
+        let rng = if campfire {
+            &mut self.fire_rng
+        } else {
+            &mut self.rng
+        };
         for _ in 0..cfg.amount {
             let life = (cfg.lifetime * (1.0 + rng.next_f64() * cfg.lifetime_randomness))
                 .max(constants::FX_MIN_LIFETIME);
@@ -498,22 +664,37 @@ impl Fx {
                 shape: cfg.shape,
                 angle: rng.next_f64() * std::f64::consts::TAU,
                 spin,
+                campfire,
             });
         }
     }
 
-    /// Keep the particle count within [`constants::EXPLOSION_MAX_PARTICLES`].
+    /// Keep each particle budget within its bound.
     ///
-    /// The oldest particles go first: a burst during a busy fight must not
-    /// push the frame budget out of shape, and dropping the tail of a purely
-    /// decorative effect costs nothing.
+    /// The explosions and the campfires are capped separately
+    /// ([`constants::EXPLOSION_MAX_PARTICLES`] and
+    /// [`constants::CAMPFIRE_MAX_PARTICLES`]) so that a map full of burning
+    /// fields can never starve the explosions, and a huge battle can never
+    /// snuff out the fires. The oldest particles of a kind go first: dropping
+    /// the tail of a purely decorative effect costs nothing.
     fn trim(&mut self) {
-        let over = self
-            .len()
-            .saturating_sub(constants::EXPLOSION_MAX_PARTICLES);
-        if over > 0 {
-            self.particles.drain(0..over);
+        let campfire = self.particles.iter().filter(|p| p.campfire).count();
+        let explosion = self.particles.len() - campfire;
+        let drop_campfire = campfire.saturating_sub(constants::CAMPFIRE_MAX_PARTICLES);
+        let drop_explosion = explosion.saturating_sub(constants::EXPLOSION_MAX_PARTICLES);
+        if drop_campfire == 0 && drop_explosion == 0 {
+            return;
         }
+        let (mut seen_campfire, mut seen_explosion) = (0usize, 0usize);
+        self.particles.retain(|p| {
+            if p.campfire {
+                seen_campfire += 1;
+                seen_campfire > drop_campfire
+            } else {
+                seen_explosion += 1;
+                seen_explosion > drop_explosion
+            }
+        });
     }
 
     /// Advance every particle by `dt` seconds and drop the expired ones.
@@ -998,5 +1179,120 @@ mod tests {
         // Out-of-range input is clamped, never wraps around.
         assert_eq!(c.sample(-5.0), [0, 0, 0]);
         assert_eq!(c.sample(5.0), [255, 255, 255]);
+    }
+
+    /// Position of one burning field for the campfire tests.
+    const FIRE_AT: (f64, f64, f64) = (500.0, -200.0, 12.0);
+
+    #[test]
+    fn campfires_burn_into_a_steady_flame() {
+        let mut fx = Fx::new();
+        // Two seconds of frames at a typical rate: the flame has to reach a
+        // standing size and then stop growing (the emitters replace what burns
+        // out).
+        for _ in 0..120 {
+            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.update(1.0 / 60.0);
+        }
+        assert!(!fx.is_empty(), "a fire trap with no flame");
+        assert!(
+            fx.particles.iter().all(|p| p.campfire),
+            "only campfire particles may come from maintain_campfires"
+        );
+        // Flame, sparks and smoke are all there.
+        assert!(
+            fx.particles
+                .iter()
+                .any(|p| p.colors.start == constants::CAMPFIRE_FLAME_COLOR_START)
+        );
+        assert!(fx.particles.iter().any(|p| p.shape == FxShape::Shard));
+        assert!(
+            fx.particles
+                .iter()
+                .any(|p| p.colors.start == constants::CAMPFIRE_SMOKE_COLOR_START)
+        );
+        // The standing flame stays in a sane band, not creeping up frame after
+        // frame.
+        let settled = fx.len();
+        for _ in 0..120 {
+            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.update(1.0 / 60.0);
+        }
+        assert!(
+            (fx.len() as f64 - settled as f64).abs() < 20.0,
+            "the flame is not steady: {settled} -> {}",
+            fx.len()
+        );
+        assert!(fx.len() < constants::CAMPFIRE_MAX_PARTICLES);
+    }
+
+    #[test]
+    fn campfire_burns_out_when_its_field_disappears() {
+        let mut fx = Fx::new();
+        for _ in 0..120 {
+            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.update(1.0 / 60.0);
+        }
+        assert!(!fx.is_empty());
+        // The trap is gone (the editor removed it): no more feeding, only decay.
+        for _ in 0..300 {
+            fx.maintain_campfires(&[], 1.0 / 60.0);
+            fx.update(1.0 / 60.0);
+        }
+        assert!(fx.is_empty(), "{} particles outlived the fire", fx.len());
+    }
+
+    #[test]
+    fn campfire_geometry_is_built() {
+        let mut fx = Fx::new();
+        for _ in 0..60 {
+            fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+            fx.update(1.0 / 60.0);
+        }
+        let mut mesh = DynamicMesh::default();
+        fx.build(&mut mesh);
+        assert!(!mesh.fx.vertices.is_empty(), "the fire has no geometry");
+    }
+
+    #[test]
+    fn campfires_and_explosions_keep_separate_budgets() {
+        let mut fx = Fx::new();
+        // Flood the system with both effects at once.
+        for _ in 0..200 {
+            fx.explode(&wreck(VehicleKind::Tank), 0.0);
+            fx.maintain_campfires(&[FIRE_AT, (0.0, 0.0, 0.0)], 0.25);
+        }
+        let campfire = fx.particles.iter().filter(|p| p.campfire).count();
+        let explosion = fx.len() - campfire;
+        assert!(campfire <= constants::CAMPFIRE_MAX_PARTICLES);
+        assert_eq!(
+            explosion,
+            constants::EXPLOSION_MAX_PARTICLES,
+            "the fires starved the explosions"
+        );
+    }
+
+    #[test]
+    fn campfires_leave_the_explosion_stream_untouched() {
+        // Campfires draw from their own stream, so a scene that has been
+        // burning for a while still explodes exactly like a fresh one: the
+        // replayability promised by `reseed` survives the fire.
+        let play = |fires: bool| {
+            let mut fx = Fx::new();
+            fx.reseed(99);
+            if fires {
+                for _ in 0..60 {
+                    fx.maintain_campfires(&[FIRE_AT], 1.0 / 60.0);
+                    fx.update(1.0 / 60.0);
+                }
+            }
+            fx.explode(&wreck(VehicleKind::Tank), 10.0);
+            fx.particles
+                .iter()
+                .filter(|p| !p.campfire)
+                .map(|p| (p.x, p.y, p.z, p.vx, p.vy, p.vz))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(play(true), play(false));
     }
 }

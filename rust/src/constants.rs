@@ -311,6 +311,108 @@ pub const EXPLOSION_HELICOPTER_SCALE: f64 = 1.25;
 pub const EXPLOSION_CENTER_LIFT: f64 = 6.0;
 
 // ---------------------------------------------------------------------------
+// Campfire effects (rendering only)
+//
+// rules.md gives a fire trap no appearance at all: section 4 only says that a
+// vehicle sitting on one loses one unit per second and that the trap is never
+// removed (rules.md section 1 makes it land only). The trap is really a
+// *campfire*, so instead of a static model it is drawn as a continuous particle
+// emitter ([`crate::fx`]): a living flame, a few sparks and a wisp of smoke.
+// Every number below is a pure presentation value in px or seconds and must
+// never influence the simulation.
+// ---------------------------------------------------------------------------
+
+/// Upper bound of live campfire particles, on top of
+/// [`EXPLOSION_MAX_PARTICLES`] (rendering budget only): a fire scene must never
+/// starve the explosions, and a busy fight must never snuff out the fires.
+pub const CAMPFIRE_MAX_PARTICLES: usize = 320;
+/// Seed of the campfire random stream, mixed into the level seed by
+/// `Fx::reseed()` (rendering only). The flame draws from its own stream so it
+/// can never perturb the reproducible sequence of the explosions.
+pub const CAMPFIRE_SEED: u64 = 0x0F1E_5EED_0000_0001;
+
+/// Flame puffs spawned per second and per burning field. Together with
+/// [`CAMPFIRE_FLAME_LIFETIME`] this sets the standing flame size.
+pub const CAMPFIRE_FLAME_RATE: f64 = 34.0;
+/// Lifetime of one flame puff in s.
+pub const CAMPFIRE_FLAME_LIFETIME: f64 = 0.55;
+/// Lifetime jitter of the flame puffs (fraction of the lifetime).
+pub const CAMPFIRE_FLAME_LIFETIME_RANDOM: f64 = 0.5;
+/// Start size of one flame puff in px.
+pub const CAMPFIRE_FLAME_SIZE: f64 = 4.6;
+/// Size jitter of the flame puffs (fraction of the size).
+pub const CAMPFIRE_FLAME_SIZE_RANDOM: f64 = 0.35;
+/// Growth of a flame puff over its lifetime in px.
+pub const CAMPFIRE_FLAME_GROWTH: f64 = 3.0;
+/// Horizontal drift speed of a flame puff in px/s (the flame sways).
+pub const CAMPFIRE_FLAME_DRIFT: f64 = 9.0;
+/// Upward acceleration of a flame puff in px/s^2.
+pub const CAMPFIRE_FLAME_RISE: f64 = 26.0;
+/// Peak alpha of one flame puff (0..1).
+pub const CAMPFIRE_FLAME_ALPHA: f64 = 0.85;
+/// Colour of a flame puff at birth: yellow-hot core.
+pub const CAMPFIRE_FLAME_COLOR_START: [u8; 3] = [255, 226, 128];
+/// Flame puff colour in mid-life: orange.
+pub const CAMPFIRE_FLAME_COLOR_MID: [u8; 3] = [255, 130, 40];
+/// Flame puff colour at death: dark ember.
+pub const CAMPFIRE_FLAME_COLOR_END: [u8; 3] = [96, 26, 14];
+
+/// Sparks spawned per second and per burning field (far rarer than the flame).
+pub const CAMPFIRE_SPARK_RATE: f64 = 3.0;
+/// Lifetime of one spark in s.
+pub const CAMPFIRE_SPARK_LIFETIME: f64 = 0.7;
+/// Lifetime jitter of the sparks (fraction of the lifetime).
+pub const CAMPFIRE_SPARK_LIFETIME_RANDOM: f64 = 0.6;
+/// Size of one spark in px.
+pub const CAMPFIRE_SPARK_SIZE: f64 = 1.8;
+/// Size jitter of the sparks (fraction of the size).
+pub const CAMPFIRE_SPARK_SIZE_RANDOM: f64 = 0.5;
+/// Horizontal speed of a spark leaving the fire in px/s.
+pub const CAMPFIRE_SPARK_SPEED: f64 = 22.0;
+/// Speed jitter of the sparks (fraction of the speed).
+pub const CAMPFIRE_SPARK_SPEED_RANDOM: f64 = 0.8;
+/// Downward acceleration of a spark in px/s^2 (it arcs back down).
+pub const CAMPFIRE_SPARK_GRAVITY: f64 = 120.0;
+/// Colour of a spark at birth: white-hot.
+pub const CAMPFIRE_SPARK_COLOR_START: [u8; 3] = [255, 240, 190];
+/// Spark colour in mid-life: ember orange.
+pub const CAMPFIRE_SPARK_COLOR_MID: [u8; 3] = [255, 150, 55];
+/// Spark colour at death: dark ember.
+pub const CAMPFIRE_SPARK_COLOR_END: [u8; 3] = [140, 46, 18];
+/// Peak alpha of one spark (0..1).
+pub const CAMPFIRE_SPARK_ALPHA: f64 = 1.0;
+
+/// Smoke puffs spawned per second and per burning field (sparser than the
+/// flame, and much fainter).
+pub const CAMPFIRE_SMOKE_RATE: f64 = 6.0;
+/// Lifetime of one smoke puff in s.
+pub const CAMPFIRE_SMOKE_LIFETIME: f64 = 1.5;
+/// Lifetime jitter of the smoke puffs (fraction of the lifetime).
+pub const CAMPFIRE_SMOKE_LIFETIME_RANDOM: f64 = 0.5;
+/// Start size of one smoke puff in px.
+pub const CAMPFIRE_SMOKE_SIZE: f64 = 3.4;
+/// Size jitter of the smoke puffs (fraction of the size).
+pub const CAMPFIRE_SMOKE_SIZE_RANDOM: f64 = 0.4;
+/// Growth of a smoke puff over its lifetime in px.
+pub const CAMPFIRE_SMOKE_GROWTH: f64 = 10.0;
+/// Horizontal drift speed of a smoke puff in px/s.
+pub const CAMPFIRE_SMOKE_DRIFT: f64 = 7.0;
+/// Upward acceleration of a smoke puff in px/s^2.
+pub const CAMPFIRE_SMOKE_RISE: f64 = 22.0;
+/// Elevation a smoke puff starts at above the field in px, so the smoke leaves
+/// the flame instead of smothering it.
+pub const CAMPFIRE_SMOKE_LIFT: f64 = 6.0;
+/// Peak alpha of one smoke puff (0..1); kept low so the smoke never hides the
+/// burning field under it.
+pub const CAMPFIRE_SMOKE_ALPHA: f64 = 0.35;
+/// Colour of a smoke puff at birth.
+pub const CAMPFIRE_SMOKE_COLOR_START: [u8; 3] = [72, 68, 66];
+/// Smoke puff colour in mid-life.
+pub const CAMPFIRE_SMOKE_COLOR_MID: [u8; 3] = [98, 94, 92];
+/// Smoke puff colour at death.
+pub const CAMPFIRE_SMOKE_COLOR_END: [u8; 3] = [54, 52, 52];
+
+// ---------------------------------------------------------------------------
 // Audio (presentation only)
 //
 // rules.md says nothing about sound: no rule mentions hearing an explosion

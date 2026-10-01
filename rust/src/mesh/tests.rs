@@ -923,13 +923,16 @@ fn obstacles_float_above_terrain_with_details() {
                 v.z
             );
         }
-        // Every obstacle carries detail lines (the red mine cross or belt,
-        // the flame core, the ice slashes), so the kind reads even at
-        // small zoom.
-        assert!(
-            !dynamic.lines.is_empty(),
-            "{kind:?} on height {height} has no detail lines"
-        );
+        // Every obstacle carries detail lines (the red mine cross or belt, the
+        // ice slashes), so the kind reads even at small zoom -- except the fire
+        // trap, whose flame is a living particle emitter now (`crate::fx`), so
+        // its mesh is only the scorched pad and has no detail strokes.
+        if *kind != ObstacleKind::TrapFire {
+            assert!(
+                !dynamic.lines.is_empty(),
+                "{kind:?} on height {height} has no detail lines"
+            );
+        }
         // The model stays inside its field and below the height cap.
         let (cx, cy) = game.board.center_world(tile);
         let (mut reach, mut high) = (0.0_f64, 0.0_f64);

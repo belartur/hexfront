@@ -672,6 +672,26 @@ impl Application {
         let centre = self.camera.screen_to_world(sx, sy, 0.0);
         self.audio.play_events(centre, &events);
     }
+    /// World positions `(x, y, z)` of every burning fire trap (rules.md section
+    /// 4) of `game`, lifted to its tile top.
+    ///
+    /// These are the inputs of the continuous campfire emitters of
+    /// [`crate::fx`]: the simulation knows nothing about how a trap looks, so
+    /// the flame is fed from the presentation layer here, both in a match and
+    /// in the editor preview.
+    fn campfire_positions(game: &Game) -> Vec<(f64, f64, f64)> {
+        let mut out = Vec::new();
+        for (tile, t) in game.board.tiles.iter() {
+            if t.obstacle
+                .as_ref()
+                .is_some_and(|o| o.kind == crate::board::ObstacleKind::TrapFire)
+            {
+                let (cx, cy) = game.board.center_world(*tile);
+                out.push((cx, cy, mesh::tile_top_z(&game.board, *tile)));
+            }
+        }
+        out
+    }
     fn draw(&mut self, dt: f32) {
         self.ensure_buffers();
         match self.state {
@@ -702,10 +722,13 @@ impl Application {
                 game.board.side,
             );
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
-            // Explosion particles live in the presentation layer, not in the
-            // simulation, so they are advanced with the wall-clock delta
-            // (exactly like the rotor phase) and rebuilt into the same
-            // per-frame mesh.
+            // Campfire flames and explosion particles both live in the
+            // presentation layer, not in the simulation: the flames are fed from
+            // the burning fields, and the whole system is advanced with the
+            // wall-clock delta (exactly like the rotor phase) and rebuilt into
+            // the same per-frame mesh.
+            let campfires = Self::campfire_positions(game);
+            self.fx.maintain_campfires(&campfires, f64::from(dt));
             self.fx.update(f64::from(dt));
             self.fx.build(&mut self.dynamic);
             // Advance the shared rotor phase by wall-clock time, so the
@@ -1561,6 +1584,9 @@ impl Application {
                 game.board.side,
             );
             mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
+            // The editor preview is a real board, so its fire traps burn too.
+            let campfires = Self::campfire_positions(game);
+            self.fx.maintain_campfires(&campfires, f64::from(dt));
             self.fx.update(f64::from(dt));
             self.fx.build(&mut self.dynamic);
             self.renderer.rotor_phase = (self.renderer.rotor_phase

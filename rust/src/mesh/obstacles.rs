@@ -4,7 +4,10 @@
 //! the mine -- the only hazard rules.md section 1 allows on land *and* on
 //! water -- gets one shape per terrain: ashore a pressure plate a vehicle rolls
 //! over, afloat a moored body floating on the surface. The two traps are
-//! land-only, so a water shape for them would be dead code.
+//! land-only, so a water shape for them would be dead code. The fire trap is
+//! the exception to "gets a model": its flame is a living particle emitter
+//! ([`crate::fx::Fx::maintain_campfires`]), so the mesh only leaves the
+//! scorched pad it burns on.
 
 use super::{
     AlphaVertex, TriangleSoup, push_beam, push_box, push_cylinder, push_hex_prism,
@@ -46,8 +49,9 @@ pub(super) fn push_obstacle(
             }
         }
         // Both traps are land-only (rules.md section 1), so neither needs a
-        // water shape.
-        ObstacleKind::TrapFire => push_fire_trap(mesh, lines, cx, cy, z),
+        // water shape. The fire trap only contributes its scorched pad here;
+        // its flame is a particle emitter in `crate::fx`.
+        ObstacleKind::TrapFire => push_fire_trap(mesh, cx, cy, z),
         ObstacleKind::TrapIce => push_ice_trap(mesh, lines, cx, cy, z),
     }
 }
@@ -360,7 +364,12 @@ fn push_mine_water(
 }
 
 // Fire trap (rules.md section 4: 1 damage per second while a vehicle sits on
-// it; never removed; land only, per rules.md section 1).
+// it; never removed; land only, per rules.md section 1). The flame itself is a
+// living particle emitter in the presentation layer
+// (`crate::fx::Fx::maintain_campfires`), not mesh geometry, so the only thing
+// modelled here is the scorched pad the fire burns on. The pad keeps the field
+// from looking barren while the flame is still ramping up, or after a trap is
+// removed in the editor and its last particles have burnt out.
 /// Radius of the scorched pad of the fire trap in px.
 pub(super) const OBS_FIRE_PAD_R: f64 = 12.0;
 /// Radius of the scorched pad at its top in px (a touch smaller, so the pad
@@ -370,94 +379,20 @@ pub(super) const OBS_FIRE_PAD_TOP_R: f64 = 11.0;
 pub(super) const OBS_FIRE_PAD_H: f64 = 1.2;
 /// Colour of the scorched pad (charred ground).
 pub(super) const OBS_FIRE_PAD_COLOR: [u8; 3] = [48, 40, 34];
-/// Radius of the central flame at its base in px.
-pub(super) const OBS_FIRE_FLAME_R: f64 = 4.2;
-/// Radius of the central flame at its tip in px.
-pub(super) const OBS_FIRE_FLAME_TOP_R: f64 = 0.8;
-/// Height of the central flame in px.
-pub(super) const OBS_FIRE_FLAME_H: f64 = 9.0;
-/// Radius of a side flame at its base in px.
-pub(super) const OBS_FIRE_SIDE_R: f64 = 2.8;
-/// Radius of a side flame at its tip in px.
-pub(super) const OBS_FIRE_SIDE_TOP_R: f64 = 0.5;
-/// Height of a side flame in px (lower than the middle one, so the cluster
-/// stays a fire and not a thicket).
-pub(super) const OBS_FIRE_SIDE_H: f64 = 5.0;
-/// Offset of each side flame from the pad centre in px.
-pub(super) const OBS_FIRE_SIDE_OFF: f64 = 5.5;
-/// Directions of the three side flames on the pad, in field coordinates and in
-/// a fixed order, so a level always burns the same way.
-pub(super) const OBS_FIRE_SIDE_DIRS: [(f64, f64); 3] = [(0.9, 0.35), (-0.9, 0.35), (0.0, -1.0)];
-/// Colour of the flame cones.
-pub(super) const OBS_FIRE_COLOR: [u8; 3] = [232, 118, 42];
-/// Facets of a flame cone.
-pub(super) const OBS_FIRE_SEGMENTS: usize = 8;
-/// How far the bright core stroke reaches down into the central flame cone in
-/// px, so the lick grows out of the fire instead of hanging over it.
-pub(super) const OBS_FIRE_CORE_LAP: f64 = 1.5;
-/// Length of the bright core stroke above the central flame tip in px: a short
-/// lick, so it does not read as a needle stuck into the fire.
-pub(super) const OBS_FIRE_CORE_H: f64 = 2.2;
-/// Colour of the hot core stroke.
-pub(super) const OBS_FIRE_CORE_COLOR: [u8; 3] = [255, 226, 120];
 
-/// Rendered fire trap (rules.md section 4): a scorched pad carrying a cluster
-/// of flame cones. The flat disc with one vertical stroke is replaced by real
-/// volumes, so a burning field reads as a hazard from across the map.
-fn push_fire_trap(
-    mesh: &mut TriangleSoup,
-    lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
-    cx: f64,
-    cy: f64,
-    z: f64,
-) {
-    let pad = z + constants::OBSTACLE_LIFT;
+/// Rendered fire trap (rules.md section 4): the scorched pad a campfire burns
+/// on. The flame, the sparks and the smoke are particles built by `crate::fx`.
+fn push_fire_trap(mesh: &mut TriangleSoup, cx: f64, cy: f64, z: f64) {
     push_cylinder(
         mesh,
         cx,
         cy,
-        pad,
+        z + constants::OBSTACLE_LIFT,
         OBS_FIRE_PAD_R,
         OBS_FIRE_PAD_TOP_R,
         OBS_FIRE_PAD_H,
         OBS_SEGMENTS,
         OBS_FIRE_PAD_COLOR,
-    );
-    let base = pad + OBS_FIRE_PAD_H;
-    push_cylinder(
-        mesh,
-        cx,
-        cy,
-        base,
-        OBS_FIRE_FLAME_R,
-        OBS_FIRE_FLAME_TOP_R,
-        OBS_FIRE_FLAME_H,
-        OBS_FIRE_SEGMENTS,
-        OBS_FIRE_COLOR,
-    );
-    for (dx, dy) in OBS_FIRE_SIDE_DIRS {
-        push_cylinder(
-            mesh,
-            cx + dx * OBS_FIRE_SIDE_OFF,
-            cy + dy * OBS_FIRE_SIDE_OFF,
-            base,
-            OBS_FIRE_SIDE_R,
-            OBS_FIRE_SIDE_TOP_R,
-            OBS_FIRE_SIDE_H,
-            OBS_FIRE_SEGMENTS,
-            OBS_FIRE_COLOR,
-        );
-    }
-    let tip = base + OBS_FIRE_FLAME_H;
-    push_beam(
-        lines,
-        cx,
-        cy,
-        tip - OBS_FIRE_CORE_LAP,
-        cx,
-        cy,
-        tip + OBS_FIRE_CORE_H,
-        OBS_FIRE_CORE_COLOR,
     );
 }
 
