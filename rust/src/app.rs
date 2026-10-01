@@ -50,7 +50,7 @@ use macroquad::prelude::*;
 use crate::ai::AiController;
 use crate::camera::Camera;
 use crate::constants::{self};
-use crate::editor::{EditorOverlay, EditorState};
+use crate::editor::{EDITOR_ERROR_COLOR, EditorOverlay, EditorState};
 use crate::entities::{Player, vehicle_kind_of};
 use crate::game::Game;
 use crate::hexgrid::Tile;
@@ -1617,7 +1617,7 @@ impl Application {
         };
         let errors = ed.validate();
         for (i, e) in errors.iter().enumerate() {
-            let ec = constants::EDITOR_ERROR_COLOR;
+            let ec = EDITOR_ERROR_COLOR;
             draw_text(
                 e,
                 10.0,

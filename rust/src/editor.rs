@@ -28,8 +28,8 @@
 //!
 //! # Board size
 //!
-//! A new board starts at [`constants::EDITOR_NEW_COLS`] x
-//! [`constants::EDITOR_NEW_ROWS`], mostly water with a small land rectangle in
+//! A new board starts at [`EDITOR_NEW_COLS`] x
+//! [`EDITOR_NEW_ROWS`], mostly water with a small land rectangle in
 //! the middle. [`trim_map`] drops empty borders when saving and [`pad_map`]
 //! grows a smaller map back up when loading, so a stored level keeps only the
 //! area it really uses while the editor still works on a full-size board. Both
@@ -45,6 +45,38 @@ use crate::entities::{Building, BuildingKind, Player, is_base};
 use crate::game::Game;
 use crate::hexgrid::{self, Tile};
 use crate::mapfile;
+
+/// Board editor tunables (specification_rust.md, section "Edytor plansz";
+/// rules.md section 1 for the 0..15 heights and player bases).
+///
+/// These live here, next to the only code that uses them, instead of the
+/// shared [`crate::constants`] module: they tune the editing tool, not the
+/// game. Gameplay and presentation values shared by several modules stay in
+/// `constants.rs`; a value used by a single module lives in that module
+/// (same precedent as the `BLD_*`/`OBS_*`/`TANK_*` blocks in `mesh/`).
+///
+// --- Editor tunables -------------------------------------------------------
+/// Seconds after which an unfinished 1- or 2-digit units entry commits.
+///
+/// A third digit commits immediately (the value cannot grow any further), so
+/// this delay only applies to a short entry the editor is waiting on. It has
+/// to be long enough to type the next digit and short enough not to surprise
+/// the user with a value they were still editing.
+pub const EDITOR_DIGIT_COMMIT_DELAY: f64 = 1.0;
+/// Columns of a newly created editor board (mostly water).
+pub const EDITOR_NEW_COLS: i32 = 256;
+/// Rows of a newly created editor board.
+pub const EDITOR_NEW_ROWS: i32 = 256;
+/// Columns of the central land rectangle on a new board.
+pub const EDITOR_LAND_COLS: i32 = 20;
+/// Rows of the central land rectangle on a new board.
+pub const EDITOR_LAND_ROWS: i32 = 13;
+/// Terrain height of the central land rectangle of a new board.
+pub const EDITOR_LAND_HEIGHT: i32 = 1;
+/// Highest unit count typed in the editor (the map format stores 0-999).
+pub const EDITOR_MAX_UNITS: u32 = 999;
+/// Colour of the rule-violation lines on the editor screen.
+pub const EDITOR_ERROR_COLOR: [u8; 3] = [255, 80, 80];
 
 /// Building kinds behind the `b` key, in cycling order.
 pub const BUILDING_ORDER: [BuildingKind; 8] = [
@@ -172,22 +204,22 @@ pub struct EditorState {
 
 impl EditorState {
     /// Create a fresh board: mostly water with a land rectangle of height
-    /// [`constants::EDITOR_LAND_HEIGHT`] in the middle.
+    /// [`EDITOR_LAND_HEIGHT`] in the middle.
     pub fn new_board() -> Self {
-        let cols = constants::EDITOR_NEW_COLS;
-        let rows = constants::EDITOR_NEW_ROWS;
+        let cols = EDITOR_NEW_COLS;
+        let rows = EDITOR_NEW_ROWS;
         let mut board = Board::new(cols, rows);
         for t in board.tiles.values_mut() {
             t.height = 0;
         }
-        let lw = constants::EDITOR_LAND_COLS;
-        let lh = constants::EDITOR_LAND_ROWS;
+        let lw = EDITOR_LAND_COLS;
+        let lh = EDITOR_LAND_ROWS;
         let q0 = (cols - lw) / 2;
         let r0 = (rows - lh) / 2;
         for q in q0..q0 + lw {
             for r in r0..r0 + lh {
                 if let Some(t) = board.tiles.get_mut(&(q, r)) {
-                    t.height = constants::EDITOR_LAND_HEIGHT;
+                    t.height = EDITOR_LAND_HEIGHT;
                 }
             }
         }
@@ -282,7 +314,7 @@ impl EditorState {
         if let Some(tile) = self.digit_tile
             && let Ok(units) = self.digit_buf.parse::<u32>()
         {
-            let units = units.min(constants::EDITOR_MAX_UNITS);
+            let units = units.min(EDITOR_MAX_UNITS);
             if let Some(b) = self.building_at_mut(tile) {
                 b.units = units as f64;
                 self.last_units = units;
@@ -297,13 +329,13 @@ impl EditorState {
     /// Advance the digit-entry commit timer (call every frame).
     ///
     /// A pending entry is committed once the user stops typing for
-    /// [`constants::EDITOR_DIGIT_COMMIT_DELAY`]; a full three-digit entry
+    /// [`EDITOR_DIGIT_COMMIT_DELAY`]; a full three-digit entry
     /// commits on the third key instead, so a completed value is never delayed
     /// (see [`EditorState::type_digit`]).
     pub fn tick(&mut self, dt: f64) {
         if !self.digit_buf.is_empty() {
             self.digit_age += dt;
-            if self.digit_age >= constants::EDITOR_DIGIT_COMMIT_DELAY {
+            if self.digit_age >= EDITOR_DIGIT_COMMIT_DELAY {
                 self.commit_digits();
             }
         }
@@ -457,7 +489,7 @@ impl EditorState {
         if self.digit_buf.len() >= 3 {
             self.commit_digits();
         } else if let Ok(units) = self.digit_buf.parse::<u32>() {
-            let units = units.min(constants::EDITOR_MAX_UNITS);
+            let units = units.min(EDITOR_MAX_UNITS);
             if let Some(b) = self.building_at_mut(tile) {
                 b.units = units as f64;
             }
@@ -997,7 +1029,7 @@ pub fn trim_map(board: &Board, buildings: &[Building]) -> (Board, Vec<Building>)
 /// column goes at the end); the view centres on the result.
 pub fn pad_map(board: Board, buildings: Vec<Building>) -> (Board, Vec<Building>) {
     let (cols, rows) = (board.cols, board.rows);
-    let (tc, tr) = (constants::EDITOR_NEW_COLS, constants::EDITOR_NEW_ROWS);
+    let (tc, tr) = (EDITOR_NEW_COLS, EDITOR_NEW_ROWS);
     if cols >= tc && rows >= tr {
         return (board, buildings);
     }
@@ -1116,7 +1148,7 @@ mod tests {
         assert!(ed.type_digit(Some((2, 2)), '1'));
         assert!(ed.type_digit(Some((2, 2)), '2'));
         assert_eq!(ed.building_at((2, 2)).unwrap().units as i64, 12);
-        ed.tick(constants::EDITOR_DIGIT_COMMIT_DELAY + 0.1);
+        ed.tick(EDITOR_DIGIT_COMMIT_DELAY + 0.1);
         assert_eq!(ed.building_at((2, 2)).unwrap().units as i64, 12);
         assert_eq!(ed.last_units, 12);
         assert!(ed.type_digit(Some((2, 2)), '5'));
@@ -1346,7 +1378,7 @@ mod tests {
         let (padded, pb) = pad_map(trimmed, tb);
         assert_eq!(
             (padded.cols, padded.rows),
-            (constants::EDITOR_NEW_COLS, constants::EDITOR_NEW_ROWS)
+            (EDITOR_NEW_COLS, EDITOR_NEW_ROWS)
         );
         assert_eq!(pb.len(), 1);
         // Only the trimmed content is land; everything padded is water.
@@ -1451,7 +1483,7 @@ mod tests {
         let (padded, pb) = pad_map(trimmed, tb);
         assert_eq!(
             (padded.cols, padded.rows),
-            (constants::EDITOR_NEW_COLS, constants::EDITOR_NEW_ROWS)
+            (EDITOR_NEW_COLS, EDITOR_NEW_ROWS)
         );
         assert_eq!(pb.len(), 1);
         let mut empty = Board::new(4, 4);
@@ -1492,7 +1524,7 @@ mod tests {
         ed2.load_path(&path).expect("load");
         assert_eq!(
             (ed2.board.cols, ed2.board.rows),
-            (constants::EDITOR_NEW_COLS, constants::EDITOR_NEW_ROWS)
+            (EDITOR_NEW_COLS, EDITOR_NEW_ROWS)
         );
         assert_eq!(ed2.buildings.len(), 2);
         assert!(!ed2.dirty);

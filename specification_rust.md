@@ -109,7 +109,7 @@ Edytor jest integralną częścią tej samej binarki — stan edytora w `app.rs`
 * `Esc` w grze testowej wraca do edytora (najpierw anuluje zaznaczenie, tak jak w normalnej grze), a stan edytora, mapa i kamera zostają nienaruszone. Wyjście do menu głównego z gry testowej jest niemożliwe. Zwykła gra z menu zachowuje dotychczasowe wyjście klawiszem `Esc`.
 
 ### Widok i rozmiar planszy
-Widok i jego sterowanie są takie jak w grze, poza kolidującymi cechami: bez `WASD` (kolizja klawisza `s`) i bez panoramowania prawym przyciskiem (bo kasuje obiekt). Stałe edytora (`EDITOR_*`) mieszkają w `constants.rs`.
+Widok i jego sterowanie są takie jak w grze, poza kolidującymi cechami: bez `WASD` (kolizja klawisza `s`) i bez panoramowania prawym przyciskiem (bo kasuje obiekt). Stałe edytora (`EDITOR_*`) mieszkają w `editor.rs`, obok jedynego kodu który ich używa.
 
 Nowo utworzona plansza ma wymiary podane w `EDITOR_NEW_COLS` × `EDITOR_NEW_ROWS` i w większości składa się z wody; na środku prostokąt lądu o wysokości 1, widok wycentrowany. Przy zapisie puste (sama woda bez obiektów) początkowe oraz końcowe wiersze i kolumny są usuwane, a przy odczycie plansze mniejsze od nowej są poszerzane o wiersze i kolumny po równo na początku/końcu. Ze względu na geometrię siatki heksów przesunięcie kolumnowe przy usuwaniu i dopełnianiu jest zawsze parzyste — opisuje to dokumentacja `trim_map()` i `pad_map()` w `editor.rs`.
 
