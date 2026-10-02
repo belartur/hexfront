@@ -1,4 +1,4 @@
 # Rust implementation (rust/; Cargo.lock is tracked on purpose so builds
 # reproduce exactly the dependency set)
-/rust/target/
+target/
 *.rs.bk
