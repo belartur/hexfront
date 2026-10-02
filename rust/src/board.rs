@@ -440,6 +440,13 @@ impl Board {
             .or_else(|| self.tiles.get(&v).and_then(|t| t.bridge))?;
         self.bridges.get(idx).filter(|br| br.connects(u, v))
     }
+    /// True when `t` is a land end of any bridge.
+    ///
+    /// A vehicle riding a deck may only come down at the ends (rules.md
+    /// section 8); in the middle of a bridge the deck has no way down.
+    fn is_bridge_end(&self, t: Tile) -> bool {
+        self.bridges.iter().any(|br| br.is_end(t))
+    }
     /// Terrain-only movement rules (rules.md sections 4, 5 and 7).
     ///
     /// Bridge decks are ignored, so a field carrying a fragment is driven
@@ -493,10 +500,11 @@ impl Board {
     /// on from one of the two land ends, i.e. by driving *along* the
     /// bridge, and a vehicle that drove under a bridge stays under it: no
     /// step from the side ever puts anybody on a deck. Leaving the deck is
-    /// the way down to the field below, which rules.md section 8 leaves
-    /// open -- unlike a ramp, which may only be left at its ends (sec. 7).
-    /// A helicopter flies over everything and keeps no crossing mode
-    /// (sec. 5.2).
+    /// likewise only possible at the ends: the choice between riding along
+    /// the bridge and crossing under it holds for the whole passage
+    /// (rules.md section 8) -- like a ramp, which may only be entered and
+    /// left at its ends (sec. 7). A helicopter flies over everything and
+    /// keeps no crossing mode (sec. 5.2).
     pub fn step(&self, u: Tile, v: Tile, kind: VehicleKind, mode: Crossing) -> Option<Crossing> {
         if u == v {
             return None;
@@ -509,7 +517,10 @@ impl Board {
             if deck.is_some() {
                 return Some(Crossing::Deck);
             }
-            if self.ground_step(u, v, kind) {
+            // No way down sideways in the middle of a bridge: the crossing
+            // mode holds for the whole passage (rules.md section 8), so a
+            // deck is only ever left at one of its two land ends.
+            if self.is_bridge_end(u) && self.ground_step(u, v, kind) {
                 return Some(Crossing::Ground);
             }
             return None;
@@ -711,8 +722,10 @@ mod tests {
             board.step(f2, b, VehicleKind::Tank, Crossing::Deck),
             Some(Crossing::Deck)
         );
-        // The deck leads nowhere else: leaving it is the way down, and only
-        // where the terrain below allows it (unlike a ramp, sec. 7).
+        // The deck leads nowhere else: the crossing choice holds for the
+        // whole passage (rules.md section 8), so the deck is only ever left
+        // at one of its two land ends -- like a ramp (sec. 7) -- even where
+        // the water below would be drivable.
         let side = hexgrid::neighbor(f1.0, f1.1, 3);
         assert_eq!(
             board.step(f1, side, VehicleKind::Tank, Crossing::Deck),
@@ -724,8 +737,18 @@ mod tests {
             land.step(a, f1, VehicleKind::Tank, Crossing::Ground),
             Some(Crossing::Deck)
         );
+        // No way down sideways in the middle of a bridge: the deck is left
+        // at its ends only (rules.md section 8), like a ramp (sec. 7).
+        assert_eq!(land.step(f1, side, VehicleKind::Tank, Crossing::Deck), None);
+        // ...while driving off either end is allowed, so a vehicle never
+        // gets stuck on the bridge it has just crossed (a ramp takes it
+        // down from the height-4 end to the height-1 land beyond).
+        let mut landing = bridge_board(1);
+        let ramp_tile = hexgrid::neighbor(b.0, b.1, 1);
+        let far = hexgrid::neighbor(ramp_tile.0, ramp_tile.1, 1);
+        landing.set_ramp(ramp_tile, b, far);
         assert_eq!(
-            land.step(f1, side, VehicleKind::Tank, Crossing::Deck),
+            landing.step(b, ramp_tile, VehicleKind::Tank, Crossing::Deck),
             Some(Crossing::Ground)
         );
         // ...and a vehicle that came down stays under the deck from there,
