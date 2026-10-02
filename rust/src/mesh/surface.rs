@@ -7,7 +7,7 @@
 //! agree on where a vehicle is.
 
 use super::terrain::bridge_deck_z;
-use super::tile_top_z;
+use super::{ramp_waypoint_z, tile_top_z};
 use crate::board::{Board, Crossing};
 use crate::constants;
 use crate::game::Game;
@@ -15,14 +15,14 @@ use crate::hexgrid::Tile;
 
 /// Ground elevation under a vehicle, ignoring bridges.
 ///
-/// Ramps sit at the lower of the two heights they join. A vehicle driving
-/// *along* a bridge stands on the deck instead — see
-/// [`vehicle_surface_z`], which adds that case on top of this terrain lookup.
+/// A ramp tilts from the height of one joined neighbour to the height of the
+/// other (rules.md section 7), so a vehicle standing on it interpolates its
+/// elevation along the ramp axis instead of sitting at the lower end. Only
+/// points past either edge clamp to the nearer end height.
 pub fn vehicle_ground_z(game: &Game, x: f64, y: f64) -> f64 {
     if let Some(t) = game.board.world_to_tile(x, y) {
-        if let Some((a, b)) = game.board.ramps.get(&t) {
-            return game.board.height(*a).min(game.board.height(*b)) as f64
-                * constants::ELEVATION_PX;
+        if let Some(z) = game.board.ramp_height_at(t, x, y) {
+            return z;
         }
         return game.board.height(t) as f64 * constants::ELEVATION_PX;
     }
@@ -132,12 +132,17 @@ pub fn vehicle_surface_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
 ///
 /// `mode` is the crossing mode the vehicle reaches `seq[i]` in, as computed
 /// by [`route_crossings`]: on a deck the waypoint rides it, a vehicle
-/// crossing *under* a bridge keeps the terrain elevation.
+/// crossing *under* a bridge keeps the terrain elevation. A waypoint on a
+/// ramp sits mid-slope (see [`Board::ramp_center_z`]), so a straight
+/// centre-to-centre drive climbs it continuously.
 pub fn waypoint_z(board: &Board, seq: &[Tile], i: usize, mode: Crossing) -> f64 {
     let tile = seq[i];
     if mode == Crossing::Deck
         && let Some(z) = deck_z_of(board, Some(tile))
     {
+        return z;
+    }
+    if let Some(z) = ramp_waypoint_z(board, tile) {
         return z;
     }
     tile_top_z(board, tile)

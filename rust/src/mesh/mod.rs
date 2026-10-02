@@ -815,6 +815,7 @@ pub(super) fn push_ring(
 // ---------------------------------------------------------------------------
 
 pub use terrain::{
-    TerrainMesh, build_terrain, depth_span, max_height, tile_top_z, visible_world_bounds,
+    TerrainMesh, build_terrain, depth_span, max_height, ramp_waypoint_z, tile_top_z,
+    visible_world_bounds,
 };
 pub use vehicles::{vehicle_z, wreck_z};

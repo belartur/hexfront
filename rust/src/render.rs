@@ -601,12 +601,14 @@ fn draw_selection_2d(
         let mut prev: Option<(f32, f32)> = None;
         if let Some(sel) = selection {
             let (wx, wy) = game.board.center_world(sel);
-            let z = crate::mesh::tile_top_z(&game.board, sel);
+            let z = crate::mesh::ramp_waypoint_z(&game.board, sel)
+                .unwrap_or_else(|| crate::mesh::tile_top_z(&game.board, sel));
             prev = Some(camera.world_to_screen(wx, wy, z));
         }
         for t in path.iter() {
             let (wx, wy) = game.board.center_world(*t);
-            let z = crate::mesh::tile_top_z(&game.board, *t);
+            let z = crate::mesh::ramp_waypoint_z(&game.board, *t)
+                .unwrap_or_else(|| crate::mesh::tile_top_z(&game.board, *t));
             let cur = camera.world_to_screen(wx, wy, z);
             if let Some(p) = prev {
                 mq::draw_line(p.0, p.1, cur.0, cur.1, 3.0, mq::YELLOW);

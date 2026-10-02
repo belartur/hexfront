@@ -234,6 +234,68 @@ impl Board {
     pub fn center_world(&self, tile: Tile) -> (f64, f64) {
         hexgrid::hex_to_world(tile.0, tile.1, self.side)
     }
+
+    /// Short-edge midpoints of the ramp strip on `tile`, ordered `(a, b)`.
+    ///
+    /// The two ends sit on the hex edges facing the joined neighbours, at
+    /// those neighbours' heights — the very edges the tilted top face of
+    /// [`crate::mesh`] spans. Vehicles interpolate their elevation between
+    /// these edges, so both ends of the travel stay on the drawn strip.
+    pub fn ramp_edges(&self, tile: Tile) -> Option<((f64, f64), (f64, f64))> {
+        let (a, b) = self.ramps.get(&tile).copied()?;
+        let corners = hexgrid::hex_corners(tile.0, tile.1, self.side);
+        let mut mids = [(0.0, 0.0); 6];
+        for k in 0..6 {
+            let c1 = corners[k];
+            let c2 = corners[(k + 1) % 6];
+            mids[k] = ((c1.0 + c2.0) / 2.0, (c1.1 + c2.1) / 2.0);
+        }
+        let nearest = |target: Tile| -> usize {
+            let (tx, ty) = hexgrid::hex_to_world(target.0, target.1, self.side);
+            let mut best = 0;
+            let mut best_d = f64::INFINITY;
+            for (k, m) in mids.iter().enumerate() {
+                let d = crate::math::dist2(*m, (tx, ty));
+                if d < best_d {
+                    best_d = d;
+                    best = k;
+                }
+            }
+            best
+        };
+        Some((mids[nearest(a)], mids[nearest(b)]))
+    }
+
+    /// Elevation of the ramp strip on `tile` at world point `(x, y)`.
+    ///
+    /// The strip tilts linearly from the height of neighbour `a` at its edge
+    /// to the height of neighbour `b` at the opposite edge (rules.md
+    /// section 7). The projection is clamped to the strip, so points past
+    /// either edge keep the nearer end height instead of extrapolating.
+    pub fn ramp_height_at(&self, tile: Tile, x: f64, y: f64) -> Option<f64> {
+        let (a, b) = self.ramps.get(&tile).copied()?;
+        let (pa, pb) = self.ramp_edges(tile)?;
+        let (dx, dy) = (pb.0 - pa.0, pb.1 - pa.1);
+        let len2 = dx * dx + dy * dy;
+        if len2 < 1e-9 {
+            return Some(self.height(a).min(self.height(b)) as f64 * constants::ELEVATION_PX);
+        }
+        let t = (((x - pa.0) * dx + (y - pa.1) * dy) / len2).clamp(0.0, 1.0);
+        let ha = self.height(a) as f64 * constants::ELEVATION_PX;
+        let hb = self.height(b) as f64 * constants::ELEVATION_PX;
+        Some(ha + (hb - ha) * t)
+    }
+
+    /// Elevation of a ramp tile at its centre (mid-slope).
+    ///
+    /// Vehicles drive centre to centre, so a waypoint standing on the ramp
+    /// sits halfway between the two joined heights. Rendered previews and
+    /// route lines share this value, which keeps the whole travel on one
+    /// continuous slope instead of jumping at the tile border.
+    pub fn ramp_center_z(&self, tile: Tile) -> Option<f64> {
+        let (cx, cy) = self.center_world(tile);
+        self.ramp_height_at(tile, cx, cy)
+    }
     /// Tile containing a world point (clamped to the board or `None`).
     pub fn world_to_tile(&self, x: f64, y: f64) -> Option<Tile> {
         let t = hexgrid::world_to_hex(x, y, self.side);
@@ -835,6 +897,52 @@ mod tests {
         assert!(board.passable((5, 6), (5, 7), VehicleKind::Tank));
         assert!(board.passable((5, 7), (5, 8), VehicleKind::Tank));
         assert!(!board.passable((4, 6), (5, 6), VehicleKind::Tank));
+    }
+
+    #[test]
+    fn ramp_height_climbs_continuously_along_its_axis() {
+        // A vehicle driving centre to centre must climb the drawn strip
+        // instead of sitting at the lower end and jumping at the border
+        // (rules.md section 7).
+        let mut board = flat_board(10, 10);
+        board.tiles.get_mut(&(4, 2)).unwrap().height = 3;
+        board.tiles.get_mut(&(6, 2)).unwrap().height = 1;
+        // Neighbours (4, 2) and (6, 2) are opposite across (5, 2).
+        board.set_ramp((5, 2), (4, 2), (6, 2));
+        let (pa, pb) = board.ramp_edges((5, 2)).expect("ramp edges");
+        let (ha, hb) = (3.0 * constants::ELEVATION_PX, 1.0 * constants::ELEVATION_PX);
+        // The ends meet the drawn strip at the joined heights.
+        assert!((board.ramp_height_at((5, 2), pa.0, pa.1).unwrap() - ha).abs() < 1e-6);
+        assert!((board.ramp_height_at((5, 2), pb.0, pb.1).unwrap() - hb).abs() < 1e-6);
+        // The middle is the mid-slope, so a travel centre -> centre -> centre
+        // climbs without a jump at either tile border.
+        let mid = board.ramp_center_z((5, 2)).unwrap();
+        assert!((mid - (ha + hb) / 2.0).abs() < 1e-6);
+        let (ca, cc, cb) = (
+            board.center_world((4, 2)),
+            board.center_world((5, 2)),
+            board.center_world((6, 2)),
+        );
+        let lerp =
+            |p: (f64, f64), q: (f64, f64), t: f64| (p.0 + (q.0 - p.0) * t, p.1 + (q.1 - p.1) * t);
+        let mut prev = ha;
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0] {
+            let (x, y) = if t <= 1.0 {
+                lerp(ca, cc, t)
+            } else {
+                lerp(cc, cb, t - 1.0)
+            };
+            let tile = board.world_to_tile(x, y).expect("on board");
+            let z = board
+                .ramp_height_at(tile, x, y)
+                .unwrap_or_else(|| board.height(tile) as f64 * constants::ELEVATION_PX);
+            assert!(
+                (z - prev).abs() <= (ha - hb) / 4.0 + 1e-6,
+                "jump from {prev} to {z} at t={t}"
+            );
+            prev = z;
+        }
+        assert!((prev - hb).abs() < 1e-6, "travel ends at {prev}, not {hb}");
     }
 
     #[test]

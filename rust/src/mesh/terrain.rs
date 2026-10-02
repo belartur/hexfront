@@ -8,7 +8,6 @@ use super::{
 use crate::board::{Board, Bridge};
 use crate::constants;
 use crate::hexgrid::{self, Tile};
-use crate::math::dist2;
 
 /// Maximum vertices per GPU chunk: macroquad batches draw calls into
 /// `u16` index buffers, so large terrains are split into chunks. It is the
@@ -119,12 +118,22 @@ pub(super) fn tile_color(tile: Tile, height: i32) -> [u8; 3] {
     }
 }
 
-/// Height rendered for a tile top (ramps sit at the lower end).
+/// Height rendered for a tile top (ramps sit at the lower end for picking).
 pub fn tile_top_z(board: &Board, tile: Tile) -> f64 {
     if let Some((a, b)) = board.ramps.get(&tile) {
         return board.height(*a).min(board.height(*b)) as f64 * constants::ELEVATION_PX;
     }
     board.height(tile) as f64 * constants::ELEVATION_PX
+}
+
+/// Height of the ramp strip on `tile` at its centre (mid-slope).
+///
+/// Vehicles drive centre to centre, so a waypoint standing on the ramp sits
+/// halfway between the two joined heights; see [`Board::ramp_center_z`].
+/// Route lines and previews share this value, which keeps the whole travel
+/// on one continuous slope instead of jumping at the tile border.
+pub fn ramp_waypoint_z(board: &Board, tile: Tile) -> Option<f64> {
+    board.ramp_center_z(tile)
 }
 
 /// Half-length of one deck segment along the bridge axis, as a fraction of
@@ -417,29 +426,13 @@ fn push_ramp(board: &Board, soup: &mut TriangleSoup, tile: Tile) {
     };
     // The strip runs edge to edge, its short edges lying on the midpoints of
     // the hex edges facing the two joined neighbours, tilted by their
-    // height difference.
-    let corners = hexgrid::hex_corners(tile.0, tile.1, board.side);
-    let mut mids = [(0.0, 0.0); 6];
-    for k in 0..6 {
-        let c1 = corners[k];
-        let c2 = corners[(k + 1) % 6];
-        mids[k] = ((c1.0 + c2.0) / 2.0, (c1.1 + c2.1) / 2.0);
-    }
-    let nearest = |target: Tile| -> usize {
-        let (tx, ty) = hexgrid::hex_to_world(target.0, target.1, board.side);
-        let mut best = 0;
-        let mut best_d = f64::INFINITY;
-        for (k, m) in mids.iter().enumerate() {
-            let d = dist2(*m, (tx, ty));
-            if d < best_d {
-                best_d = d;
-                best = k;
-            }
-        }
-        best
+    // height difference. The edge lookup is shared with the drive height
+    // (Board::ramp_edges), so vehicles interpolate along the very strip
+    // drawn here.
+    let (edge_a, edge_b) = match board.ramp_edges(tile) {
+        Some(e) => e,
+        None => return,
     };
-    let edge_a = mids[nearest(a)];
-    let edge_b = mids[nearest(b)];
     let ha = board.height(a) as f64 * constants::ELEVATION_PX;
     let hb = board.height(b) as f64 * constants::ELEVATION_PX;
     let (dx, dy) = (edge_b.0 - edge_a.0, edge_b.1 - edge_a.1);
