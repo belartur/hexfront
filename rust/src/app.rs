@@ -76,6 +76,16 @@ pub struct Application {
     terrain: TerrainMesh,
     dynamic: DynamicMesh,
     terrain_board_key: Option<(i32, i32)>,
+    /// Cached [`crate::mesh::depth_span`] of the current game board.
+    ///
+    /// Terrain heights, ramps and bridges never change during a match, so the
+    /// span is computed once per level next to `build_terrain` instead of
+    /// every frame.
+    depth_span: (f64, f64),
+    /// Cached [`crate::mesh::max_height`] of the current game board (same
+    /// lifetime as [`Application::depth_span`]; also feeds the helicopter
+    /// altitude through [`crate::mesh::build_dynamic`]).
+    max_height: f64,
     state: State,
     maps: Vec<PathBuf>,
     menu_scroll: f32,
@@ -129,6 +139,8 @@ impl Application {
             terrain: TerrainMesh::default(),
             dynamic: DynamicMesh::default(),
             terrain_board_key: None,
+            depth_span: (0.0, 1.0),
+            max_height: 0.0,
             state: State::Menu,
             maps: mapfile::list_maps(None),
             menu_scroll: 0.0,
@@ -494,6 +506,8 @@ impl Application {
                 self.terrain = mesh::build_terrain(&game.board);
                 self.renderer.set_terrain(&self.terrain);
                 self.terrain_board_key = Some((game.board.cols, game.board.rows));
+                self.depth_span = mesh::depth_span(&game.board);
+                self.max_height = mesh::max_height(&game.board);
                 self.game = Some(game);
                 self.ai = ai;
                 self.playtest = false;
@@ -543,6 +557,8 @@ impl Application {
         self.terrain = mesh::build_terrain(&game.board);
         self.renderer.set_terrain(&self.terrain);
         self.terrain_board_key = Some((game.board.cols, game.board.rows));
+        self.depth_span = mesh::depth_span(&game.board);
+        self.max_height = mesh::max_height(&game.board);
         self.camera.limit_to_board(&game.board);
         self.game = Some(game);
         self.ai = ai;
@@ -680,16 +696,13 @@ impl Application {
     /// the flames are fed from the presentation layer here, both in a match
     /// and in the editor preview.
     fn campfire_spots(game: &Game) -> Vec<crate::fx::Campfire> {
+        // Fire traps are permanent, so the game index stays complete: no full
+        // board scan, just the burning fields.
         let mut out = Vec::new();
-        for (tile, t) in game.board.tiles.iter() {
-            if t.obstacle
-                .as_ref()
-                .is_some_and(|o| o.kind == crate::board::ObstacleKind::TrapFire)
-            {
-                let (cx, cy) = game.board.center_world(*tile);
-                let z = mesh::tile_top_z(&game.board, *tile);
-                out.extend(crate::fx::campfire_cluster(cx, cy, z, tile.0, tile.1));
-            }
+        for tile in game.fire_tiles.iter() {
+            let (cx, cy) = game.board.center_world(*tile);
+            let z = mesh::tile_top_z(&game.board, *tile);
+            out.extend(crate::fx::campfire_cluster(cx, cy, z, tile.0, tile.1));
         }
         out
     }
@@ -714,15 +727,20 @@ impl Application {
                 self.terrain = mesh::build_terrain(&game.board);
                 self.renderer.set_terrain(&self.terrain);
                 self.terrain_board_key = key;
+                self.depth_span = mesh::depth_span(&game.board);
+                self.max_height = mesh::max_height(&game.board);
             }
-            let (lo, hi) = mesh::depth_span(&game.board);
+            let (lo, hi) = self.depth_span;
             let iso = IsoCamera::from_camera(&self.camera, lo, hi);
-            let view_bounds = mesh::visible_world_bounds(
-                &self.camera,
-                mesh::max_height(&game.board),
-                game.board.side,
+            let view_bounds =
+                mesh::visible_world_bounds(&self.camera, self.max_height, game.board.side);
+            let max_height = self.max_height;
+            mesh::build_dynamic(
+                game,
+                self.renderer.rotor_phase,
+                max_height,
+                &mut self.dynamic,
             );
-            mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
             // Campfire flames and explosion particles both live in the
             // presentation layer, not in the simulation: the flames are fed from
             // the burning fields, and the whole system is advanced with the
@@ -1186,6 +1204,8 @@ impl Application {
                 self.terrain = mesh::build_terrain(&g.board);
                 self.renderer.set_terrain(&self.terrain);
                 self.terrain_board_key = Some((g.board.cols, g.board.rows));
+                self.depth_span = mesh::depth_span(&g.board);
+                self.max_height = mesh::max_height(&g.board);
             }
             self.editor_terrain_fp = fp;
         }
@@ -1577,14 +1597,17 @@ impl Application {
         }
         let hover = self.editor_hover();
         if let Some(game) = self.editor_game.as_ref() {
-            let (lo, hi) = mesh::depth_span(&game.board);
+            let (lo, hi) = self.depth_span;
             let iso = IsoCamera::from_camera(&self.camera, lo, hi);
-            let view_bounds = mesh::visible_world_bounds(
-                &self.camera,
-                mesh::max_height(&game.board),
-                game.board.side,
+            let view_bounds =
+                mesh::visible_world_bounds(&self.camera, self.max_height, game.board.side);
+            let max_height = self.max_height;
+            mesh::build_dynamic(
+                game,
+                self.renderer.rotor_phase,
+                max_height,
+                &mut self.dynamic,
             );
-            mesh::build_dynamic(game, self.renderer.rotor_phase, &mut self.dynamic);
             // The editor preview is a real board, so its fire traps burn too.
             let campfires = Self::campfire_spots(game);
             self.fx.maintain_campfires(&campfires, f64::from(dt));

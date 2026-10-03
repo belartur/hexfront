@@ -111,6 +111,17 @@ pub fn vehicle_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     }
 }
 
+/// [`vehicle_z`] with the board height handed in (see [`helicopter_altitude`]):
+/// the per-frame mesh builder caches it once per level instead of rescanning
+/// the board for every helicopter.
+pub fn vehicle_z_with_height(game: &Game, v: &crate::entities::Vehicle, max_height_px: f64) -> f64 {
+    if v.kind == constants::VehicleKind::Helicopter {
+        helicopter_altitude_px(max_height_px)
+    } else {
+        vehicle_surface_z(game, v)
+    }
+}
+
 /// Rendered elevation of an explosion of the destroyed vehicle `w` in px.
 ///
 /// A ground vehicle is drawn on the surface it stood on, so its blast starts
@@ -122,7 +133,7 @@ pub fn vehicle_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
 /// therefore used whenever the wreck sits on one.
 pub fn wreck_z(game: &Game, w: &crate::entities::Wreck) -> f64 {
     if w.kind == constants::VehicleKind::Helicopter {
-        return helicopter_altitude(game);
+        return helicopter_altitude_px(max_height(&game.board));
     }
     let tile = game.board.world_to_tile(w.x, w.y);
     match deck_z_of(&game.board, tile) {
@@ -136,7 +147,14 @@ pub fn wreck_z(game: &Game, w: &crate::entities::Wreck) -> f64 {
 /// Measured above the highest terrain of the board, so a helicopter never
 /// hides behind a peak no matter where it crosses the map.
 pub(super) fn helicopter_altitude(game: &Game) -> f64 {
-    max_height(&game.board) + constants::HELICOPTER_ALTITUDE_PX
+    helicopter_altitude_px(max_height(&game.board))
+}
+
+/// Flight altitude over an already known board height: the same arithmetic as
+/// [`helicopter_altitude`], callable without rescanning the board when the
+/// caller caches [`max_height`] once per level.
+pub(super) fn helicopter_altitude_px(max_height_px: f64) -> f64 {
+    max_height_px + constants::HELICOPTER_ALTITUDE_PX
 }
 
 // ---------------------------------------------------------------------------
@@ -242,11 +260,12 @@ pub(super) fn push_vehicle(
     game: &Game,
     v: &crate::entities::Vehicle,
     rotor_phase: f64,
+    max_height_px: f64,
     mesh: &mut TriangleSoup,
     lines: &mut Vec<(AlphaVertex, AlphaVertex)>,
 ) {
     let color = constants::player_color(v.owner);
-    let z = vehicle_z(game, v);
+    let z = vehicle_z_with_height(game, v, max_height_px);
     let (x, y) = (v.x, v.y);
     match v.kind {
         constants::VehicleKind::Tank => push_tank(game, v, mesh, lines, x, y, z, color),

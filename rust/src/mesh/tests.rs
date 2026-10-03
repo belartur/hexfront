@@ -105,7 +105,7 @@ fn helicopter_has_slender_hull_and_spinning_rotor() {
         None,
     ));
     let mut first = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut first);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut first);
     // Opaque hull + canopy + tail boom + fin + skid rails + mast: clearly
     // more than the old single flat disc (12 triangles = 36 vertices).
     assert!(
@@ -168,7 +168,7 @@ fn helicopter_has_slender_hull_and_spinning_rotor() {
     }
     // Advancing the phase rotates the main blades.
     let mut second = DynamicMesh::default();
-    build_dynamic(&game, 0.7, &mut second);
+    build_dynamic(&game, 0.7, max_height(&game.board), &mut second);
     assert_eq!(second.lines.len(), 7);
     let endpoints = |mesh: &DynamicMesh| -> Vec<(f32, f32, f32, f32)> {
         blades(mesh)
@@ -214,7 +214,7 @@ fn helicopter_tail_trails_behind_flight_heading() {
         "heading {fx},{fy} misses waypoint {dx},{dy}"
     );
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     // Distance of a stroke midpoint along the heading.
     let along = |p: &(AlphaVertex, AlphaVertex)| {
         let (mx, my) = (
@@ -317,7 +317,7 @@ fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
         "shadow {low_shadow}/{hill_shadow} not below the hull {alt}"
     );
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     // The shadow is a flat silhouette (blades + skids + tail boom + fin
     // + hull), not one plain disc, and every piece is black, 70/255.
     let per_heli = 7 * 6; // seven oriented rectangles, two triangles each
@@ -347,7 +347,7 @@ fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
     );
     // The blade part of the silhouette follows the rotor phase.
     let mut spun = DynamicMesh::default();
-    build_dynamic(&game, 0.9, &mut spun);
+    build_dynamic(&game, 0.9, max_height(&game.board), &mut spun);
     assert_eq!(spun.shadow.vertices.len(), dynamic.shadow.vertices.len());
     let coords = |mesh: &DynamicMesh| -> Vec<(f32, f32)> {
         mesh.shadow
@@ -372,7 +372,12 @@ fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
         None,
     ));
     let mut tank_mesh = DynamicMesh::default();
-    build_dynamic(&tank_game, 0.0, &mut tank_mesh);
+    build_dynamic(
+        &tank_game,
+        0.0,
+        max_height(&tank_game.board),
+        &mut tank_mesh,
+    );
     assert!(
         tank_mesh.shadow.vertices.is_empty(),
         "a ground vehicle needs no shadow disc"
@@ -402,7 +407,7 @@ fn helicopter_shadow_blades_follow_the_rotor_phase() {
     // phase, so every blade tip must have a shadow right below it.
     for phase in [0.0, 1.1, 3.7] {
         let mut dynamic = DynamicMesh::default();
-        build_dynamic(&game, phase, &mut dynamic);
+        build_dynamic(&game, phase, max_height(&game.board), &mut dynamic);
         let top = dynamic
             .lines
             .iter()
@@ -475,7 +480,7 @@ fn tank_gun_trains_on_the_fought_enemy() {
     let (ax, ay) = tank_aim(&game, &game.vehicles[0], (fx, fy));
     assert!(ax > 0.999 && ay.abs() < 1e-9, "gun aim {ax},{ay}");
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     // Keep only the parts of the first tank: the enemy sits 120 px away
     // and its own barrel stays outside this radius.
     let (mut along_gun, mut across_gun) = (f64::NEG_INFINITY, 0.0f64);
@@ -561,7 +566,7 @@ fn tank_parts_stack_on_the_chassis_with_details() {
         None,
     ));
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     // Chassis (two tracks, hull, deck, glacis) plus turret, cupola,
     // bustle, barrel and muzzle brake: far more than the two plain
     // boxes the tank used to be (36 vertices).
@@ -620,7 +625,7 @@ fn buffer_shares_the_tank_chassis_without_a_gun() {
         None,
     ));
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     // The healing cross (rules.md section 5.4) marks the support role
     // and floats where a tank's turret would be, not above the whole
     // vehicle twice over.
@@ -667,7 +672,7 @@ fn hovercraft_floats_on_a_skirt_with_a_spinning_fan() {
         None,
     ));
     let mut first = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut first);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut first);
     // Skirt + hull + bow + cockpit + fan duct + fan plate + rudder: far more
     // than the two plain discs the craft used to be (24 triangles = 72
     // vertices).
@@ -733,7 +738,7 @@ fn hovercraft_floats_on_a_skirt_with_a_spinning_fan() {
         assert!((len - HOVER_FAN_R).abs() < 1e-3, "fan blade length {len}");
     }
     let mut second = DynamicMesh::default();
-    build_dynamic(&game, 0.5, &mut second);
+    build_dynamic(&game, 0.5, max_height(&game.board), &mut second);
     assert_ne!(
         first_blades,
         blades(&second),
@@ -765,7 +770,7 @@ fn hovercraft_bow_and_fan_follow_the_travel_heading() {
     let (vx, vy) = (game.vehicles[0].x, game.vehicles[0].y);
     let (fx, fy) = vehicle_heading(&game, &game.vehicles[0]);
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     // Distance of a world point along the travel heading.
     let along = |x: f64, y: f64| (x - vx) * fx + (y - vy) * fy;
     // The glazed cockpit (its own fixed tint) is on the foredeck, so it sits
@@ -830,7 +835,7 @@ fn range_fills_are_opaque_masks_and_outlines_use_owner_colour() {
     game.buildings
         .push(Building::new(BuildingKind::HealTower, Some(0), 8, 8, 10.0));
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     assert_eq!(dynamic.range_turret.vertices.len(), 3 * 40 * 3);
     assert!(!dynamic.range_heal.vertices.is_empty());
     // Fills are binary offscreen masks: fully opaque and colourless, so the
@@ -909,7 +914,7 @@ fn obstacles_float_above_terrain_with_details() {
         board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(*kind));
         let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
         let mut dynamic = DynamicMesh::default();
-        build_dynamic(&game, 0.0, &mut dynamic);
+        build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
         let top = tile_top_z(&game.board, tile);
         assert!(
             !dynamic.opaque.vertices.is_empty(),
@@ -957,7 +962,7 @@ fn obstacles_float_above_terrain_with_details() {
     board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Wall));
     let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     let top = tile_top_z(&game.board, tile);
     let raised = dynamic
         .opaque
@@ -984,7 +989,7 @@ fn fire_trap_has_no_static_model() {
     board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::TrapFire));
     let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     assert!(
         dynamic.opaque.vertices.is_empty(),
         "a fire trap must not leave an opaque base behind"
@@ -1017,7 +1022,7 @@ fn mine_changes_shape_with_the_terrain() {
         board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Mine));
         let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
         let mut dynamic = DynamicMesh::default();
-        build_dynamic(&game, 0.0, &mut dynamic);
+        build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
         let top = tile_top_z(&game.board, tile);
         let tall = dynamic
             .opaque
@@ -1078,7 +1083,7 @@ fn flat_building_parts_float_above_terrain() {
         .collect();
     let game = Game::new(board, vec![Player::new(0, true)], buildings, 1);
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     assert!(!dynamic.opaque.vertices.is_empty());
     // Every foundation slab floats like the flat obstacle markers: the
     // lowest opaque vertex of the whole scene sits at the shared lift
@@ -1115,7 +1120,7 @@ fn every_building_kind_fits_its_field() {
             1,
         );
         let mut dynamic = DynamicMesh::default();
-        build_dynamic(&game, 0.0, &mut dynamic);
+        build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
         assert!(
             !dynamic.opaque.vertices.is_empty(),
             "{kind:?} has no geometry"
@@ -1172,8 +1177,8 @@ fn building_mesh_is_deterministic() {
     let game = Game::new(board, vec![Player::new(0, true)], buildings, 1);
     let mut first = DynamicMesh::default();
     let mut second = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut first);
-    build_dynamic(&game, 0.0, &mut second);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut first);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut second);
     assert_eq!(first.opaque.vertices.len(), second.opaque.vertices.len());
     assert_eq!(first.lines.len(), second.lines.len());
     for (a, b) in first
@@ -1206,7 +1211,7 @@ fn turret_weapon_tip(kind: crate::entities::BuildingKind, aim: Option<(f64, f64)
     }
     let game = Game::new(board, vec![Player::new(0, true)], vec![b], 1);
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     let weapon_base = tile_top_z(&game.board, tile)
         + constants::OBSTACLE_LIFT
         + BLD_FOUND_H
@@ -1719,7 +1724,7 @@ fn helicopter_shadow_over_a_bridge_is_clipped_to_the_deck() {
         None,
     ));
     let mut dynamic = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut dynamic);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     let deck = bridge_deck_quad(&game.board, &game.board.bridges[0], mid);
     assert!(
         !dynamic.shadow.vertices.is_empty(),
@@ -1755,7 +1760,7 @@ fn helicopter_shadow_over_a_bridge_is_clipped_to_the_deck() {
     game.vehicles[0].x = gx;
     game.vehicles[0].y = gy;
     let mut open = DynamicMesh::default();
-    build_dynamic(&game, 0.0, &mut open);
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut open);
     let span = |mesh: &DynamicMesh, (ox, oy): (f64, f64)| {
         let mut widest: f64 = 0.0;
         for v in mesh.shadow.vertices.iter() {

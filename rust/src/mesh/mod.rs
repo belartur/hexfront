@@ -726,7 +726,11 @@ pub fn push_beam(
     ));
 }
 /// Rebuild the dynamic mesh of one frame (buildings, obstacles, vehicles).
-pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
+///
+/// `max_height_px` is the cached [`terrain::max_height`] of the board: terrain
+/// never changes during a match, so the caller computes it once per level and
+/// hands it down instead of rescanning the board per helicopter per frame.
+pub fn build_dynamic(game: &Game, rotor_phase: f64, max_height_px: f64, out: &mut DynamicMesh) {
     out.clear();
     let mut order: Vec<usize> = (0..game.buildings.len()).collect();
     order.sort_by(|a, b| {
@@ -739,16 +743,24 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, out: &mut DynamicMesh) {
     for i in order {
         push_building(game, &game.buildings[i], &mut out.opaque, &mut out.lines);
     }
-    for (tile, t) in game.board.tiles.iter() {
-        if t.obstacle.is_some() {
-            push_obstacle(game, *tile, &mut out.opaque, &mut out.lines);
-        }
+    // Obstacles come from the game index, not from a full board scan: the
+    // board only changes on wall destruction / mine explosion, which keep the
+    // index in sync (see `Game::remove_obstacle_tile`).
+    for tile in game.obstacle_tiles.iter() {
+        push_obstacle(game, *tile, &mut out.opaque, &mut out.lines);
     }
     for v in game.vehicles.iter() {
         if v.dead {
             continue;
         }
-        push_vehicle(game, v, rotor_phase, &mut out.opaque, &mut out.lines);
+        push_vehicle(
+            game,
+            v,
+            rotor_phase,
+            max_height_px,
+            &mut out.opaque,
+            &mut out.lines,
+        );
         if v.kind == constants::VehicleKind::Helicopter {
             push_helicopter_shadow(game, v, rotor_phase, &mut out.shadow);
         }

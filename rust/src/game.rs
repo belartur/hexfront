@@ -58,6 +58,19 @@ pub struct Game {
     pub buildings: Vec<Building>,
     /// Building index by tile.
     pub building_at: HashMap<Tile, usize>,
+    /// Tiles carrying a static obstacle, in deterministic (sorted) order.
+    ///
+    /// The board is immutable during a match except for destroyed walls and
+    /// exploded mines (see [`Game::update_vehicles`] and [`Game::check_mine`]),
+    /// which remove their tile from this list, so the presentation layer can
+    /// iterate obstacles without scanning the whole board every frame.
+    pub obstacle_tiles: Vec<Tile>,
+    /// Tiles carrying a fire trap, in deterministic (sorted) order.
+    ///
+    /// Fire traps are permanent (rules.md section 4), so this list never
+    /// changes during a match; it feeds the campfire emitters of [`crate::fx`]
+    /// without a full board scan per frame.
+    pub fire_tiles: Vec<Tile>,
     /// All vehicles (dead ones are removed at the end of the step).
     pub vehicles: Vec<Vehicle>,
     /// Turret shots in flight, resolved on impact.
@@ -102,11 +115,32 @@ impl Game {
             .enumerate()
             .map(|(i, b)| (b.tile, i))
             .collect();
+        let mut obstacle_tiles: Vec<Tile> = board
+            .tiles
+            .iter()
+            .filter(|(_, t)| t.obstacle.is_some())
+            .map(|(tile, _)| *tile)
+            .collect();
+        obstacle_tiles.sort();
+        let mut fire_tiles: Vec<Tile> = obstacle_tiles
+            .iter()
+            .copied()
+            .filter(|tile| {
+                board
+                    .tiles
+                    .get(tile)
+                    .and_then(|t| t.obstacle.as_ref())
+                    .is_some_and(|o| o.kind == ObstacleKind::TrapFire)
+            })
+            .collect();
+        fire_tiles.sort();
         Self {
             board,
             players,
             buildings,
             building_at,
+            obstacle_tiles,
+            fire_tiles,
             vehicles: Vec::new(),
             projectiles: Vec::new(),
             wrecks: Vec::new(),
@@ -119,6 +153,17 @@ impl Game {
             sandbox: false,
         }
     }
+    /// Remove `tile` from the obstacle index, if present.
+    ///
+    /// Called whenever the simulation clears an obstacle (a destroyed wall or
+    /// an exploded mine): the board stays the source of truth, this only keeps
+    /// the presentation index in sync so it never points at an empty field.
+    fn remove_obstacle_tile(&mut self, tile: Tile) {
+        if let Some(i) = self.obstacle_tiles.iter().position(|t| *t == tile) {
+            self.obstacle_tiles.swap_remove(i);
+        }
+    }
+
     #[allow(dead_code)]
     /// The human player.
     pub fn human_player(&self) -> &Player {
@@ -675,8 +720,11 @@ impl Game {
                             .and_then(|x| x.obstacle.as_ref())
                             .map(|o| o.hp <= 0)
                             .unwrap_or(false);
-                        if destroyed && let Some(tile_ref) = self.board.tiles.get_mut(&t) {
-                            tile_ref.obstacle = None;
+                        if destroyed {
+                            if let Some(tile_ref) = self.board.tiles.get_mut(&t) {
+                                tile_ref.obstacle = None;
+                            }
+                            self.remove_obstacle_tile(t);
                         }
                     }
                     continue;
@@ -758,6 +806,7 @@ impl Game {
             if let Some(t) = self.board.tiles.get_mut(&tile) {
                 t.obstacle = None;
             }
+            self.remove_obstacle_tile(tile);
         }
     }
     /// Nearest enemy within detection radius (rules.md sec. 9).
@@ -976,6 +1025,121 @@ mod tests {
         for _ in 0..steps {
             game.update(constants::SIM_DT);
         }
+    }
+    #[test]
+    fn obstacle_index_matches_board_scan() {
+        // Every repo map: the index built in `Game::new` lists exactly the
+        // fields a full board scan would find.
+        for path in crate::mapfile::list_maps(None) {
+            let game = crate::mapfile::load_game(&path).expect("repo map must load");
+            let mut scan: Vec<Tile> = game
+                .board
+                .tiles
+                .iter()
+                .filter(|(_, t)| t.obstacle.is_some())
+                .map(|(tile, _)| *tile)
+                .collect();
+            scan.sort();
+            assert_eq!(
+                game.obstacle_tiles,
+                scan,
+                "obstacle index on {}",
+                path.display()
+            );
+            let mut fires: Vec<Tile> = scan
+                .iter()
+                .copied()
+                .filter(|tile| {
+                    game.board.tiles[tile]
+                        .obstacle
+                        .as_ref()
+                        .is_some_and(|o| o.kind == ObstacleKind::TrapFire)
+                })
+                .collect();
+            fires.sort();
+            assert_eq!(game.fire_tiles, fires, "fire index on {}", path.display());
+        }
+    }
+    #[test]
+    fn obstacle_index_drops_destroyed_walls_and_exploded_mines() {
+        // Wall destruction and mine explosion clear the board tile and must
+        // drop it from the index too; fire traps are permanent and stay.
+        let mut board = flat_board(10, 10, 1);
+        let wall = (2, 2);
+        let mine = (3, 3);
+        let fire = (4, 4);
+        board.tiles.get_mut(&wall).unwrap().obstacle =
+            Some(crate::board::Obstacle::new(ObstacleKind::Wall));
+        board.tiles.get_mut(&mine).unwrap().obstacle =
+            Some(crate::board::Obstacle::new(ObstacleKind::Mine));
+        board.tiles.get_mut(&fire).unwrap().obstacle =
+            Some(crate::board::Obstacle::new(ObstacleKind::TrapFire));
+        let mut game = make_game(board);
+        assert!(game.obstacle_tiles.contains(&wall));
+        assert!(game.obstacle_tiles.contains(&mine));
+        assert!(game.fire_tiles.contains(&fire));
+        // Mine: place a tank next to the mine centre and trigger it directly.
+        // NB: `check_mine` only explodes when a vehicle stands within the trigger
+        // radius, and the vehicle must survive the blast to be reused below.
+        let (mx, my) = game.board.center_world(mine);
+        game.vehicles.push(crate::entities::Vehicle::new(
+            crate::constants::VehicleKind::Tank,
+            0,
+            1000.0,
+            Vec::new(),
+            (mx, my),
+            Some(mine),
+        ));
+        game.check_mine(mine);
+        assert!(
+            game.board.tiles[&mine].obstacle.is_none(),
+            "mine must explode"
+        );
+        assert!(
+            !game.obstacle_tiles.contains(&mine),
+            "exploded mine must leave the index"
+        );
+        assert!(game.fire_tiles.contains(&fire), "fire traps are permanent");
+        // Wall: smash it through the wall-attack path.
+        game.board.tiles.get_mut(&wall).unwrap().obstacle =
+            Some(crate::board::Obstacle::new(ObstacleKind::Wall));
+        if let Some(t) = game.board.tiles.get_mut(&wall) {
+            // One hit point left: the next shot destroys it.
+            if let Some(o) = t.obstacle.as_mut() {
+                o.hp = 1;
+            }
+        }
+        // Park a vehicle on the wall tile and force the attack cooldown over.
+        // The wall sits on the vehicle's own field here, so it also counts as the
+        // previous field: give the vehicle a blocked route off the wall (a wall
+        // tile never lets a tank pass), which keeps it parked on the wall.
+        // NB: the route destination must be a neighbour of the wall tile, so the
+        // wall-attack branch (not the movement branch) owns the vehicle.
+        game.vehicles[0].x = game.board.center_world(wall).0;
+        game.vehicles[0].y = game.board.center_world(wall).1;
+        game.vehicles[0].wall_timer = constants::WALL_ATTACK_INTERVAL;
+        // A wall never lets a tank onto the next field, so any route whose next
+        // waypoint leaves the wall tile keeps the vehicle parked on the wall.
+        game.vehicles[0].route = vec![(3, 2)];
+        game.vehicles[0].route_index = 0;
+        let wall_units_before = game.obstacle_tiles.len();
+        for _ in 0..(constants::WALL_ATTACK_INTERVAL / constants::SIM_DT).ceil() as usize {
+            game.vehicles[0].wall_timer = constants::WALL_ATTACK_INTERVAL;
+            game.update(constants::SIM_DT);
+            if game.board.tiles[&wall].obstacle.is_none() {
+                break;
+            }
+        }
+        assert!(game.board.tiles[&wall].obstacle.is_none(), "wall must fall");
+        assert!(
+            !game.obstacle_tiles.contains(&wall),
+            "destroyed wall must leave the index"
+        );
+        assert_eq!(
+            game.obstacle_tiles.len(),
+            wall_units_before - 1,
+            "only the wall tile leaves the index"
+        );
     }
     fn flat_board(cols: i32, rows: i32, h: i32) -> Board {
         let mut b = Board::new(cols, rows);
