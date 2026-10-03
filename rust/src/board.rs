@@ -3,7 +3,7 @@
 //! Ground-movement rules implemented in [`Board::passable`] follow rules.md
 //! sections 4, 5, 7 (ramps) and 8 (bridges).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::constants::{self, VehicleKind};
 use crate::hexgrid::{self, Tile};
@@ -140,7 +140,7 @@ impl Bridge {
 /// it (by the normal terrain rules) — never one way and then the other:
 /// the mode a vehicle enters a bridge with is kept until it leaves the
 /// bridge again, so a deck is never entered from the side.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Crossing {
     /// On the terrain; a field carrying a fragment is crossed under the deck.
     Ground,
@@ -148,7 +148,7 @@ pub enum Crossing {
     Deck,
 }
 
-/// Rebuild the tile route of a breadth-first search from its parent links,
+/// Rebuild the tile route of a shortest-path search from its parent links,
 /// leaving out the source field.
 fn walk_path(
     prev: &HashMap<(Tile, Crossing), (Tile, Crossing)>,
@@ -163,6 +163,61 @@ fn walk_path(
     }
     path.reverse();
     path.remove(0); // drop the source field
+    path
+}
+
+/// One entry of the A* open set of [`Board::find_path`].
+///
+/// `BinaryHeap` is a max-heap, so the ordering is reversed to pop the lowest
+/// `f = g + h` first. Ties break on `(h, tile, mode)`, which keeps the search
+/// deterministic for a given board: equal-length routes resolve to the same
+/// tiles, and the AI scores built on them stay reproducible for a level seed
+/// (rules.md section 13.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenEntry {
+    /// Estimated total cost `g + h` (both in whole steps).
+    f: i32,
+    /// Heuristic remainder `h` (whole steps, for tie-breaking).
+    h: i32,
+    /// Field of the state.
+    tile: Tile,
+    /// Crossing mode of the state (rules.md section 8).
+    mode: Crossing,
+}
+
+impl Ord for OpenEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reversed: the smallest `f` must pop first out of the max-heap.
+        (other.f, other.h, other.tile, other.mode).cmp(&(self.f, self.h, self.tile, self.mode))
+    }
+}
+
+impl PartialOrd for OpenEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Greedy hex-grid walk src -> dst, one neighbour closer per hop.
+///
+/// Used for helicopters only ([`Board::find_path`]): they ignore the terrain
+/// (rules.md section 5.2), so every hop is legal and any walk that shortens
+/// the hex-grid distance by one per hop is a shortest route. The neighbour
+/// order is deterministic, hence the whole walk is.
+fn helicopter_path(src: Tile, dst: Tile) -> Vec<Tile> {
+    let mut path = Vec::new();
+    let mut cur = src;
+    while cur != dst {
+        let d0 = hexgrid::hex_distance(cur.0, cur.1, dst.0, dst.1);
+        // First neighbour that gets closer: deterministic and always exists
+        // while `cur != dst` on a connected hex grid.
+        let next = hexgrid::neighbors(cur.0, cur.1)
+            .into_iter()
+            .find(|n| hexgrid::hex_distance(n.0, n.1, dst.0, dst.1) < d0)
+            .expect("a hex grid always has a neighbour closer to the target");
+        path.push(next);
+        cur = next;
+    }
     path
 }
 
@@ -620,7 +675,7 @@ impl Board {
         }
         t.height > 0
     }
-    /// Breadth-first shortest route src -> dst for vehicle `kind`.
+    /// Shortest route src -> dst for vehicle `kind` (A* over uniform steps).
     ///
     /// Returns the list of tiles *after* the source, including the
     /// destination, or `None` when no road exists. Mines, traps and walls
@@ -631,28 +686,61 @@ impl Board {
     /// rules.md section 8 keeps a vehicle either on a deck or under it for
     /// a whole crossing: a field beside a bridge is reachable both on the
     /// ground and on the deck, and only the route's own history decides
-    /// which of the two is drivable.
+    /// which of the two is drivable. Every hop costs one, so A* with the
+    /// hex-grid distance as the heuristic returns the same shortest length
+    /// as a breadth-first search while steering the open set towards the
+    /// destination instead of flooding the board in rings.
     pub fn find_path(&self, src: Tile, dst: Tile, kind: VehicleKind) -> Option<Vec<Tile>> {
         if src == dst || !self.contains(src) || !self.contains(dst) {
             return None;
         }
+        // Helicopters ignore the terrain (rules.md section 5.2): every hop is
+        // legal, so any route of `hex_distance` steps is optimal and there is
+        // nothing to search for.
+        if kind == VehicleKind::Helicopter {
+            return Some(helicopter_path(src, dst));
+        }
         let start = (src, Crossing::Ground);
         let mut prev: HashMap<(Tile, Crossing), (Tile, Crossing)> = HashMap::new();
-        let mut queue: VecDeque<(Tile, Crossing)> = VecDeque::from([start]);
-        while let Some(cur) = queue.pop_front() {
-            for n in self.neighbors(cur.0) {
-                let Some(mode) = self.step(cur.0, n, kind, cur.1) else {
+        let mut best_g: HashMap<(Tile, Crossing), i32> = HashMap::from([(start, 0)]);
+        let mut open = BinaryHeap::from([OpenEntry {
+            f: hexgrid::hex_distance(src.0, src.1, dst.0, dst.1),
+            h: hexgrid::hex_distance(src.0, src.1, dst.0, dst.1),
+            tile: src,
+            mode: Crossing::Ground,
+        }]);
+        while let Some(cur) = open.pop() {
+            let state = (cur.tile, cur.mode);
+            // Lazy deletion: skip an entry whose `g` (`f - h`) is worse than
+            // the best one recorded for this state, i.e. a stale duplicate
+            // pushed before a shorter route to the same state was found. The
+            // state is always present: a successor is only pushed right after
+            // its `g` is stored.
+            let g = best_g[&state];
+            if cur.f - cur.h != g {
+                continue;
+            }
+            if cur.tile == dst {
+                return Some(walk_path(&prev, start, state));
+            }
+            for n in self.neighbors(cur.tile) {
+                let Some(mode) = self.step(cur.tile, n, kind, cur.mode) else {
                     continue;
                 };
                 let next = (n, mode);
-                if prev.contains_key(&next) {
+                let next_g = g + 1;
+                if best_g.get(&next).is_some_and(|old| next_g >= *old) {
                     continue;
                 }
-                prev.insert(next, cur);
-                if n == dst {
-                    return Some(walk_path(&prev, start, next));
-                }
-                queue.push_back(next);
+                best_g.insert(next, next_g);
+                prev.insert(next, state);
+                let h = hexgrid::hex_distance(n.0, n.1, dst.0, dst.1);
+                open.push(OpenEntry {
+                    f: next_g + h,
+                    h,
+                    tile: n,
+                    mode,
+                });
             }
         }
         None
@@ -764,6 +852,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn astar_returns_shortest_routes_and_greedy_heli_walks() {
+        // Open land: A* must match the hex-grid distance, and the greedy
+        // helicopter walk must be optimal too (it shortens the distance by
+        // one on every hop).
+        let board = flat_board(20, 20);
+        for (src, dst) in [((0, 0), (19, 19)), ((2, 3), (17, 5)), ((10, 0), (0, 10))] {
+            let want = hexgrid::hex_distance(src.0, src.1, dst.0, dst.1) as usize;
+            for kind in [
+                VehicleKind::Tank,
+                VehicleKind::Hovercraft,
+                VehicleKind::Buffer,
+            ] {
+                let path = board.find_path(src, dst, kind).expect("open land route");
+                assert_eq!(path.len(), want, "{kind:?} {src:?} -> {dst:?}");
+                assert_route_rules(&board, kind, src, &path);
+            }
+            let heli = board
+                .find_path(src, dst, VehicleKind::Helicopter)
+                .expect("heli route");
+            assert_eq!(heli.len(), want, "heli {src:?} -> {dst:?}");
+        }
+        // Unreachable: a tank on an isolated height-1 island has no road to
+        // the mainland, while a helicopter still flies over. (A hovercraft
+        // only crosses shores at h=1, so a height-2 wall stops it too.)
+        let mut cut = flat_board(10, 10);
+        for r in 0..10 {
+            cut.tiles.get_mut(&(5, r)).unwrap().height = 2;
+        }
+        assert!(cut.find_path((0, 0), (9, 9), VehicleKind::Tank).is_none());
+        assert!(
+            cut.find_path((0, 0), (9, 9), VehicleKind::Hovercraft)
+                .is_none()
+        );
+        assert!(
+            cut.find_path((0, 0), (9, 9), VehicleKind::Helicopter)
+                .is_some()
+        );
+        // Determinism: the same query twice resolves to the same tiles, so
+        // AI scores built on the route stay reproducible (rules.md 13.2).
+        let board = bridge_board(0);
+        let (a, b) = ((0, 0), (9, 9));
+        let first = board
+            .find_path(a, b, VehicleKind::Hovercraft)
+            .expect("route");
+        let second = board
+            .find_path(a, b, VehicleKind::Hovercraft)
+            .expect("route");
+        assert_eq!(first, second);
     }
 
     #[test]

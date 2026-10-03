@@ -1,8 +1,10 @@
 //! Headless mesh-build baseline of the GPU path.
 //!
 //! Measures pure CPU cost of [`build_terrain`] (once per map) plus
-//! [`build_dynamic`] (every frame) per repository map. It only prints numbers,
-//! never asserts, so plain `cargo test` skips it; run explicitly with:
+//! [`build_dynamic`] (every frame) per repository map, and the `find_path`
+//! cost per (source, target, kind) pair over the buildings of each map. It
+//! only prints numbers, never asserts, so plain `cargo test` skips it; run
+//! explicitly with:
 //!
 //! ```bash
 //! cd rust && cargo test --release render_baseline -- --ignored --nocapture
@@ -60,8 +62,31 @@ fn bench_game(name: &str, game: &crate::game::Game, frames: usize) {
         std::hint::black_box(campfire_count(game));
     });
     let tverts: usize = terrain.chunks.iter().map(|c| c.soup.vertices.len()).sum();
+    // Pathfinding baseline: every ordered building pair, like one AI
+    // decision over all pairs (kinds come from the source buildings).
+    let mut pairs = 0;
+    let mut path_us_total = 0.0;
+    let mut path_us_worst: f64 = 0.0;
+    let mut unreachable = 0;
+    for si in 0..game.buildings.len() {
+        for di in 0..game.buildings.len() {
+            if si == di {
+                continue;
+            }
+            let src = &game.buildings[si];
+            let dst = &game.buildings[di];
+            let kind = crate::entities::vehicle_kind_of(src.kind);
+            let start = std::time::Instant::now();
+            let found = game.board.find_path(src.tile, dst.tile, kind).is_some();
+            let us = start.elapsed().as_secs_f64() * 1e6;
+            pairs += 1;
+            path_us_total += us;
+            path_us_worst = path_us_worst.max(us);
+            unreachable += (!found) as usize;
+        }
+    }
     println!(
-        "{}: tiles={} terrain={:.1} ms ({} verts) dynamic={:.3} ms/frame ({} verts) span={:.3} height={:.3} camp={:.3} ms/frame ({} spots) cached_span=({:.0},{:.0}) cached_height={:.0}",
+        "{}: tiles={} terrain={:.1} ms ({} verts) dynamic={:.3} ms/frame ({} verts) span={:.3} height={:.3} camp={:.3} ms/frame ({} spots) cached_span=({:.0},{:.0}) cached_height={:.0} path={:.1}us/pair worst={:.0}us unreachable={}/{}",
         name,
         game.board.tiles.len(),
         terrain_ms,
@@ -75,6 +100,10 @@ fn bench_game(name: &str, game: &crate::game::Game, frames: usize) {
         span.0,
         span.1,
         height,
+        path_us_total / pairs.max(1) as f64,
+        path_us_worst,
+        unreachable,
+        pairs,
     );
 }
 

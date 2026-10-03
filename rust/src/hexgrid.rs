@@ -96,7 +96,6 @@ pub fn offset_to_axial(q: i32, r: i32) -> (i32, i32) {
     (q, r - (q - (q & 1)) / 2)
 }
 
-#[allow(dead_code)]
 /// Hex-grid distance (number of steps) between two tiles.
 pub fn hex_distance(q1: i32, r1: i32, q2: i32, r2: i32) -> i32 {
     let (qa1, ra1) = offset_to_axial(q1, r1);
