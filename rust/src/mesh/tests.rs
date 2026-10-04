@@ -23,7 +23,7 @@ use crate::board::Board;
 use crate::board::Crossing;
 use crate::constants;
 use crate::hexgrid::{self, Tile};
-use crate::math::dist2;
+use crate::math::{dist, dist2};
 
 #[test]
 fn billboard_quads_are_flat_in_the_depth_buffer() {
@@ -1669,7 +1669,7 @@ fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
     let modes = route_crossings(&board, VehicleKind::Tank, Some(a), Crossing::Ground, &route);
     for i in 0..route.len() - 1 {
         assert_eq!(
-            waypoint_z(&board, &route, i, modes[i + 1]),
+            waypoint_z(&board, route[i], modes[i + 1]),
             bridge_deck_z(&board.bridges[0]),
             "waypoint {i} left the deck"
         );
@@ -1677,7 +1677,7 @@ fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
     // The far end is land again, so the vehicle has already left the deck.
     assert_eq!(modes[route.len()], Crossing::Deck);
     assert_eq!(
-        waypoint_z(&board, &route, route.len() - 1, modes[route.len()]),
+        waypoint_z(&board, route[route.len() - 1], modes[route.len()]),
         tile_top_z(&board, b)
     );
     // A route crossing under the bridge enters its fragment from the
@@ -1705,7 +1705,7 @@ fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
     );
     for i in 0..under.len() {
         assert_eq!(
-            waypoint_z(&board, &under, i, modes[i + 1]),
+            waypoint_z(&board, under[i], modes[i + 1]),
             0.0,
             "waypoint {i} climbed"
         );
@@ -1736,7 +1736,7 @@ fn route_line_of_a_vehicle_already_on_the_bridge_keeps_riding_the_deck() {
     assert_eq!(lines.len(), 3, "one line per remaining leg");
     for (i, l) in lines.iter().enumerate() {
         assert!(
-            (f64::from(l.1.z) - deck).abs() < 1e-6 || i == lines.len() - 1,
+            (f64::from(l.1.z) - deck - constants::ROUTE_LIFT).abs() < 1e-5 || i == lines.len() - 1,
             "leg {i} left the deck to z={}",
             f64::from(l.1.z)
         );
@@ -1754,19 +1754,184 @@ fn route_line_of_a_vehicle_already_on_the_bridge_keeps_riding_the_deck() {
     let mut lines = Vec::new();
     push_paths(&game, &mut lines);
     assert_eq!(lines.len(), 2, "one line per remaining leg");
-    assert!((f64::from(lines[0].0.z) - deck).abs() < 1e-6);
+    let lifted = deck + constants::ROUTE_LIFT;
+    assert!((f64::from(lines[0].0.z) - lifted).abs() < 1e-5);
     for (i, l) in lines.iter().enumerate() {
         let want = if i + 1 == lines.len() {
-            tile_top_z(&game.board, b)
+            tile_top_z(&game.board, b) + constants::ROUTE_LIFT
         } else {
-            deck
+            lifted
         };
         assert!(
-            (f64::from(l.1.z) - want).abs() < 1e-6,
+            (f64::from(l.1.z) - want).abs() < 1e-5,
             "leg {i} drawn at z={} instead of {want}",
             f64::from(l.1.z)
         );
     }
+}
+
+#[test]
+fn route_line_floats_above_the_decals_lying_on_the_ground() {
+    use crate::constants::VehicleKind;
+    use crate::entities::{Player, Vehicle};
+    use crate::game::Game;
+    let (mut board, _a, _b, frags) = bridge_board();
+    // A route crossing *under* the bridge runs along the water, where the deck
+    // drops its shadow right on top of it (rules.md section 8).
+    let west = hexgrid::neighbor(frags[0].0, frags[0].1, 3);
+    let east = hexgrid::neighbor(frags[1].0, frags[1].1, 5);
+    for t in [west, east] {
+        board.tiles.get_mut(&t).unwrap().height = 0;
+    }
+    let (mx, my) = board.center_world(frags[0]);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    game.vehicles.push(Vehicle::new(
+        VehicleKind::Hovercraft,
+        0,
+        30.0,
+        vec![frags[1], east],
+        (mx, my),
+        Some(west),
+    ));
+    let mut lines = Vec::new();
+    push_paths(&game, &mut lines);
+    // Every vertex of the line clears the decals drawn on the same surface, so
+    // none of them can win the depth race and swallow the line.
+    let water = tile_top_z(&game.board, frags[0]);
+    for l in [lines[0].0, lines[0].1] {
+        assert!(
+            f64::from(l.z) >= water + constants::SHADOW_LIFT,
+            "the line at z={} lies under a bridge shadow at {}",
+            f64::from(l.z),
+            water + constants::SHADOW_LIFT
+        );
+        assert!(
+            f64::from(l.z) >= water + constants::OBSTACLE_LIFT,
+            "the line at z={} lies under a ground marker",
+            f64::from(l.z)
+        );
+    }
+    // The whole line floats at one height above the water it runs over, so it
+    // reads as lying on that surface.
+    assert!(
+        (f64::from(lines[0].1.z) - water - constants::ROUTE_LIFT).abs() < 1e-5,
+        "the line left the water surface at z={}",
+        f64::from(lines[0].1.z)
+    );
+}
+
+#[test]
+fn route_line_climbs_a_ramp_as_steeply_as_the_slope() {
+    use crate::constants::VehicleKind;
+    use crate::entities::{Player, Vehicle};
+    use crate::game::Game;
+    let mut board = Board::new(8, 8);
+    for t in board.tiles.clone().keys() {
+        board.tiles.get_mut(t).unwrap().height = 1;
+    }
+    // Low land on one side of the ramp, high land on the other, so the slope
+    // spans the full elevation difference (rules.md section 7).
+    let low = (3, 3);
+    let ramp = (4, 3);
+    let high = (5, 3);
+    board.tiles.get_mut(&low).unwrap().height = 1;
+    board.tiles.get_mut(&high).unwrap().height = 4;
+    board.set_ramp(ramp, low, high);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let (lx, ly) = game.board.center_world(low);
+    game.vehicles.push(Vehicle::new(
+        VehicleKind::Tank,
+        0,
+        10.0,
+        vec![ramp, high],
+        (lx, ly),
+        Some(low),
+    ));
+    let mut lines = Vec::new();
+    push_paths(&game, &mut lines);
+    // The ramp splits into three vertices (entry edge, middle, exit edge), so
+    // the route from the low field onto the high one is four legs: in from the
+    // low field, up to the middle, down off the slope, and out to the high one.
+    assert_eq!(lines.len(), 4, "entry edge, exit edge and the way out");
+    let rise = (game.board.height(high) - game.board.height(low)) as f64 * constants::ELEVATION_PX;
+    let climb = |i: usize| (f64::from(lines[i].1.z) - f64::from(lines[i].0.z)).abs();
+    // The route is level on the low field, climbs the whole rise across the
+    // ramp (legs 1 and 2, the slope being split at its middle) and is level
+    // again on the high field.
+    assert!(
+        (climb(1) + climb(2) - rise).abs() < 1e-5,
+        "the legs rise {} over {rise}",
+        climb(1) + climb(2)
+    );
+    assert!(
+        climb(0) < 1e-5 && climb(3) < 1e-5,
+        "the line kept climbing off the slope: {} and {}",
+        climb(0),
+        climb(3)
+    );
+    // Each half of the split ramp leg is exactly as steep as the drawn slope
+    // itself: the same rise over half its width. A single centre waypoint
+    // would have spread the whole rise over the whole width, i.e. been twice
+    // as flat as the slope the vehicle actually climbs. What has to match is
+    // the steepness per unit of *ground* the line covers, so the widths are
+    // measured horizontally, the way the drawn strip spans the field.
+    let xy = |v: AlphaVertex| (f64::from(v.x), f64::from(v.y));
+    // The ramp leg runs from the entry edge (the end of leg 0) through its
+    // middle (the end of leg 1) to the exit edge (the end of leg 2).
+    //
+    // The point of the split is the *slope*: before it, the route climbed the
+    // whole rise between the field centres, i.e. over twice the width of the
+    // drawn strip and at half its steepness. After it, the rise happens across
+    // the strip alone, so the steepness per unit of ground the line covers is
+    // the drawn slope's own -- measured the same way here, edge to edge.
+    let strip = dist(xy(lines[0].1), xy(lines[2].1));
+    let centres = dist(xy(lines[0].0), xy(lines[2].1));
+    assert!(
+        strip < centres * 0.95,
+        "the route still climbs across {centres}, no better than a centre waypoint ({strip})"
+    );
+    // The whole rise is taken on the slope: level before it, level after it.
+    assert!(
+        (climb(1) + climb(2) - rise).abs() < 1e-5,
+        "the legs rise {} over {rise}",
+        climb(1) + climb(2)
+    );
+    // Both halves of the split are equally steep, so it re-segments the slope
+    // instead of bending it.
+    assert!(
+        (climb(1) - climb(2)).abs() < 1e-5,
+        "the two halves of the slope differ: {} and {}",
+        climb(1),
+        climb(2)
+    );
+    // Entering from the other end flips the edges: the line leaves the high
+    // field, drops across the whole slope and is level again on the low field.
+    let (hx, hy) = game.board.center_world(high);
+    game.vehicles[0].route = vec![ramp, low];
+    game.vehicles[0].x = hx;
+    game.vehicles[0].y = hy;
+    game.vehicles[0].src_tile = Some(high);
+    let mut lines = Vec::new();
+    push_paths(&game, &mut lines);
+    assert_eq!(lines.len(), 4, "entry edge, exit edge and the way out");
+    assert!(
+        (f64::from(lines[0].0.z) - tile_top_z(&game.board, high) - constants::ROUTE_LIFT).abs()
+            < 1e-3,
+        "the line left the high field at z={}",
+        f64::from(lines[0].0.z)
+    );
+    let drop = |i: usize| (f64::from(lines[i].1.z) - f64::from(lines[i].0.z)).abs();
+    assert!(
+        (drop(1) + drop(2) - rise).abs() < 1e-5,
+        "the reversed legs drop {} over {rise}",
+        drop(1) + drop(2)
+    );
+    assert!(
+        drop(0) < 1e-5 && drop(3) < 1e-5,
+        "the reversed line kept dropping off the slope: {} and {}",
+        drop(0),
+        drop(3)
+    );
 }
 
 #[test]
@@ -1863,7 +2028,7 @@ fn helicopter_route_leaves_from_its_shadow_not_from_the_hull() {
     let mut lines = Vec::new();
     push_paths(&game, &mut lines);
     assert_eq!(lines.len(), 2, "one line per remaining leg");
-    assert!((f64::from(lines[0].0.z) - deck).abs() < 1e-6);
+    assert!((f64::from(lines[0].0.z) - deck - constants::ROUTE_LIFT).abs() < 1e-5);
     assert!(
         (f64::from(lines[0].0.z) - vehicle_z(&game, v)).abs() > 1.0,
         "the route still starts at the flying hull"

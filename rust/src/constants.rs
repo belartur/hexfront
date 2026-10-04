@@ -92,6 +92,14 @@ pub const BRIDGE_DECK_LIFT: f64 = 5.0 * UNIT_J_TO_PX;
 /// terrain, so they look faint or vanish (rendering only; objects themselves
 /// come from rules.md sections 1-2).
 pub const OBSTACLE_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
+/// Lift of a drawn route line above the surface it runs on, in px
+/// (rendering only; rules.md has no drawn routes). The line is drawn exactly
+/// on the surface otherwise, which loses the depth race against the decals
+/// lying there -- the bridge shadow ([`SHADOW_LIFT`]) in particular swallowed
+/// a route running under a bridge, and the flat ground markers above it cut
+/// the line into pieces. Above every one of those, yet low enough to read as
+/// lying on the ground.
+pub const ROUTE_LIFT: f64 = 0.6 * UNIT_J_TO_PX;
 /// Fixed flight altitude of a helicopter above the *highest* terrain of the
 /// board in px (rendering only; rules.md section 5.2 makes helicopters
 /// ignore tile heights, so they do not bob up and down over hills). The

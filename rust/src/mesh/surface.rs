@@ -146,15 +146,13 @@ pub fn vehicle_surface_z(game: &Game, v: &crate::entities::Vehicle) -> f64 {
     vehicle_ground_z(game, v.x, v.y)
 }
 
-/// Elevation of the route waypoint `seq[i]`, bridge deck included.
+/// Elevation of the route waypoint `tile`, bridge deck included.
 ///
-/// `mode` is the crossing mode the vehicle reaches `seq[i]` in, as computed
+/// `mode` is the crossing mode the vehicle reaches `tile` in, as computed
 /// by [`route_crossings`]: on a deck the waypoint rides it, a vehicle
 /// crossing *under* a bridge keeps the terrain elevation. A waypoint on a
-/// ramp sits mid-slope (see [`Board::ramp_center_z`]), so a straight
-/// centre-to-centre drive climbs it continuously.
-pub fn waypoint_z(board: &Board, seq: &[Tile], i: usize, mode: Crossing) -> f64 {
-    let tile = seq[i];
+/// ramp sits mid-slope (see [`Board::ramp_center_z`]).
+pub fn waypoint_z(board: &Board, tile: Tile, mode: Crossing) -> f64 {
     if mode == Crossing::Deck
         && let Some(z) = deck_z_of(board, Some(tile))
     {
@@ -164,4 +162,46 @@ pub fn waypoint_z(board: &Board, seq: &[Tile], i: usize, mode: Crossing) -> f64 
         return z;
     }
     tile_top_z(board, tile)
+}
+
+/// Points a drawn route runs through on field `tile`, in world space.
+///
+/// An ordinary field is a single point in its centre. A ramp (rules.md
+/// section 7) is three: the edge the vehicle comes in over, the middle of the
+/// slope and the edge it leaves over. Straight centre-to-centre waypoints would
+/// halve the slope instead -- the vehicle drives onto the ramp across its full
+/// width, from the height of the joined field on one edge to the height on the
+/// other, while a centre point is only halfway up. Splitting on both edges
+/// makes the drawn line climb exactly as steeply as the drawn slope.
+///
+/// `from` is the field the route enters `tile` from, which decides which edge
+/// comes first; the exit edge is the opposite one. `None` (a route with no
+/// known origin) falls back to the a/b order of the ramp.
+///
+/// A field crossed on a bridge deck is flat, so it stays a single point.
+pub fn waypoint_points(
+    board: &Board,
+    tile: Tile,
+    mode: Crossing,
+    from: Option<Tile>,
+) -> Vec<(f64, f64, f64)> {
+    let (cx, cy) = board.center_world(tile);
+    let middle = waypoint_z(board, tile, mode);
+    if mode == Crossing::Deck {
+        return vec![(cx, cy, middle)];
+    }
+    let Some((a, b)) = board.ramps.get(&tile).copied() else {
+        return vec![(cx, cy, middle)];
+    };
+    let Some((pa, pb)) = board.ramp_edges(tile) else {
+        return vec![(cx, cy, middle)];
+    };
+    let z_of = |n: Tile| board.height(n) as f64 * constants::ELEVATION_PX;
+    // Entering over `b` means the route runs b -> a, so the edges swap.
+    let (enter, leave) = if from == Some(b) {
+        ((pb.0, pb.1, z_of(b)), (pa.0, pa.1, z_of(a)))
+    } else {
+        ((pa.0, pa.1, z_of(a)), (pb.0, pb.1, z_of(b)))
+    };
+    vec![enter, (cx, cy, middle), leave]
 }

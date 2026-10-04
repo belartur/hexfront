@@ -1,7 +1,7 @@
 //! The flat per-frame overlays: range fills and outlines, drawn vehicle routes
 //! and projectiles.
 
-use super::surface::{route_crossings, route_prev, route_prev_crossing, waypoint_z};
+use super::surface::{route_crossings, route_prev, route_prev_crossing, waypoint_points};
 use super::vehicles::{helicopter_shadow_surface, vehicle_z};
 use super::{
     AlphaVertex, RangeSoup, TriangleSoup, alpha_vert, push_disc, push_range_disc, push_ring,
@@ -144,15 +144,23 @@ pub(super) fn push_paths(game: &Game, lines: &mut Vec<(AlphaVertex, AlphaVertex)
             route_prev_crossing(game, v),
             seq,
         );
-        let mut prev = (v.x, v.y, route_start_z(game, v));
+        // Every vertex is lifted off the surface it runs on: drawn exactly on
+        // it, the line would lose the depth race to the decals lying there and
+        // vanish under a bridge shadow or a ground marker.
+        let lift = constants::ROUTE_LIFT;
+        let mut prev = (v.x, v.y, route_start_z(game, v) + lift);
+        let mut from = route_prev(v);
         for i in 0..seq.len() {
-            let (wx, wy) = game.board.center_world(seq[i]);
-            let wz = waypoint_z(&game.board, seq, i, modes[i + 1]);
-            lines.push((
-                alpha_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
-                alpha_vert(wx, wy, wz, [255, 255, 255], 255),
-            ));
-            prev = (wx, wy, wz);
+            // A ramp splits into its entry edge, its middle and its exit edge,
+            // so the drawn line climbs as steeply as the slope does.
+            for (wx, wy, wz) in waypoint_points(&game.board, seq[i], modes[i + 1], from) {
+                lines.push((
+                    alpha_vert(prev.0, prev.1, prev.2, [255, 255, 255], 255),
+                    alpha_vert(wx, wy, wz + lift, [255, 255, 255], 255),
+                ));
+                prev = (wx, wy, wz + lift);
+            }
+            from = Some(seq[i]);
         }
     }
 }
