@@ -169,16 +169,22 @@ fn walk_path(
 /// One entry of the A* open set of [`Board::find_path`].
 ///
 /// `BinaryHeap` is a max-heap, so the ordering is reversed to pop the lowest
-/// `f = g + h` first. Ties break on `(h, tile, mode)`, which keeps the search
-/// deterministic for a given board: equal-length routes resolve to the same
-/// tiles, and the AI scores built on them stay reproducible for a level seed
-/// (rules.md section 13.2).
+/// `f = g + h` first. Ties break on `d2` — the squared Euclidean distance
+/// from the field to the destination — as rules.md section 4 requires: when
+/// several routes of equal length exist, the next field of the route is the
+/// one nearest the goal. `tile` and `mode` close the order, which keeps the
+/// search deterministic for a given board, so equal-length routes that the
+/// tie-break leaves equal still resolve to the same tiles and the AI scores
+/// built on them stay reproducible for a level seed (rules.md section 13.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OpenEntry {
     /// Estimated total cost `g + h` (both in whole steps).
     f: i32,
-    /// Heuristic remainder `h` (whole steps, for tie-breaking).
+    /// Heuristic remainder `h` in whole steps, i.e. the hex-grid distance.
     h: i32,
+    /// Squared Euclidean distance to the destination, as the integer key
+    /// [`hexgrid::sq_dist_key`] (tie-break, rules.md section 4).
+    d2: i64,
     /// Field of the state.
     tile: Tile,
     /// Crossing mode of the state (rules.md section 8).
@@ -188,7 +194,7 @@ struct OpenEntry {
 impl Ord for OpenEntry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Reversed: the smallest `f` must pop first out of the max-heap.
-        (other.f, other.h, other.tile, other.mode).cmp(&(self.f, self.h, self.tile, self.mode))
+        (other.f, other.d2, other.tile, other.mode).cmp(&(self.f, self.d2, self.tile, self.mode))
     }
 }
 
@@ -202,18 +208,24 @@ impl PartialOrd for OpenEntry {
 ///
 /// Used for helicopters only ([`Board::find_path`]): they ignore the terrain
 /// (rules.md section 5.2), so every hop is legal and any walk that shortens
-/// the hex-grid distance by one per hop is a shortest route. The neighbour
-/// order is deterministic, hence the whole walk is.
+/// the hex-grid distance by one per hop is a shortest route. Which of the
+/// neighbours that get closer is taken follows the tie-break of rules.md
+/// section 4 — the one nearest the goal by squared Euclidean distance —
+/// so a helicopter flies straight instead of zig-zagging. The neighbour order
+/// is deterministic and [`Ord`] picks the first of equal minima, hence the
+/// whole walk is.
 fn helicopter_path(src: Tile, dst: Tile) -> Vec<Tile> {
     let mut path = Vec::new();
     let mut cur = src;
     while cur != dst {
         let d0 = hexgrid::hex_distance(cur.0, cur.1, dst.0, dst.1);
-        // First neighbour that gets closer: deterministic and always exists
-        // while `cur != dst` on a connected hex grid.
+        // Closest neighbour that gets closer, breaking the tie on the squared
+        // distance to the goal: at least one exists while `cur != dst` on a
+        // connected hex grid.
         let next = hexgrid::neighbors(cur.0, cur.1)
             .into_iter()
-            .find(|n| hexgrid::hex_distance(n.0, n.1, dst.0, dst.1) < d0)
+            .filter(|n| hexgrid::hex_distance(n.0, n.1, dst.0, dst.1) < d0)
+            .min_by_key(|n| hexgrid::sq_dist_key(n.0, n.1, dst.0, dst.1))
             .expect("a hex grid always has a neighbour closer to the target");
         path.push(next);
         cur = next;
@@ -689,7 +701,9 @@ impl Board {
     /// which of the two is drivable. Every hop costs one, so A* with the
     /// hex-grid distance as the heuristic returns the same shortest length
     /// as a breadth-first search while steering the open set towards the
-    /// destination instead of flooding the board in rings.
+    /// destination instead of flooding the board in rings. Equally short
+    /// routes are resolved by the squared Euclidean distance to the
+    /// destination (rules.md section 4).
     pub fn find_path(&self, src: Tile, dst: Tile, kind: VehicleKind) -> Option<Vec<Tile>> {
         if src == dst || !self.contains(src) || !self.contains(dst) {
             return None;
@@ -703,9 +717,11 @@ impl Board {
         let start = (src, Crossing::Ground);
         let mut prev: HashMap<(Tile, Crossing), (Tile, Crossing)> = HashMap::new();
         let mut best_g: HashMap<(Tile, Crossing), i32> = HashMap::from([(start, 0)]);
+        let start_h = hexgrid::hex_distance(src.0, src.1, dst.0, dst.1);
         let mut open = BinaryHeap::from([OpenEntry {
-            f: hexgrid::hex_distance(src.0, src.1, dst.0, dst.1),
-            h: hexgrid::hex_distance(src.0, src.1, dst.0, dst.1),
+            f: start_h,
+            h: start_h,
+            d2: hexgrid::sq_dist_key(src.0, src.1, dst.0, dst.1),
             tile: src,
             mode: Crossing::Ground,
         }]);
@@ -738,6 +754,7 @@ impl Board {
                 open.push(OpenEntry {
                     f: next_g + h,
                     h,
+                    d2: hexgrid::sq_dist_key(n.0, n.1, dst.0, dst.1),
                     tile: n,
                     mode,
                 });
@@ -1025,6 +1042,131 @@ mod tests {
             modes.iter().all(|m| *m == Crossing::Ground),
             "a hovercraft that entered from the side must not climb the deck: {path:?}"
         );
+    }
+
+    #[test]
+    fn equal_length_routes_take_the_field_nearest_the_goal() {
+        // rules.md section 4: when several roads are equally long, the route
+        // steps onto the field nearest the destination, measured by the
+        // squared Euclidean distance. On open land that means a straight line
+        // instead of a detour through a parallel band of fields, so the
+        // squared distance to the goal must drop on every single hop.
+        let board = flat_board(20, 20);
+        for (src, dst) in [
+            ((0, 0), (19, 19)),
+            ((2, 3), (17, 5)),
+            ((10, 0), (0, 10)),
+            ((0, 7), (19, 12)),
+            ((3, 15), (16, 4)),
+        ] {
+            for kind in [
+                VehicleKind::Tank,
+                VehicleKind::Hovercraft,
+                VehicleKind::Buffer,
+                VehicleKind::Helicopter,
+            ] {
+                let path = board.find_path(src, dst, kind).expect("open land route");
+                assert_route_rules(&board, kind, src, &path);
+                let mut cur = src;
+                let mut prev_key = hexgrid::sq_dist_key(src.0, src.1, dst.0, dst.1);
+                for step in &path {
+                    let key = hexgrid::sq_dist_key(step.0, step.1, dst.0, dst.1);
+                    assert!(
+                        key < prev_key,
+                        "{kind:?} {src:?} -> {dst:?} wandered away from the goal at {step:?}: {path:?}"
+                    );
+                    prev_key = key;
+                    cur = *step;
+                }
+                assert_eq!(cur, dst, "{kind:?} {src:?} -> {dst:?} stops short");
+            }
+        }
+    }
+
+    #[test]
+    fn routes_are_shortest_and_reproducible_on_rough_terrain() {
+        // On a board where the roads fork all the time, a route must still be
+        // shortest and must not depend on the order the open set happened to
+        // fill (rules.md section 4 and 13.2).
+        fn shortest(board: &Board, src: Tile, dst: Tile, kind: VehicleKind) -> Option<usize> {
+            let mut seen: HashSet<Tile> = HashSet::from([src]);
+            let mut queue: VecDeque<(Tile, usize)> = VecDeque::from([(src, 0)]);
+            while let Some((t, d)) = queue.pop_front() {
+                if t == dst {
+                    return Some(d);
+                }
+                for n in board.neighbors(t) {
+                    if board.passable(t, n, kind) && seen.insert(n) {
+                        queue.push_back((n, d + 1));
+                    }
+                }
+            }
+            None
+        }
+
+        let mut board = flat_board(14, 11);
+        for r in 0..11 {
+            // A wall down the middle, open at both ends, so routes have to
+            // decide which way round to take.
+            board.tiles.get_mut(&(7, r)).unwrap().height = 2;
+        }
+        board.tiles.get_mut(&(7, 0)).unwrap().height = 1;
+        board.tiles.get_mut(&(7, 10)).unwrap().height = 1;
+        for src in [(1, 2), (3, 5), (5, 8), (2, 9)] {
+            for dst in [(12, 2), (11, 5), (12, 8), (10, 9)] {
+                for kind in [
+                    VehicleKind::Tank,
+                    VehicleKind::Hovercraft,
+                    VehicleKind::Buffer,
+                    VehicleKind::Helicopter,
+                ] {
+                    let path = board.find_path(src, dst, kind).expect("a route exists");
+                    assert_route_rules(&board, kind, src, &path);
+                    assert_eq!(
+                        Some(path.len()),
+                        shortest(&board, src, dst, kind),
+                        "{kind:?} {src:?} -> {dst:?} took {path:?}"
+                    );
+                    assert_eq!(
+                        path,
+                        board.find_path(src, dst, kind).expect("a route exists"),
+                        "{kind:?} {src:?} -> {dst:?} is not reproducible"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_open_set_prefers_the_field_nearest_the_goal_on_a_tie() {
+        // The tie-break of rules.md section 4: among states that cost the same
+        // `f`, the one nearest the goal by squared Euclidean distance leaves
+        // the heap first; `tile` and `mode` only close the order so the search
+        // stays reproducible.
+        let entry = |tile: Tile, mode: Crossing, f: i32, d2: i64| OpenEntry {
+            f,
+            h: f,
+            d2,
+            tile,
+            mode,
+        };
+        let mut open = BinaryHeap::from([
+            entry((3, 3), Crossing::Ground, 5, 900),
+            entry((3, 3), Crossing::Ground, 5, 100),
+            entry((4, 4), Crossing::Ground, 5, 100),
+            entry((3, 3), Crossing::Deck, 5, 100),
+        ]);
+        // Same `f`: the smaller squared distance wins over the nearer field in
+        // hex steps and over the cheaper crossing mode.
+        assert_eq!(open.pop().unwrap().tile, (3, 3));
+        let second = open.pop().unwrap();
+        assert_eq!((second.tile, second.mode), ((3, 3), Crossing::Deck));
+        let third = open.pop().unwrap();
+        assert_eq!((third.tile, third.mode), ((4, 4), Crossing::Ground));
+        // A smaller `f` beats every tie-break above.
+        assert_eq!(open.pop().unwrap().f, 5);
+        let mut low = BinaryHeap::from([entry((9, 9), Crossing::Ground, 4, 10_000)]);
+        assert_eq!(low.pop().unwrap().f, 4);
     }
 
     #[test]

@@ -84,6 +84,7 @@ Każdym pojazdem przemieszcza się pewna, niezerowa liczba jednostek. Na począt
 Gdy liczba jednostek w pojeździe przestanie być dodatnia, pojazd znika.
 
 Każdy pojazd ma określony cel podróży (wskazany budynek, dowolny do którego istnieje droga i jest różny od źródłowego), do którego podąża po automatycznie wyznaczonej ścieżce (ścieżka jest wyznaczana w momencie rozpoczęcia podróży i nie może się później zmienić).
+Ścieżka jest najkrótsza możliwa. Jeżeli kolejne jej pole nie jest wyznaczone jednoznacznie (bo istnieje kilka dróg o tej samej długości), to rozstrzygamy remis tak, że wybieramy pole położone najbliżej celowi — odległość porównujemy euklidesowo, wystarczy jej kwadrat.
 Większość pojazdów (wszystkich poza helikopterem) porusza się jedynie po polach leżących na tej samej wysokości: dwa sąsiednie pola o różnych wysokościach nie są dla nich połączone bezpośrednim przejazdem. Zmiana wysokości jest możliwa tylko za pomocą podjazdów oraz przejechania pomiędzy lądem o wysokości 1 i wodą przez poduszkowiec.
 
 Gdy pojazd z p jednostkami dociera do budynku docelowego, w którym znajduje się b jednostek, to wykonywana jest jedna z poniższych akcji i pojazd znika:

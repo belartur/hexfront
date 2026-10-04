@@ -106,6 +106,27 @@ pub fn hex_distance(q1: i32, r1: i32, q2: i32, r2: i32) -> i32 {
     (dx.abs() + dy.abs() + dz.abs()) / 2
 }
 
+/// Tie-break key for routes of equal length: `4 * d^2 / side^2`, the squared
+/// Euclidean distance between two tile centres scaled by a factor common to
+/// every pair, so comparing keys orders the distances exactly (rules.md
+/// section 4 resolves an ambiguous next field of a route by the squared
+/// Euclidean distance to the destination).
+///
+/// Computed in `i64` from the odd-q layout rather than from
+/// [`hex_to_world`], because `y` contains `sqrt(3)`: with
+/// `dq = q2 - q1`, `dr = r2 - r1` and `dp = (q2 & 1) - (q1 & 1)` the world
+/// offset is `(1.5 * dq, sqrt(3) * (dr + dp / 2))` sides, which squares to
+/// `(9 * dq^2 + 3 * (2 * dr + dp)^2) / 4` sides squared. An integer key keeps
+/// the ordering total and free of floating-point ties, so a queue ordered by
+/// it stays deterministic.
+pub fn sq_dist_key(q1: i32, r1: i32, q2: i32, r2: i32) -> i64 {
+    let dq = q2 as i64 - q1 as i64;
+    let dr = r2 as i64 - r1 as i64;
+    let dp = (q2 & 1) as i64 - (q1 & 1) as i64;
+    let s = 2 * dr + dp;
+    9 * dq * dq + 3 * s * s
+}
+
 /// Return the six corners of a tile as world (x, y) pairs.
 ///
 /// Corners are ordered clockwise starting at angle 0 deg (east). The edge
@@ -151,6 +172,46 @@ mod tests {
             for r in 0..8 {
                 let (x, y) = hex_to_world(q, r, side);
                 assert_eq!(world_to_hex(x, y, side), (q, r));
+            }
+        }
+    }
+
+    #[test]
+    fn sq_dist_key_is_four_times_the_squared_distance_in_sides() {
+        // rules.md section 4 compares routes by the squared Euclidean
+        // distance to the goal; the key must order exactly like the distance
+        // it stands for, and stay an integer so a queue ordered by it is
+        // free of float ties.
+        let side = 36.0;
+        for q1 in -3..4 {
+            for r1 in -3..4 {
+                for q2 in -3..4 {
+                    for r2 in -3..4 {
+                        let a = hex_to_world(q1, r1, side);
+                        let b = hex_to_world(q2, r2, side);
+                        let want = 4.0 * ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)) / side.powi(2);
+                        let got = sq_dist_key(q1, r1, q2, r2) as f64;
+                        assert!(
+                            (got - want).abs() < 1e-9,
+                            "sq_dist_key({q1},{r1},{q2},{r2}) = {got}, want {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sq_dist_key_is_symmetric_and_zero_only_on_itself() {
+        for q1 in -3..4 {
+            for r1 in -3..4 {
+                for q2 in -3..4 {
+                    for r2 in -3..4 {
+                        let k = sq_dist_key(q1, r1, q2, r2);
+                        assert_eq!(k, sq_dist_key(q2, r2, q1, r1), "asymmetric");
+                        assert_eq!(k == 0, (q1, r1) == (q2, r2), "zero distance");
+                    }
+                }
             }
         }
     }
