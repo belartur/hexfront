@@ -24,9 +24,6 @@ fn hexgrid_pos(tile: Tile, side: f64) -> (f64, f64) {
 /// One turret shot in flight, resolved on impact (rules.md section 10).
 #[derive(Clone, Debug)]
 pub struct Projectile {
-    #[allow(dead_code)]
-    /// Firing building tile.
-    pub from: Tile,
     /// Firing building tile world position.
     pub from_pos: (f64, f64),
     /// Firing player (None = neutral).
@@ -164,30 +161,11 @@ impl Game {
         }
     }
 
-    #[allow(dead_code)]
-    /// The human player.
-    pub fn human_player(&self) -> &Player {
-        &self.players[self.human_id]
-    }
-    #[allow(dead_code)]
-    /// All buildings currently owned by `player_id`.
-    pub fn buildings_owned_by(&self, player_id: Option<usize>) -> Vec<&Building> {
-        self.buildings
-            .iter()
-            .filter(|b| b.owner == player_id)
-            .collect()
-    }
     /// Building standing on `tile`, if any.
     pub fn building_at_tile(&self, tile: Tile) -> Option<&Building> {
         self.building_at
             .get(&tile)
             .and_then(|i| self.buildings.get(*i))
-    }
-    #[allow(dead_code)]
-    /// Mutable building standing on `tile`, if any.
-    pub fn building_at_tile_mut(&mut self, tile: Tile) -> Option<&mut Building> {
-        let i = *self.building_at.get(&tile)?;
-        self.buildings.get_mut(i)
     }
     /// Send one vehicle from `src_tile` to `dst_tile`.
     ///
@@ -323,8 +301,8 @@ impl Game {
             }
         }
         for (id, owner, tid, dmg) in shots {
-            let (pos, tile) = match self.vehicles.iter().find(|v| v.id == id) {
-                Some(v) => (v.pos(), self.board.world_to_tile(v.x, v.y)),
+            let pos = match self.vehicles.iter().find(|v| v.id == id) {
+                Some(v) => v.pos(),
                 None => continue,
             };
             let target = match self.vehicles.iter().find(|v| v.id == tid) {
@@ -336,7 +314,6 @@ impl Game {
             // code path (rules.md sec. 10).
             self.report_sound(SoundKind::TurretShot(TurretKind::Normal), pos.0, pos.1);
             self.projectiles.push(Projectile {
-                from: tile.unwrap_or((0, 0)),
                 from_pos: pos,
                 owner: Some(owner),
                 target: tid,
@@ -376,7 +353,6 @@ impl Game {
     /// Turrets (rules.md sec. 10, 12).
     fn update_turrets(&mut self, dt: f64) {
         struct Shot {
-            from: Tile,
             from_pos: (f64, f64),
             owner: Option<usize>,
             target: u64,
@@ -437,7 +413,6 @@ impl Game {
             // A turret that fires is audible from the turret itself.
             self.report_sound(SoundKind::TurretShot(kind), from_pos.0, from_pos.1);
             shots.push(Shot {
-                from: tile,
                 from_pos,
                 owner,
                 target: tid,
@@ -451,7 +426,6 @@ impl Game {
                 None => continue,
             };
             self.projectiles.push(Projectile {
-                from: s.from,
                 from_pos: s.from_pos,
                 owner: s.owner,
                 target: s.target,
@@ -463,34 +437,6 @@ impl Game {
                 dur: constants::turret_flight_time(s.kind),
             });
         }
-    }
-    #[allow(dead_code)]
-    /// Nearest valid target of a turret: owned turrets shoot enemies,
-    /// neutral turrets shoot everybody (rules.md sec. 12). Ties by id.
-    fn turret_target(&self, tile: Tile, owner: Option<usize>, range: f64) -> Option<u64> {
-        let side = self.board.side;
-        let bpos = {
-            let i = self.building_at.get(&tile)?;
-            self.buildings[*i].pos(side)
-        };
-        let mut best: Option<(u64, f64)> = None;
-        for v in self.vehicles.iter() {
-            if v.dead {
-                continue;
-            }
-            if owner.is_some() && Some(v.owner) == owner {
-                continue;
-            }
-            let d = dist(bpos, v.pos());
-            match best {
-                None if d <= range => best = Some((v.id, d)),
-                Some((bid, bd)) if (d < bd || (d == bd && v.id < bid)) && d <= range => {
-                    best = Some((v.id, d));
-                }
-                _ => {}
-            }
-        }
-        best.map(|(id, _)| id)
     }
     /// Healing towers (rules.md sec. 11, 12).
     fn update_heal_towers(&mut self, dt: f64) {
@@ -1009,7 +955,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::Obstacle;
+    use crate::board::{Crossing, Obstacle};
     use crate::entities::BuildingKind;
     use crate::hexgrid;
     fn make_game(board: Board) -> Game {
@@ -1198,16 +1144,21 @@ mod tests {
     }
     #[test]
     fn movement_rules() {
+        // A single ground step, which is what rules.md sections 4-8 describe
+        // for open land, ramps and the ground under a bridge.
+        let step = |b: &Board, u: Tile, v: Tile, kind: VehicleKind| {
+            b.step(u, v, kind, Crossing::Ground).is_some()
+        };
         let mut b = Board::new(12, 12);
-        assert!(b.passable((0, 0), (1, 0), VehicleKind::Tank));
+        assert!(step(&b, (0, 0), (1, 0), VehicleKind::Tank));
         b.tiles.get_mut(&(1, 0)).unwrap().height = 2;
-        assert!(!b.passable((0, 0), (1, 0), VehicleKind::Tank));
-        assert!(b.passable((0, 0), (1, 0), VehicleKind::Helicopter));
+        assert!(!step(&b, (0, 0), (1, 0), VehicleKind::Tank));
+        assert!(step(&b, (0, 0), (1, 0), VehicleKind::Helicopter));
         b.tiles.get_mut(&(2, 1)).unwrap().height = 0;
-        assert!(!b.passable((1, 0), (2, 1), VehicleKind::Hovercraft));
+        assert!(!step(&b, (1, 0), (2, 1), VehicleKind::Hovercraft));
         b.tiles.get_mut(&(1, 0)).unwrap().height = 1;
-        assert!(b.passable((1, 0), (2, 1), VehicleKind::Hovercraft));
-        assert!(!b.passable((1, 0), (2, 1), VehicleKind::Tank));
+        assert!(step(&b, (1, 0), (2, 1), VehicleKind::Hovercraft));
+        assert!(!step(&b, (1, 0), (2, 1), VehicleKind::Tank));
         // Ramp joins opposite neighbours regardless of height.
         let mut b2 = flat_board(12, 12, 1);
         for t in [(5, 5), (5, 4), (6, 4), (7, 4), (8, 4)] {
@@ -1215,19 +1166,28 @@ mod tests {
         }
         let (a, p, hi) = ((4, 5), (5, 5), (5, 4));
         b2.set_ramp(p, a, hi);
-        assert!(b2.passable(a, p, VehicleKind::Tank));
-        assert!(b2.passable(p, hi, VehicleKind::Tank));
-        assert!(!b2.passable((4, 4), p, VehicleKind::Tank));
-        assert!(b2.passable((4, 4), p, VehicleKind::Helicopter));
-        // Bridge over water between equal height >= 3 land.
+        assert!(step(&b2, a, p, VehicleKind::Tank));
+        assert!(step(&b2, p, hi, VehicleKind::Tank));
+        assert!(!step(&b2, (4, 4), p, VehicleKind::Tank));
+        assert!(step(&b2, (4, 4), p, VehicleKind::Helicopter));
+        // Bridge over water between equal height >= 3 land: the ground below
+        // the deck stays open to a tank, and the deck itself is a legal step
+        // once the vehicle drives onto it from a land end.
         let mut b3 = flat_board(14, 14, 3);
         for t in [(5, 6), (5, 7)] {
             b3.tiles.get_mut(&t).unwrap().height = 0;
         }
         let bridge = b3.add_bridge((5, 5), (5, 8), 1);
         assert!(bridge.is_some());
-        assert!(b3.passable((5, 5), (5, 6), VehicleKind::Tank));
-        assert!(b3.passable((5, 6), (5, 7), VehicleKind::Tank));
+        assert!(step(&b3, (5, 5), (5, 6), VehicleKind::Tank));
+        assert_eq!(
+            b3.step((5, 6), (5, 7), VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Deck)
+        );
+        assert!(
+            !step(&b3, (5, 6), (5, 7), VehicleKind::Tank),
+            "a tank under a bridge cannot climb onto the deck from the side"
+        );
     }
     #[test]
     fn production_and_capture() {

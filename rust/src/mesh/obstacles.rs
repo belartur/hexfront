@@ -68,15 +68,15 @@ pub(super) fn push_obstacle(
 
 /// Facets of the round obstacle parts (mine parts, the ice trap).
 pub(super) const OBS_SEGMENTS: usize = 12;
-#[allow(dead_code)]
 /// Highest point any obstacle part may reach above its field in px: like
 /// `BLD_MAX_H` a design limit checked by the mesh tests, not a value the
-/// builder reads back.
+/// builder reads back, so it is compiled for tests alone.
+#[cfg(test)]
 pub(super) const OBS_MAX_H: f64 = 20.0;
-#[allow(dead_code)]
 /// Furthest horizontal distance of an obstacle part from its field centre in
 /// px; the wall block is the widest of them. Also a design limit checked by
-/// the mesh tests.
+/// the mesh tests, so it is compiled for tests alone like `BLD_MAX_H`.
+#[cfg(test)]
 pub(super) const OBS_MAX_REACH: f64 = 27.0;
 
 // Wall (rules.md sections 1 and 4: 20 hp, blocks ground vehicles).

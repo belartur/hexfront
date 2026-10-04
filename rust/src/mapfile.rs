@@ -36,7 +36,6 @@ pub fn building_kind_of(code: u8) -> Option<BuildingKind> {
     }
 }
 
-#[allow(dead_code)]
 /// Inverse of [`building_kind_of`].
 pub fn building_code_of(kind: BuildingKind) -> u8 {
     match kind {
@@ -67,7 +66,6 @@ pub fn obstacle_kind_of(code: u8) -> Option<ObstacleKind> {
     }
 }
 
-#[allow(dead_code)]
 /// Inverse of [`obstacle_kind_of`].
 pub fn obstacle_code_of(kind: ObstacleKind) -> u8 {
     match kind {
@@ -80,18 +78,13 @@ pub fn obstacle_code_of(kind: ObstacleKind) -> u8 {
 
 /// Highest starting unit count storable for a building (10 bits).
 pub const MAX_SAVED_UNITS: u32 = 999;
-#[allow(dead_code)]
 /// Building owner code: neutral.
 pub const OWNER_CODE_NEUTRAL: u32 = 0;
-#[allow(dead_code)]
-/// Owner code uses 6 bits.
-pub const OWNER_CODE_BITS: u32 = 6;
 
 /// Non-fatal map-loading warning.
 fn warn(path: &Path, message: &str) {
     eprintln!("warning: {}: {}", path.display(), message);
 }
-#[allow(dead_code)]
 /// Write `board` and its `buildings` to the binary file `path`.
 pub fn save_map(path: &Path, board: &Board, buildings: &[Building]) -> std::io::Result<()> {
     if board.cols > 255 || board.rows > 255 || board.cols < 1 || board.rows < 1 {
@@ -451,6 +444,7 @@ pub fn rebuild_bridges(board: &mut Board, frag_marks: &HashMap<Tile, usize>, val
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::Crossing;
     use crate::constants::VehicleKind;
     #[test]
     fn all_repo_maps_load() {
@@ -523,14 +517,26 @@ mod tests {
         let lr = loaded_board.tiles[&(3, 2)].ramp.unwrap();
         assert!((lr.0 == (4, 3) && lr.1 == (2, 2)) || (lr.0 == (2, 2) && lr.1 == (4, 3)));
         assert_eq!(loaded_board.tiles[&(3, 2)].height, 2);
-        // Bridge survives as a whole object with the same passable pairs.
+        // Bridge survives as a whole object: the same steps are legal in the same
+        // crossing modes as before the round trip (rules.md section 8).
         let lb = loaded_board.tiles[&(5, 3)]
             .bridge
             .map(|i| &loaded_board.bridges[i]);
         assert!(lb.is_some() && lb.unwrap().w == 3 && lb.unwrap().direction == 1);
-        assert!(loaded_board.passable((5, 2), (5, 3), VehicleKind::Tank));
-        assert!(loaded_board.passable((5, 4), (5, 5), VehicleKind::Tank));
-        assert!(!loaded_board.passable((4, 3), (5, 3), VehicleKind::Tank));
+        let step = |u: Tile, v: Tile, mode: Crossing| {
+            loaded_board.step(u, v, VehicleKind::Tank, mode).is_some()
+        };
+        // Onto the deck from its land end, along the deck, and off it again.
+        assert_eq!(
+            loaded_board.step((5, 2), (5, 3), VehicleKind::Tank, Crossing::Ground),
+            Some(Crossing::Deck)
+        );
+        assert_eq!(
+            loaded_board.step((5, 3), (5, 4), VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Deck)
+        );
+        assert!(step((5, 4), (5, 5), Crossing::Deck));
+        assert!(!step((4, 3), (5, 3), Crossing::Deck));
         // Buildings survive with kind, owner and units.
         assert_eq!(loaded_buildings.len(), 4);
         let by_tile: HashMap<Tile, &Building> =

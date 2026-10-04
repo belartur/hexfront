@@ -1,9 +1,9 @@
 //! The game board: tiles, obstacles, ramps, bridges and path-finding.
 //!
-//! Ground-movement rules implemented in [`Board::passable`] follow rules.md
+//! Ground-movement rules implemented in [`Board::step`] follow rules.md
 //! sections 4, 5, 7 (ramps) and 8 (bridges).
 
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::constants::{self, VehicleKind};
 use crate::hexgrid::{self, Tile};
@@ -41,16 +41,6 @@ impl Obstacle {
         };
         Self { kind, hp }
     }
-    #[allow(dead_code)]
-    /// String name of the kind.
-    pub fn kind_str(&self) -> &'static str {
-        match self.kind {
-            ObstacleKind::Wall => "wall",
-            ObstacleKind::Mine => "mine",
-            ObstacleKind::TrapFire => "trap_fire",
-            ObstacleKind::TrapIce => "trap_ice",
-        }
-    }
 }
 
 /// One hexagonal field of the board.
@@ -83,9 +73,8 @@ impl HexTile {
 pub struct Bridge {
     /// Land tile at one end (height `w`).
     pub a: Tile,
-    /// Land tile at the other end (height `w`); unused by rendering but
-    /// kept for format round-trips and gameplay queries.
-    #[allow(dead_code)]
+    /// Land tile at the other end (height `w`); kept for format round-trips and
+    /// gameplay queries, though no mesh reads it.
     pub b: Tile,
     /// Shared height of both ends.
     pub w: i32,
@@ -276,16 +265,6 @@ impl Board {
     pub fn contains(&self, tile: Tile) -> bool {
         tile.0 >= 0 && tile.0 < self.cols && tile.1 >= 0 && tile.1 < self.rows
     }
-    #[allow(dead_code)]
-    /// Tile object or `None` when outside the board.
-    pub fn tile(&self, tile: Tile) -> Option<&HexTile> {
-        self.tiles.get(&tile)
-    }
-    #[allow(dead_code)]
-    /// Mutable tile object or `None` when outside the board.
-    pub fn tile_mut(&mut self, tile: Tile) -> Option<&mut HexTile> {
-        self.tiles.get_mut(&tile)
-    }
     /// Terrain height of `tile` (0 outside the board = open water).
     pub fn height(&self, tile: Tile) -> i32 {
         self.tiles.get(&tile).map(|t| t.height).unwrap_or(0)
@@ -375,7 +354,6 @@ impl Board {
     /// input and the flat `Alt` mode of specification.md, section
     /// "Sterowanie"). With `flat` the tile is picked as if every field
     /// stood at height zero — no elevation refinement happens.
-    #[allow(dead_code)]
     pub fn pick_tile(
         &self,
         camera: &crate::camera::Camera,
@@ -454,14 +432,6 @@ impl Board {
             t.bridge = None;
         }
         self.ramps.insert(tile, (a, b));
-    }
-    #[allow(dead_code)]
-    /// Remove the ramp standing on `tile`, if any.
-    pub fn remove_ramp(&mut self, tile: Tile) {
-        if let Some(t) = self.tiles.get_mut(&tile) {
-            t.ramp = None;
-        }
-        self.ramps.remove(&tile);
     }
     /// Repair the bookkeeping after an in-place height edit of a ramp tile.
     ///
@@ -664,16 +634,6 @@ impl Board {
         }
         None
     }
-    #[allow(dead_code)]
-    /// True when a vehicle of `kind` may drive directly u -> v.
-    ///
-    /// A single step of the movement graph, ignoring which way the vehicle
-    /// entered the bridge: rules.md section 8 keeps that mode for the whole
-    /// crossing, which is what [`Board::step`] and the route search do.
-    pub fn passable(&self, u: Tile, v: Tile, kind: VehicleKind) -> bool {
-        self.step(u, v, kind, Crossing::Ground).is_some()
-            || self.step(u, v, kind, Crossing::Deck).is_some()
-    }
     fn drivable(&self, tile: Tile, kind: VehicleKind) -> bool {
         let t = match self.tiles.get(&tile) {
             Some(t) => t,
@@ -762,30 +722,6 @@ impl Board {
         }
         None
     }
-    #[allow(dead_code)]
-    /// Set of tiles reachable from `src` by vehicle `kind`.
-    ///
-    /// Like [`Board::find_path`], a bridge is crossed either on its deck or
-    /// under it, never both; the returned set is the union of the fields
-    /// reachable in either mode.
-    pub fn reachable(&self, src: Tile, kind: VehicleKind) -> HashSet<Tile> {
-        let start = (src, Crossing::Ground);
-        let mut seen: HashSet<(Tile, Crossing)> = HashSet::from([start]);
-        let mut queue: VecDeque<(Tile, Crossing)> = VecDeque::from([start]);
-        let mut tiles: HashSet<Tile> = HashSet::from([src]);
-        while let Some(cur) = queue.pop_front() {
-            for n in self.neighbors(cur.0) {
-                let Some(mode) = self.step(cur.0, n, kind, cur.1) else {
-                    continue;
-                };
-                if seen.insert((n, mode)) {
-                    tiles.insert(n);
-                    queue.push_back((n, mode));
-                }
-            }
-        }
-        tiles
-    }
     /// World-space length of a tile path (for travel-time estimates).
     /// When `start` is given, the hop from `start` to `path[0]` is included.
     pub fn path_world_length(&self, path: &[Tile], start: Option<Tile>) -> f64 {
@@ -805,6 +741,8 @@ impl Board {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+
     use crate::camera::Camera;
     use crate::constants::HOVER_SNAP_RADIUS;
     use crate::entities::{Building, BuildingKind};
@@ -1096,7 +1034,9 @@ mod tests {
                     return Some(d);
                 }
                 for n in board.neighbors(t) {
-                    if board.passable(t, n, kind) && seen.insert(n) {
+                    let ground = board.step(t, n, kind, Crossing::Ground).is_some();
+                    let deck = board.step(t, n, kind, Crossing::Deck).is_some();
+                    if (ground || deck) && seen.insert(n) {
                         queue.push_back((n, d + 1));
                     }
                 }
@@ -1170,14 +1110,34 @@ mod tests {
     }
 
     #[test]
-    fn passable_reports_a_single_possible_step() {
+    fn a_deck_step_needs_the_deck_mode() {
         let board = bridge_board(0);
         // Both hops of the deck and the hop along it are single steps
-        // someone can make; rules.md section 8 only constrains the sequence.
-        assert!(board.passable((5, 5), (5, 6), VehicleKind::Tank));
-        assert!(board.passable((5, 6), (5, 7), VehicleKind::Tank));
-        assert!(board.passable((5, 7), (5, 8), VehicleKind::Tank));
-        assert!(!board.passable((4, 6), (5, 6), VehicleKind::Tank));
+        // someone can make; rules.md section 8 only constrains the sequence,
+        // so it is the mode that decides which of them are reachable.
+        assert_eq!(
+            board.step((5, 5), (5, 6), VehicleKind::Tank, Crossing::Ground),
+            Some(Crossing::Deck)
+        );
+        assert_eq!(
+            board.step((5, 6), (5, 7), VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Deck)
+        );
+        assert_eq!(
+            board.step((5, 7), (5, 8), VehicleKind::Tank, Crossing::Deck),
+            Some(Crossing::Deck),
+            "the deck runs to the second land end"
+        );
+        assert_eq!(
+            board.step((5, 6), (5, 7), VehicleKind::Tank, Crossing::Ground),
+            None,
+            "a field beside a deck is never entered from the side"
+        );
+        assert_eq!(
+            board.step((4, 6), (5, 6), VehicleKind::Tank, Crossing::Deck),
+            None,
+            "the deck is only entered from a land end"
+        );
     }
 
     #[test]

@@ -19,8 +19,12 @@ pub const SQRT3: f64 = 1.7320508075688772;
 pub const GEO_DIRS_EVEN: [(i32, i32); 6] = [(1, 0), (0, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
 /// Same angles for tiles in odd columns (the odd-q stagger swaps offsets).
 pub const GEO_DIRS_ODD: [(i32, i32); 6] = [(1, 1), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, 0)];
-#[allow(dead_code)]
 /// Index of the opposite (180 deg) geometric direction.
+///
+/// Test-only: the board expresses "the other end of this axis" as `d + 3`
+/// inline, and only the geometry tests need a table to walk over. Compiled
+/// for tests alone because nothing in the game reads it.
+#[cfg(test)]
 pub const OPPOSITE_DIR: [usize; 6] = [3, 4, 5, 0, 1, 2];
 
 /// Tile coordinates: column `q`, row `r` (both zero-based).
@@ -90,7 +94,6 @@ pub fn world_to_hex(x: f64, y: f64, side: f64) -> Tile {
     (q, r)
 }
 
-#[allow(dead_code)]
 /// Convert odd-q offset coordinates to axial (q, r).
 pub fn offset_to_axial(q: i32, r: i32) -> (i32, i32) {
     (q, r - (q - (q & 1)) / 2)

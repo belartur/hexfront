@@ -51,8 +51,7 @@ pub fn maps_dir() -> PathBuf {
     repo_root().join("maps")
 }
 
-#[allow(dead_code)]
-/// File name extension of the binary map files.
+/// Map file name extension.
 pub const MAP_EXTENSION: &str = ".map";
 
 /// Directory holding the sound effect files (`*.ogg`) of the game. It sits in
@@ -696,27 +695,12 @@ pub const RANGE_FILL_LIFT: f64 = 0.5 * UNIT_J_TO_PX;
 /// Height of a range outline above the tile top in px (rendering only), just
 /// above [`RANGE_FILL_LIFT`] so the outline stays readable over the fill.
 pub const RANGE_OUTLINE_LIFT: f64 = 0.6 * UNIT_J_TO_PX;
-#[allow(dead_code)]
-/// Route line colour of moving vehicles.
-pub const PATH_COLOR: [u8; 3] = [255, 255, 255];
-/// Route preview colour.
-#[allow(dead_code)]
-pub const PATH_PREVIEW_COLOR: [u8; 3] = [255, 240, 120];
-#[allow(dead_code)]
-/// UI text colour.
-pub const UI_TEXT_COLOR: [u8; 3] = [235, 235, 235];
-#[allow(dead_code)]
-/// UI background colour.
-pub const UI_BACKGROUND: [u8; 3] = [24, 26, 34];
 /// Number of level-menu columns (UI only).
 pub const MENU_COLUMNS: usize = 3;
 /// Menu font size.
 pub const MENU_FONT_SIZE: u16 = 26;
 /// Menu cell horizontal padding.
 pub const MENU_CELL_PAD_X: f32 = 18.0;
-#[allow(dead_code)]
-/// Menu cell vertical padding.
-pub const MENU_CELL_PAD_Y: f32 = 8.0;
 /// Menu row gap.
 pub const MENU_ROW_GAP: f32 = 6.0;
 /// Menu side margin.

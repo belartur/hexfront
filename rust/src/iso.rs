@@ -39,12 +39,6 @@ pub struct IsoCamera {
     pub view: [[f32; 4]; 4],
     /// Row-vector orthographic projection matrix, same convention.
     pub proj: [[f32; 4]; 4],
-    /// Near plane in ray-depth units (kept for debugging).
-    #[allow(dead_code)]
-    pub near: f32,
-    /// Far plane in ray-depth units (kept for debugging).
-    #[allow(dead_code)]
-    pub far: f32,
 }
 
 impl IsoCamera {
@@ -85,12 +79,7 @@ impl IsoCamera {
             [0.0, 0.0, 1.0 / (near - far), 0.0],
             [0.0, 0.0, near / (near - far), 1.0],
         ];
-        Self {
-            view,
-            proj,
-            near,
-            far,
-        }
+        Self { view, proj }
     }
 
     /// Apply the GPU pipeline by hand (tests only).

@@ -341,12 +341,6 @@ impl EditorState {
         }
     }
 
-    #[allow(dead_code)]
-    /// Building standing on `tile`, if any.
-    pub fn building_at(&self, tile: Tile) -> Option<&Building> {
-        self.buildings.iter().find(|b| b.tile == tile)
-    }
-
     /// Mutable building standing on `tile`, if any.
     fn building_at_mut(&mut self, tile: Tile) -> Option<&mut Building> {
         self.buildings.iter_mut().find(|b| b.tile == tile)
@@ -900,17 +894,6 @@ impl EditorState {
     }
 }
 
-/// Axis 0-2 of a ramp whose neighbour `a` end is `ramp_a`.
-#[allow(dead_code)]
-pub fn ramp_axis(tile: Tile, ramp_a: Tile) -> usize {
-    for d in 0..6 {
-        if hexgrid::neighbor(tile.0, tile.1, d) == ramp_a {
-            return d % 3;
-        }
-    }
-    0 // unreachable for ramps
-}
-
 /// True when `tile` holds anything a trimmed map must keep: non-water, an
 /// object, or a tile kept so no ramp/bridge endpoint falls off the board.
 fn tile_occupied(board: &Board, tile: Tile, buildings: &[Building]) -> bool {
@@ -1109,6 +1092,12 @@ mod tests {
         }
     }
 
+    /// The building standing on `tile`, read back through the editor's own
+    /// index rather than through a test-only lookup.
+    fn building_at(ed: &EditorState, tile: Tile) -> &Building {
+        &ed.buildings[ed.building_index(tile).expect("a building on the tile")]
+    }
+
     /// The legend documents the play/ramp keys: `r` places a ramp and `p`
     /// starts the playtest.
     #[test]
@@ -1134,10 +1123,7 @@ mod tests {
         assert_eq!(ed.buildings[0].kind, BuildingKind::BaseHelicopter);
         assert_eq!(ed.last_kind, BuildingKind::BaseHelicopter);
         assert!(ed.press_b(Some((3, 3))));
-        assert_eq!(
-            ed.building_at((3, 3)).unwrap().kind,
-            BuildingKind::BaseHelicopter
-        );
+        assert_eq!(building_at(&ed, (3, 3)).kind, BuildingKind::BaseHelicopter);
     }
 
     #[test]
@@ -1147,19 +1133,19 @@ mod tests {
             .push(Building::new(BuildingKind::BaseTank, Some(0), 2, 2, 0.0));
         assert!(ed.type_digit(Some((2, 2)), '1'));
         assert!(ed.type_digit(Some((2, 2)), '2'));
-        assert_eq!(ed.building_at((2, 2)).unwrap().units as i64, 12);
+        assert_eq!(building_at(&ed, (2, 2)).units as i64, 12);
         ed.tick(EDITOR_DIGIT_COMMIT_DELAY + 0.1);
-        assert_eq!(ed.building_at((2, 2)).unwrap().units as i64, 12);
+        assert_eq!(building_at(&ed, (2, 2)).units as i64, 12);
         assert_eq!(ed.last_units, 12);
         assert!(ed.type_digit(Some((2, 2)), '5'));
         assert!(ed.press_b(Some((3, 3))));
-        assert_eq!(ed.building_at((2, 2)).unwrap().units as i64, 5);
+        assert_eq!(building_at(&ed, (2, 2)).units as i64, 5);
         ed.buildings
             .push(Building::new(BuildingKind::BaseTank, Some(0), 4, 4, 0.0));
         assert!(ed.type_digit(Some((4, 4)), '1'));
         assert!(ed.type_digit(Some((4, 4)), '2'));
         assert!(ed.type_digit(Some((4, 4)), '3'));
-        assert_eq!(ed.building_at((4, 4)).unwrap().units as i64, 123);
+        assert_eq!(building_at(&ed, (4, 4)).units as i64, 123);
         assert!(ed.digit_tile.is_none());
     }
 
@@ -1169,7 +1155,7 @@ mod tests {
         ed.buildings
             .push(Building::new(BuildingKind::BaseTank, None, 2, 2, 0.0));
         assert!(ed.press_o(Some((2, 2))));
-        assert_eq!(ed.building_at((2, 2)).unwrap().owner, Some(0));
+        assert_eq!(building_at(&ed, (2, 2)).owner, Some(0));
         assert!(!ed.press_o(Some((7, 7))));
         assert!(ed.press_t(Some((3, 3))));
         assert_eq!(

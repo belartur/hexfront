@@ -57,19 +57,6 @@ impl AiController {
             self.decide(game);
         }
     }
-    #[allow(dead_code)]
-    /// Map destination tile -> total units of `owner`'s vehicles.
-    fn inbound_units(&self, game: &Game, owner: usize) -> HashMap<Tile, f64> {
-        let mut result: HashMap<Tile, f64> = HashMap::new();
-        for v in game.vehicles.iter() {
-            if v.dead || v.owner != owner || v.route.is_empty() {
-                continue;
-            }
-            let dst = v.route[v.route.len() - 1];
-            *result.entry(dst).or_insert(0.0) += v.units;
-        }
-        result
-    }
     /// Filter raw threats through the reaction delay (section 13.8).
     fn visible_threats(&mut self, game: &Game, raw: &HashMap<Tile, f64>) -> HashMap<Tile, f64> {
         let game_time = game.time;

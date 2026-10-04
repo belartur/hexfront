@@ -96,11 +96,6 @@ impl Player {
             eliminated: false,
         }
     }
-    #[allow(dead_code)]
-    /// Player colour used by the renderer.
-    pub fn color(&self) -> [u8; 3] {
-        constants::player_color(self.id)
-    }
 }
 
 /// A vehicle destroyed in combat, reported by the simulation so the renderer
@@ -299,10 +294,5 @@ impl Vehicle {
     /// World position (centre of the sprite).
     pub fn pos(&self) -> (f64, f64) {
         (self.x, self.y)
-    }
-    #[allow(dead_code)]
-    /// Final tile of the route (or `None`).
-    pub fn dest_tile(&self) -> Option<Tile> {
-        self.route.last().copied()
     }
 }

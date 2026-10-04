@@ -83,16 +83,18 @@ pub(super) const BLD_FOUND_H: f64 = 2.5;
 pub(super) const BLD_DARK: f64 = 0.55;
 /// Thickness of a roof plate in px.
 pub(super) const BLD_ROOF_H: f64 = 2.0;
-#[allow(dead_code)]
 /// Highest point any building part may reach above its field in px: the unit
 /// counter and the floating texts sit right next to the structure, and a
 /// building must never hide the field behind it. The cap is a design limit
-/// checked by the mesh tests, not a value the builder reads back.
+/// checked by the mesh tests, not a value the builder reads back, so it is
+/// compiled for tests alone.
+#[cfg(test)]
 pub(super) const BLD_MAX_H: f64 = 30.0;
-#[allow(dead_code)]
 /// Furthest horizontal distance of a building part from its field centre in
 /// px. A gun barrel overhangs its field (like a tank's), everything else
-/// stays inside it. Also a design limit checked by the mesh tests.
+/// stays inside it. Also a design limit checked by the mesh tests, so like
+/// [`BLD_MAX_H`] it is compiled for tests alone.
+#[cfg(test)]
 pub(super) const BLD_MAX_REACH: f64 = 27.0;
 /// Light green of every healing part (tanks of the buffer base, crosses). It
 /// matches the healed-range tint, so the support role reads the same way.

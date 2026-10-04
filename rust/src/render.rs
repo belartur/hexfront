@@ -316,28 +316,6 @@ impl Renderer {
             draw_mask_overlay(&target.texture, color, alpha);
         }
     }
-    /// True when the renderer holds buffers for `terrain` already.
-    #[allow(dead_code)]
-    pub fn has_terrain(&self) -> bool {
-        self.terrain.is_some()
-    }
-    /// Nearest building tile within HOVER_SNAP_RADIUS of the cursor.
-    ///
-    /// Shared helper kept next to the renderer: delegates to the board
-    /// geometry in [`Board::snap_to_building`](crate::board::Board::snap_to_building),
-    /// so the game input and the picking tests use exactly one code path.
-    #[allow(dead_code)]
-    pub fn snap_to_building(
-        &self,
-        game: &Game,
-        camera: &Camera,
-        sx: f32,
-        sy: f32,
-        flat: bool,
-    ) -> Option<Tile> {
-        game.board
-            .snap_to_building(camera, sx, sy, &game.buildings, flat)
-    }
 }
 
 /// Custom 3D camera reproducing the isometric projection on the GPU.

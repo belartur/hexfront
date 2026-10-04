@@ -70,13 +70,6 @@ impl Camera {
         self.y -= dy as f64 / self.zoom;
         self.clamp_to_bounds();
     }
-    #[allow(dead_code)]
-    /// Pan the view directly in projected space.
-    pub fn pan_projected(&mut self, dx: f64, dy: f64) {
-        self.x += dx;
-        self.y += dy;
-        self.clamp_to_bounds();
-    }
     /// Multiplicative zoom keeping the world point under the cursor.
     pub fn zoom_at(&mut self, factor: f64, sx: f32, sy: f32) {
         let (wx, wy) = self.screen_to_world(sx, sy, 0.0);
@@ -123,23 +116,6 @@ impl Camera {
         wy = clamp(wy, y_min, y_max);
         self.x = (wx - wy) * constants::ISO_COS;
         self.y = (wx + wy) * constants::ISO_SIN;
-    }
-    #[allow(dead_code)]
-    /// Project a ground-plane circle as a polygon (an iso ellipse).
-    pub fn screen_circle_poly(
-        &self,
-        cx: f64,
-        cy: f64,
-        radius: f64,
-        wz: f64,
-        n: usize,
-    ) -> Vec<(f32, f32)> {
-        let mut pts = Vec::with_capacity(n);
-        for i in 0..n {
-            let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
-            pts.push(self.world_to_screen(cx + radius * a.cos(), cy + radius * a.sin(), wz));
-        }
-        pts
     }
 }
 
