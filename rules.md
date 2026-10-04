@@ -19,7 +19,8 @@ Na każdym polu z lądem może się znajdować jedno z:
 * fragment mostu,
 * ściana,
 * mina,
-* pułapka (ogniowa lub lodowa).
+* pułapka (ogniowa lub lodowa),
+* premia (sekcja 13).
 
 Na polu z wodą (o wysokości 0) może się znajdować jedno z:
 
@@ -125,7 +126,7 @@ Bufor ma taki ruch, jak czołg. Jedyną różnicą między buforem a czołgiem j
 
 ## 6. Sterowanie
 
-Każdy gracz może wysłać pojazd z jednostkami. W tym celu, gracz najpierw wskazuje swój budynek (z dodatnią liczbą jednostek w środku), z którego chce wysyłać jednostki. Następnie wskazuje dowolny (inny) budynek docelowy. Wtedy wyznaczana jest najkrótsza możliwa droga między wskazanymi budynkami, która zależy od typu pojazdu i nie uwzględnia utrudnień (min, pułapek i ścian). Jeśli nie istnieje żadna droga, pojazd nie jest wysyłany. Pojazd zabiera wszystkie jednostki z budynku źródłowego.
+Każdy gracz może wysłać pojazd z jednostkami. W tym celu, gracz najpierw wskazuje swój budynek (z dodatnią liczbą jednostek w środku), z którego chce wysyłać jednostki. Następnie wskazuje dowolny (inny) budynek docelowy albo premię (sekcja 13). Wtedy wyznaczana jest najkrótsza możliwa droga między wskazanymi polami, która zależy od typu pojazdu i nie uwzględnia utrudnień (min, pułapek i ścian). Jeśli nie istnieje żadna droga, pojazd nie jest wysyłany. Pojazd zabiera wszystkie jednostki z budynku źródłowego.
 
 
 
@@ -204,27 +205,49 @@ Pojazd znajduje się w zasięgu wieży leczniczej, jeśli jego aktualna pozycja 
 
 Budynki neutralne nie mogą wysyłać pojazdów, bazy neutralne nie produkują jednostek, neutralne wieże lecznicze nie dodają nikomu jednostek, lecz neutralne działka strzelają do wszystkich pojazdów, wg zasad z sekcji 10, pociskami zadającymi normalną ilość obrażeń.
 
-## 13. Sztuczna inteligencja
+## 13. Premie
+
+Premia jest elementem mapy. Może znajdować się wyłącznie na lądzie i zajmuje całe pole, więc na polu z premią nie może się znajdować nic innego — ani budynek, ani podjazd, ani fragment mostu, ani ściana, mina czy pułapka. Sama premia nie jest przeszkodą: pojazdy przejeżdżają przez takie pole normalnie, ale go nie zbierają, bo premię wyzwala wyłącznie pojazd, który do niej wysłano.
+
+Do premii można wysłać pojazd tak samo jak do budynku (sekcja 6): wskazuje się budynek źródłowy, a celem jest pole z premią. Po osiągnięciu celu dzieje się efekt premii, a następnie pojazd wraca tą samą drogą do budynku, z którego wyruszył. Dojazd powrotny rozlicza się tak jak zwykły dojazd pojazdu, więc jeśli budynek źródłowy w międzyczasie zmieni właściciela, pojazd może go odzyskać. Każdy gracz może aktywować premię.
+
+Każda premia jest jednorazowa: pierwszy pojazd, który ją wyzwoli, powoduje jej zniknięcie. Pojazdy, których celem była ta premia, kontynuują podróż i po dotarciu do miejsca, na którym premia była, wracają z niczym — z tymi samymi jednostkami, które mają w drodze, bo mogły je stracić w walce, na minie albo pułapce, albo odzyskać dzięki leczeniu. Premię wyzwala pojazd, który do niej dotrze i w tej chwili żyje: zniszczony w drodze albo na samym polu premii nie wyzwala jej, bo premia czeka wtedy na kolejnego. Efekt działa dopiero wtedy, gdy środek grafiki pojazdu znajduje się na polu premii, więc pojazdy w trakcie walki jej nie wyzwalają. Jeżeli w tym samym kroku symulacji na polu premii stoją dwa pojazdy, premię wyzwala ten o mniejszym identyfikatorze pojazdu (tak samo rozstrzyga się remisy celu działka).
+
+Każda premia ma dokładnie jeden z trzech efektów:
+
+* **+x jednostek** — dodaje x jednostek do pojazdu, który ją wyzwolił,
+* **\*x jednostek** — mnoży liczbę jednostek tego pojazdu przez x,
+* **dron** — przywiązuje drona do pojazdu, który ją wyzwolił.
+
+Efekty +x i \*x zmieniają siłę pojazdu, czyli liczbę jednostek w nim, i dotyczą wyłącznie pojazdu, który premię wyzwolił — nie zmieniają liczby jednostek w żadnym budynku. Zakres wartości na mapie: +x od 1 do 999 (tak jak początkowa liczba jednostek w budynkach, sekcja 3), \*x od 2 do 99.
+
+### 13.1. Dron
+
+Dron jest niezniszczalną jednostką strzelającą. Dopóki znajduje się w premii, jest neutralny i nie strzela. Po aktywacji premii z dronem dron zostaje przywiązany do pojazdu, który ją wyzwolił, a właścicielem drona jest właściciel tego pojazdu. Jeśli pojazd z dronem dotrze do budynku, z którego wyruszył, dron zostaje przywiązany do tego budynku, a jego właścicielem jest właściciel budynku — zmiana właściciela budynku zmienia więc właściciela drona. Drona przywiązanego do budynku nic nie może ruszyć. Jeśli pojazd z dronem zostanie zniszczony, dron wraca na miejsce swojej premii i zaczyna ją tworzyć ponownie — od tej chwili premia znów istnieje i znów można ją wyzwolić.
+
+Dron strzela tylko wtedy, gdy nie znajduje się w premii. Strzela z stałą prędkością 3 razy na sekundę, w stałym zasięgu 80j liczonym od środka tego budynku lub pojazdu, do którego jest przywiązany, i zadaje stałe jedno obrażenie. W przeciwieństwie do działek efekt pocisków drona rozstrzygany jest natychmiastowo. Dron nie ma przypisanej liczby jednostek, nie wpływa na wykrywanie ani walkę pojazdów i nie jest ani pojazdem, ani budynkiem, więc nie blokuje eliminacji gracza i nie ma wpływu na zwycięstwo (sekcja 2). Do jednego budynku można przypisać dowolnie dużo dronów i wtedy wszystkie mają działanie — każdy dron działa niezależnie.
+
+## 14. Sztuczna inteligencja
 
 Gracze sterowani przez AI podejmują decyzje według poniższych zasad.
 
-### 13.1. Akcje
+### 14.1. Akcje
 
-Jedyną akcją, jaką może wykonać AI, jest wysłanie pojazdu z jednego ze swoich budynków do innego budynku — na zasadach opisanych w sekcji 6. AI może także nie wykonać żadnej akcji. Pojazdy w trasie, walki pojazdów, leczenie i ostrzał działek zachodzą automatycznie, zgodnie z zasadami gry; AI nie steruje nimi bezpośrednio.
+Jedyną akcją, jaką może wykonać AI, jest wysłanie pojazdu z jednego ze swoich budynków do innego budynku albo do premii — na zasadach opisanych w sekcji 6 i 13. AI może także nie wykonać żadnej akcji. Pojazdy w trasie, walki pojazdów, leczenie i ostrzał działek zachodzą automatycznie, zgodnie z zasadami gry; AI nie steruje nimi bezpośrednio.
 
-### 13.2. Pętla decyzyjna
+### 14.2. Pętla decyzyjna
 
 AI podejmuje decyzje co stały interwał 2 sekund, przy czym decyzje poszczególnych graczy AI są przesunięte w czasie względem siebie: pierwszy gracz AI podejmuje decyzję po pełnym interwale, każdy następny o interwał podzielony przez liczbę graczy AI wcześniej. Dzięki temu w danym momencie decyzję podejmuje najwyżej jeden gracz AI, a koszt wszystkich decyzji w interwale rozłożony jest równomiernie na liczbę graczy AI. W ramach jednej decyzji AI wykonuje co najwyżej jedną akcję. Zachowanie AI jest deterministyczne przy ustalonym ziarnie losowości przypisanym do poziomu.
 
-### 13.3. Informacje
+### 14.3. Informacje
 
-Decydując, AI uwzględnia aktualny stan gry: położenie i liczbę jednostek we wszystkich budynkach, położenie, typ i liczebność wszystkich pojazdów wraz z ich trasami, a także położenie min, pułapek, ścian i zasięgów działek.
+Decydując, AI uwzględnia aktualny stan gry: położenie i liczbę jednostek we wszystkich budynkach, położenie, typ i liczebność wszystkich pojazdów wraz z ich trasami, a także położenie min, pułapek, ścian i zasięgów działek. AI uwzględnia również położenie, rodzaj i wartość każdej premii, która wciąż istnieje w meczu.
 
-### 13.4. Model zagrożeń
+### 14.4. Model zagrożeń
 
 Dla każdego swojego budynku AI wyznacza łączną liczbę jednostek w wrogich pojazdach jadących do tego budynku oraz szacowany czas ich dotarcia. AI śledzi również własne pojazdy w trasie, aby nie dublować rozkazów skierowanych do tego samego celu.
 
-### 13.5. Ocena akcji
+### 14.5. Ocena akcji
 
 Dla każdej pary (budynek źródłowy z jednostkami, budynek docelowy), dla której istnieje droga, AI wyznacza punktację:
 
@@ -248,15 +271,32 @@ Przy ocenie wysyłki do budynku należącego do tego samego gracza AI uwzględni
 
 AI wykonuje akcję o najwyższej punktacji, o ile przekracza ona ustalony próg; w przeciwnym razie nie wysyła żadnego pojazdu.
 
-### 13.6. Zasady bezpieczeństwa
+Premia jest dodatkowym celem wysyłki: wysłanie pojazdu do premii jest tą samą akcją co wysłanie go do budynku, tylko o innym celu. W ramach jednej decyzji AI wykonuje co najwyżej jedną akcję, więc premia jest tylko jednym z kandydatów obok par budynków. Próg wysyłki jest wspólny dla premii i dla budynków.
+
+Punktacja premii nie używa szansy przejęcia ani wartości budynku, bo premia nie ma załogi ani właściciela. Zamiast tego liczy się wartość jej efektu:
+* premia +x jest warta tyle, ile wynosi x podzielone przez liczbę jednostek w pojeździe,
+* premia *x — przyrost z mnożnika, czyli x−1,
+* premia z dronem ma wartość stałą, niezależną od liczby jednostek.
+
+Mnożnik działa na cały oddział, więc premie *x mają z natury większą wartość niż premie +x o tej samej wartości liczbowej — autor mapy sam ustawia je na mapie.
+
+Misja po premię jest podróżą w obie strony: pojazd wraca tą samą drogą, którą przyszedł. Dlatego koszt misji jest podwójny — czas podróży, niebezpieczeństwo trasy i oczekiwane obrażenia na drodze powrotnej są takie same jak na drodze tam, a więc liczone dwa razy. Podwojenie jest oszacowaniem zachowawczym, bo wyjście może zniszczyć ściany i miny na trasie, więc powrót jest odrobinę bezpieczniejszy.
+
+Wartość premii maleje o proporcję jednostek, o jakie zmniejsza się oczekiwana liczba jednostek w pojeździe po powrocie (dla premii +x i *x). Dla premii z dronem czynnik ten nie obowiązuje, bo dron po zniszczeniu pojazdu wraca na swoją premię i odtwarza ją.
+
+AI nie odrzuca premii tylko dlatego, że po nią jedzie pojazd przeciwnika — zdążyć może również sam, wygrywając walkę w drodze, bo walka nie zmienia celu pojazdu. Dlatego jeżeli do tej samej premii jedzie pojazd przeciwnika, to wartość premii jest pomniejszona o szansę zdobycia jej: jest pełna, gdy własny pojazd dotrze nie później, a gdy dotrze później, liczona jest tylko możliwość wygrania walki z pojazdem przeciwnika — pełna przy przewadze jednostek, zerowa przy jej braku. AI nie wysyła drugiego pojazdu po tę samą premię, po której jedzie już jego własny pojazd.
+
+### 14.6. Zasady bezpieczeństwa
 
 AI nie wykonuje wysyłki, gdy:
 
 * z budynku źródłowego nie istnieje droga do żadnego innego budynku (sekcja 6),
 * wysyłka do wrogo lub neutralnie posiadanego celu byłaby nieopłacalna, czyli gdy liczba jednostek w pojeździe nie przewyższa liczby jednostek w budynku docelowym (sekcja 4),
-* liczba dostarczanych jednostek znacząco przekroczyłaby pojemność budynku docelowego, tak że większość z nich zginęłaby w przeludnieniu (sekcja 3).
+* liczba dostarczanych jednostek znacząco przekroczyłaby pojemność budynku docelowego, tak że większość z nich zginęłaby w przeludnieniu (sekcja 3),
+* oczekiwane obrażenia na trasie po premię są nie mniejsze niż liczba jednostek w pojeździe,
+* premia leży w budynku zagrożonym, a w tym budynku nie ma innej własnej siły, która budynek broni — misja po premię pozostawia budynek pusty na dwa razy dłużej.
 
-### 13.7. Taktyki
+### 14.7. Taktyki
 
 AI może stosować taktyki wynikające wprost z zasad gry, w szczególności:
 
@@ -266,7 +306,7 @@ AI może stosować taktyki wynikające wprost z zasad gry, w szczególności:
 * szybkie przejmowanie pustych budynków, np. po eliminacji innego gracza (sekcja 2).
 * koncentracja sił — przemieszczanie zapasów jednostek z tylnych baz do budynku przyczółkowego przed większym atakiem.
 
-### 13.8. Poziomy trudności
+### 14.8. Poziomy trudności
 
-Poziom trudności AI jest opisany zestawem parametrów: interwałem decyzji, szumem dodawanym do punktacji, opóźnieniem reakcji na zagrożenia, progiem wysyłki oraz wagami W1–W6 i progiem z sekcji 13.5. Wartości tych parametrów są zdefiniowane w pliku stałych (zgodnie z sekcją „Kod” specyfikacji implementacji).
+Poziom trudności AI jest opisany zestawem parametrów: interwałem decyzji, szumem dodawanym do punktacji, opóźnieniem reakcji na zagrożenia, progiem wysyłki oraz wagami W1–W6 i progiem z sekcji 14.5. Wartości tych parametrów są zdefiniowane w pliku stałych (zgodnie z sekcją „Kod” specyfikacji implementacji).
 

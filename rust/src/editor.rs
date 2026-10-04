@@ -22,9 +22,9 @@
 //! [`EditorState::validate`] returns the rule violations of rules.md as human
 //! readable strings: a building on water, a bridge over too high land or
 //! joining two different heights, a ramp joining tiles of the same height or
-//! sitting at the wrong height, a missing player base, and a missing opponent
-//! base. The editor lists them on screen but never blocks a save, so a map
-//! can be stored and fixed later.
+//! sitting at the wrong height, a missing player base, a missing opponent
+//! base and a bonus no vehicle can reach. The editor lists them on screen but
+//! never blocks a save, so a map can be stored and fixed later.
 //!
 //! # Board size
 //!
@@ -41,7 +41,7 @@ use std::path::{Path, PathBuf};
 
 use crate::board::{Board, Obstacle, ObstacleKind};
 use crate::constants;
-use crate::entities::{Building, BuildingKind, Player, is_base};
+use crate::entities::{Bonus, BonusKind, Building, BuildingKind, Player, is_base};
 use crate::game::Game;
 use crate::hexgrid::{self, Tile};
 use crate::mapfile;
@@ -67,6 +67,10 @@ pub const EDITOR_DIGIT_COMMIT_DELAY: f64 = 1.0;
 pub const EDITOR_NEW_COLS: i32 = 256;
 /// Rows of a newly created editor board.
 pub const EDITOR_NEW_ROWS: i32 = 256;
+/// Value a freshly placed `+x` bonus gets (rules.md section 13).
+pub const EDITOR_DEFAULT_BONUS_ADD: u32 = 10;
+/// Value a freshly placed `*x` bonus gets (rules.md section 13).
+pub const EDITOR_DEFAULT_BONUS_MUL: u32 = 2;
 /// Columns of the central land rectangle on a new board.
 pub const EDITOR_LAND_COLS: i32 = 20;
 /// Rows of the central land rectangle on a new board.
@@ -103,13 +107,13 @@ pub const OBSTACLE_ORDER: [ObstacleKind; 4] = [
 
 /// Legend lines shown on the editor screen.
 pub const LEGEND: [&str; 7] = [
-    "b: building (again: cycle kind)    digits: units 0-999",
+    "b: building (again: cycle kind)    i: bonus (again: cycle kind)",
     "o: cycle owner                     t: obstacle (again: cycle kind)",
+    "digits: units 0-999, bonus 1-999 (+x) / 2-99 (*x)",
     "m: bridge (again: rotate)          r: ramp (again: rotate)",
     "[/]: lower/raise terrain           Del/RMB: delete object",
     "l: load   s: save   ctrl+s: quick save   ctrl+n: new map",
-    "p: play the level (Esc there: back to editing)",
-    "Esc: menu (asks to save if dirty)   view: drag/wheel/arrows",
+    "p: play the level (Esc there: back to editing)   Esc: menu",
 ];
 
 /// Which overlay (if any) the editor UI currently shows.
@@ -174,6 +178,8 @@ pub struct EditorState {
     pub board: Board,
     /// Buildings standing on the board.
     pub buildings: Vec<Building>,
+    /// Bonuses standing on the board (rules.md section 13).
+    pub bonuses: Vec<Bonus>,
     /// File name (without extension) the map was loaded from or saved under.
     pub map_name: Option<String>,
     /// True once the board differs from the last loaded/saved state.
@@ -186,6 +192,11 @@ pub struct EditorState {
     pub last_units: u32,
     /// Obstacle kind reused for newly placed obstacles.
     pub last_obstacle: ObstacleKind,
+    /// Bonus kind reused for newly placed bonuses.
+    pub last_bonus: BonusKind,
+    /// Bonus value reused for newly placed bonuses and for the next step of
+    /// the `+x` → `*x` → drone cycle, clamped to the range of the kind.
+    pub last_bonus_value: u32,
     /// Pending digit entry for the unit count: tile + typed digits.
     pub digit_tile: Option<Tile>,
     /// Pending digit entry, committed on the third digit.
@@ -226,12 +237,15 @@ impl EditorState {
         Self {
             board,
             buildings: Vec::new(),
+            bonuses: Vec::new(),
             map_name: None,
             dirty: false,
             last_kind: BuildingKind::BaseTank,
             last_owner: None,
             last_units: 0,
             last_obstacle: ObstacleKind::Wall,
+            last_bonus: BonusKind::Add(EDITOR_DEFAULT_BONUS_ADD),
+            last_bonus_value: EDITOR_DEFAULT_BONUS_ADD,
             digit_tile: None,
             digit_buf: String::new(),
             digit_age: 0.0,
@@ -305,7 +319,7 @@ impl EditorState {
         }
     }
 
-    /// Commit the pending digit entry to its building, if still valid.
+    /// Commit the pending digit entry to its building or bonus, if still valid.
     pub fn commit_digits(&mut self) {
         if self.digit_buf.is_empty() {
             self.digit_tile = None;
@@ -314,16 +328,46 @@ impl EditorState {
         if let Some(tile) = self.digit_tile
             && let Ok(units) = self.digit_buf.parse::<u32>()
         {
-            let units = units.min(EDITOR_MAX_UNITS);
             if let Some(b) = self.building_at_mut(tile) {
+                let units = units.min(EDITOR_MAX_UNITS);
                 b.units = units as f64;
                 self.last_units = units;
                 self.dirty = true;
+            } else if let Some(kind) = self.bonus_kind_at(tile) {
+                // Bonus values share the digit entry with buildings
+                // (rules.md section 13): +x takes 1-999, *x 2-99.
+                let value = match kind {
+                    BonusKind::Add(_) => {
+                        units.clamp(constants::BONUS_ADD_MIN, constants::BONUS_ADD_MAX)
+                    }
+                    BonusKind::Mul(_) => {
+                        units.clamp(constants::BONUS_MUL_MIN, constants::BONUS_MUL_MAX)
+                    }
+                    BonusKind::Drone => return,
+                };
+                self.set_bonus_value(tile, value);
             }
         }
         self.digit_tile = None;
         self.digit_buf.clear();
         self.digit_age = 0.0;
+    }
+    /// Kind of the bonus on `tile`, if any.
+    fn bonus_kind_at(&self, tile: Tile) -> Option<BonusKind> {
+        self.bonuses.iter().find(|b| b.tile == tile).map(|b| b.kind)
+    }
+    /// Write `value` into the bonus on `tile` (a drone has no value, so the
+    /// call is ignored) and remember it for the next bonus.
+    fn set_bonus_value(&mut self, tile: Tile, value: u32) {
+        if let Some(bonus) = self.bonuses.iter_mut().find(|b| b.tile == tile) {
+            match bonus.kind {
+                BonusKind::Add(_) => bonus.kind = BonusKind::Add(value),
+                BonusKind::Mul(_) => bonus.kind = BonusKind::Mul(value),
+                BonusKind::Drone => return,
+            }
+            self.last_bonus_value = value;
+            self.dirty = true;
+        }
     }
 
     /// Advance the digit-entry commit timer (call every frame).
@@ -351,12 +395,16 @@ impl EditorState {
         self.buildings.iter().position(|b| b.tile == tile)
     }
 
-    /// Remove every object (building, obstacle, ramp, bridge fragment) from
-    /// `tile`, returning true when anything was removed.
+    /// Remove every object (building, bonus, obstacle, ramp, bridge fragment)
+    /// from `tile`, returning true when anything was removed.
     fn clear_tile(&mut self, tile: Tile) -> bool {
         let mut removed = false;
         if let Some(i) = self.building_index(tile) {
             self.buildings.remove(i);
+            removed = true;
+        }
+        if let Some(i) = self.bonuses.iter().position(|b| b.tile == tile) {
+            self.bonuses.remove(i);
             removed = true;
         }
         if self.board.tiles.get(&tile).and_then(|t| t.ramp).is_some() {
@@ -464,13 +512,15 @@ impl EditorState {
         }
     }
 
-    /// Type one digit of the unit count (0-999) of the building on `tile`.
+    /// Type one digit of the unit count (0-999) of the building on `tile`,
+    /// or of the bonus value (+x 1-999, *x 2-99) on `tile`.
     pub fn type_digit(&mut self, tile: Option<Tile>, digit: char) -> bool {
         let Some(tile) = tile else { return false };
         if !digit.is_ascii_digit() {
             return false;
         }
-        if self.building_index(tile).is_none() {
+        let is_bonus = self.bonuses.iter().any(|b| b.tile == tile);
+        if self.building_index(tile).is_none() && !is_bonus {
             return false;
         }
         if self.digit_tile != Some(tile) {
@@ -483,9 +533,22 @@ impl EditorState {
         if self.digit_buf.len() >= 3 {
             self.commit_digits();
         } else if let Ok(units) = self.digit_buf.parse::<u32>() {
-            let units = units.min(EDITOR_MAX_UNITS);
             if let Some(b) = self.building_at_mut(tile) {
+                let units = units.min(EDITOR_MAX_UNITS);
                 b.units = units as f64;
+            } else if let Some(kind) = self.bonus_kind_at(tile) {
+                let value = match kind {
+                    BonusKind::Add(_) => {
+                        units.clamp(constants::BONUS_ADD_MIN, constants::BONUS_ADD_MAX)
+                    }
+                    BonusKind::Mul(_) => {
+                        units.clamp(constants::BONUS_MUL_MIN, constants::BONUS_MUL_MAX)
+                    }
+                    BonusKind::Drone => 0,
+                };
+                if value > 0 {
+                    self.set_bonus_value(tile, value);
+                }
             }
         }
         self.dirty = true;
@@ -686,6 +749,52 @@ impl EditorState {
         true
     }
 
+    /// `i`: place a bonus or cycle the kind of the existing one
+    /// (rules.md section 13: +x, *x, drone).
+    ///
+    /// A bonus fills the whole field, so placing one removes whatever stood on
+    /// the tile (see [`EditorState::clear_tile`]). Pressing `i` again on the
+    /// same field walks the kinds in the cycle and back to the first one; the
+    /// value of `+x` and `*x` follows the last one used, like the remembered
+    /// properties of a building.
+    pub fn press_i(&mut self, tile: Option<Tile>) -> bool {
+        let Some(tile) = tile else { return false };
+        if !self.board.contains(tile) {
+            return false;
+        }
+        self.accept_digits(Some(tile));
+        // Bonuses stand on land only (rules.md section 13).
+        if self.board.height(tile) == 0 {
+            return false;
+        }
+        if let Some(i) = self.bonuses.iter().position(|b| b.tile == tile) {
+            let kind = next_bonus_kind(self.bonuses[i].kind);
+            self.bonuses[i].kind = kind;
+            self.last_bonus = kind;
+            if let BonusKind::Add(x) | BonusKind::Mul(x) = kind {
+                self.last_bonus_value = x;
+            }
+            self.dirty = true;
+            return true;
+        }
+        self.clear_tile(tile);
+        let kind = match self.last_bonus {
+            BonusKind::Add(_) => BonusKind::Add(
+                self.last_bonus_value
+                    .clamp(constants::BONUS_ADD_MIN, constants::BONUS_ADD_MAX),
+            ),
+            BonusKind::Mul(_) => BonusKind::Mul(
+                self.last_bonus_value
+                    .clamp(constants::BONUS_MUL_MIN, constants::BONUS_MUL_MAX),
+            ),
+            BonusKind::Drone => BonusKind::Drone,
+        };
+        self.bonuses.push(Bonus::new(tile, kind));
+        self.last_bonus = kind;
+        self.dirty = true;
+        true
+    }
+
     /// `Del` / RMB: delete the object on `tile`.
     pub fn delete_at(&mut self, tile: Option<Tile>) -> bool {
         let Some(tile) = tile else { return false };
@@ -767,6 +876,7 @@ impl EditorState {
             self.board.clone(),
             players,
             self.buildings.clone(),
+            self.bonuses.clone(),
             self.playtest_seed(),
         );
         // A test run is a sandbox: the match never ends, so an unfinished map
@@ -787,15 +897,23 @@ impl EditorState {
     /// Load the map stored at `path`, padding small boards up to the standard
     /// new-map size.
     pub fn load_path(&mut self, path: &Path) -> Result<(), String> {
-        let (board, buildings) = mapfile::load_board(path)?;
+        let (board, buildings, bonuses) = mapfile::load_board(path)?;
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("map")
             .to_string();
-        let (board, buildings) = pad_map(board, buildings);
+        let (board, buildings, bonuses) = pad_map(board, buildings, bonuses);
         self.board = board;
         self.buildings = buildings;
+        self.bonuses = bonuses;
+        // Remember the loaded bonus kind and value as defaults for new bonuses.
+        if let Some(last) = self.bonuses.last() {
+            self.last_bonus = last.kind;
+            if let BonusKind::Add(x) | BonusKind::Mul(x) = last.kind {
+                self.last_bonus_value = x;
+            }
+        }
         self.map_name = Some(name);
         self.dirty = false;
         self.digit_tile = None;
@@ -824,9 +942,9 @@ impl EditorState {
             return Err("no map name".to_string());
         }
         self.commit_digits();
-        let (board, buildings) = trim_map(&self.board, &self.buildings);
+        let (board, buildings, bonuses) = trim_map(&self.board, &self.buildings, &self.bonuses);
         let path = dir.join(format!("{}{}", name, constants::MAP_EXTENSION));
-        mapfile::save_map(&path, &board, &buildings).map_err(|e| e.to_string())?;
+        mapfile::save_map(&path, &board, &buildings, &bonuses).map_err(|e| e.to_string())?;
         self.map_name = Some(name.to_string());
         self.dirty = false;
         self.overlay = EditorOverlay::None;
@@ -836,7 +954,8 @@ impl EditorState {
     /// Rule violations shown in red on the editor screen: building on water,
     /// bridge over too high land, bridge joining different heights, ramp on
     /// the wrong height, ramp joining equal heights, missing player base,
-    /// missing enemy base. A map with errors can still be saved and loaded.
+    /// missing enemy base, unreachable bonus. A map with errors can still be
+    /// saved and loaded.
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
         for b in self.buildings.iter() {
@@ -890,13 +1009,30 @@ impl EditorState {
         if !enemy_base {
             errors.push("missing enemy base".to_string());
         }
+        for bonus in self.bonuses.iter() {
+            // A bonus no vehicle can reach is useless (rules.md section 13).
+            let mut reachable = false;
+            for b in self.buildings.iter() {
+                let kind = crate::entities::vehicle_kind_of(b.kind);
+                if self.board.find_path(b.tile, bonus.tile, kind).is_some() {
+                    reachable = true;
+                    break;
+                }
+            }
+            if !reachable {
+                errors.push(format!(
+                    "unreachable bonus at {},{}",
+                    bonus.tile.0, bonus.tile.1
+                ));
+            }
+        }
         errors
     }
 }
 
 /// True when `tile` holds anything a trimmed map must keep: non-water, an
 /// object, or a tile kept so no ramp/bridge endpoint falls off the board.
-fn tile_occupied(board: &Board, tile: Tile, buildings: &[Building]) -> bool {
+fn tile_occupied(board: &Board, tile: Tile, buildings: &[Building], bonuses: &[Bonus]) -> bool {
     let Some(t) = board.tiles.get(&tile) else {
         return false;
     };
@@ -906,24 +1042,47 @@ fn tile_occupied(board: &Board, tile: Tile, buildings: &[Building]) -> bool {
     if t.ramp.is_some() || t.bridge.is_some() {
         return true;
     }
-    buildings.iter().any(|b| b.tile == tile)
+    if buildings.iter().any(|b| b.tile == tile) {
+        return true;
+    }
+    bonuses.iter().any(|b| b.tile == tile)
+}
+
+/// The kind that follows `current` in the editor cycle `+x` → `*x` → drone
+/// → `+x`, with the starting value of the kind (rules.md section 13).
+///
+/// Cycling does not carry a typed number over: `*x` starts at 2 and `+x` at
+/// 10, the same values a freshly placed bonus gets. A typed number is
+/// remembered per kind in [`EditorState::last_bonus`] /
+/// [`EditorState::last_bonus_value`] and applies to the next bonus of that
+/// kind the map author places.
+fn next_bonus_kind(current: BonusKind) -> BonusKind {
+    match current {
+        BonusKind::Add(_) => BonusKind::Mul(EDITOR_DEFAULT_BONUS_MUL),
+        BonusKind::Mul(_) => BonusKind::Drone,
+        BonusKind::Drone => BonusKind::Add(EDITOR_DEFAULT_BONUS_ADD),
+    }
 }
 
 /// Remove empty border rows and columns from the board.
 ///
 /// Empty means pure water (height 0) without any object. Every kept ramp
 /// endpoint and bridge end is kept on the board as well, so no object loses
-/// its neighbours. Returns a new `(board, buildings)` pair with shifted
-/// coordinates; the smallest possible result is a 1 x 1 board. The column
-/// shift is always *even* (the odd-q grid is translation-invariant only
-/// then), so one extra water column may be kept on the left when the first
-/// occupied column is odd.
-pub fn trim_map(board: &Board, buildings: &[Building]) -> (Board, Vec<Building>) {
+/// its neighbours. Returns a new `(board, buildings, bonuses)` triple with
+/// shifted coordinates; the smallest possible result is a 1 x 1 board. The
+/// column shift is always *even* (the odd-q grid is translation-invariant
+/// only then), so one extra water column may be kept on the left when the
+/// first occupied column is odd.
+pub fn trim_map(
+    board: &Board,
+    buildings: &[Building],
+    bonuses: &[Bonus],
+) -> (Board, Vec<Building>, Vec<Bonus>) {
     use std::collections::HashSet;
     let mut occupied_cols: HashSet<i32> = HashSet::new();
     let mut occupied_rows: HashSet<i32> = HashSet::new();
     for tile in board.tiles.keys() {
-        if tile_occupied(board, *tile, buildings) {
+        if tile_occupied(board, *tile, buildings, bonuses) {
             occupied_cols.insert(tile.0);
             occupied_rows.insert(tile.1);
         }
@@ -1004,17 +1163,30 @@ pub fn trim_map(board: &Board, buildings: &[Building]) -> (Board, Vec<Building>)
             out_buildings.push(nb);
         }
     }
-    (out, out_buildings)
+    let mut out_bonuses = Vec::with_capacity(bonuses.len());
+    for b in bonuses.iter() {
+        let nt = shift(b.tile);
+        if out.contains(nt) {
+            let mut nb = *b;
+            nb.tile = nt;
+            out_bonuses.push(nb);
+        }
+    }
+    (out, out_buildings, out_bonuses)
 }
 
 /// Pad boards smaller than the standard new-map size back up to it,
 /// spreading the extra rows/columns evenly at the start/end (the surplus
 /// column goes at the end); the view centres on the result.
-pub fn pad_map(board: Board, buildings: Vec<Building>) -> (Board, Vec<Building>) {
+pub fn pad_map(
+    board: Board,
+    buildings: Vec<Building>,
+    bonuses: Vec<Bonus>,
+) -> (Board, Vec<Building>, Vec<Bonus>) {
     let (cols, rows) = (board.cols, board.rows);
     let (tc, tr) = (EDITOR_NEW_COLS, EDITOR_NEW_ROWS);
     if cols >= tc && rows >= tr {
-        return (board, buildings);
+        return (board, buildings, bonuses);
     }
     let mut q0 = ((tc - cols) / 2).max(0);
     q0 -= q0 % 2;
@@ -1060,7 +1232,14 @@ pub fn pad_map(board: Board, buildings: Vec<Building>) -> (Board, Vec<Building>)
             b
         })
         .collect();
-    (out, out_buildings)
+    let out_bonuses = bonuses
+        .into_iter()
+        .map(|mut b| {
+            b.tile = (b.tile.0 + q0, b.tile.1 + r0);
+            b
+        })
+        .collect();
+    (out, out_buildings, out_bonuses)
 }
 
 #[cfg(test)]
@@ -1076,12 +1255,15 @@ mod tests {
         EditorState {
             board,
             buildings: Vec::new(),
+            bonuses: Vec::new(),
             map_name: None,
             dirty: false,
             last_kind: BuildingKind::BaseTank,
             last_owner: None,
             last_units: 0,
             last_obstacle: ObstacleKind::Wall,
+            last_bonus: BonusKind::Add(EDITOR_DEFAULT_BONUS_ADD),
+            last_bonus_value: EDITOR_DEFAULT_BONUS_ADD,
             digit_tile: None,
             digit_buf: String::new(),
             digit_age: 0.0,
@@ -1314,6 +1496,92 @@ mod tests {
         assert!(errors.iter().any(|e| e.contains("water")));
     }
 
+    /// A bonus fills its whole field, is placed with `i` and cycles its kind
+    /// on every further press; digits set the value of the `+x` / `*x` kinds.
+    #[test]
+    fn bonus_placement_cycles_and_takes_a_value() {
+        let mut ed = test_state(6, 3);
+        let land = (2, 1);
+        // Land only: water takes no bonus (rules.md section 13).
+        ed.board.tiles.get_mut(&(2, 0)).unwrap().height = 0;
+        assert!(!ed.press_i(Some((2, 0))));
+        assert!(ed.press_i(Some(land)));
+        assert_eq!(ed.bonuses[0].tile, land);
+        assert_eq!(
+            ed.bonuses[0].kind,
+            BonusKind::Add(10),
+            "the default +x value"
+        );
+        // A bonus fills the field, so placing a building there drops the
+        // bonus, and pressing `i` again drops the building (rules.md 13).
+        assert!(ed.press_b(Some(land)));
+        assert!(ed.bonuses.is_empty());
+        assert!(ed.press_i(Some(land)));
+        assert!(ed.buildings.is_empty());
+        // Further presses walk +x -> *x -> drone -> +x again.
+        assert!(ed.press_i(Some(land)));
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Mul(2));
+        assert!(ed.press_i(Some(land)));
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Drone);
+        assert!(ed.press_i(Some(land)));
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Add(10));
+        // Digits set the value of the current kind, clamped to its range.
+        assert!(ed.press_i(Some(land))); // *x with its default value
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Mul(2));
+        for c in ['4', '2'] {
+            assert!(ed.type_digit(Some(land), c));
+        }
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Mul(42));
+        // A third digit commits the entry at once, clamped to the range.
+        assert!(ed.type_digit(Some(land), '9'));
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Mul(99), "429 clamps to 99");
+        // A drone has no value, so digits change nothing.
+        assert!(ed.press_i(Some(land)));
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Drone);
+        assert!(ed.type_digit(Some(land), '7'));
+        assert_eq!(ed.bonuses[0].kind, BonusKind::Drone);
+        // A newly placed bonus repeats the kind and value last used.
+        assert!(ed.press_i(Some((3, 1))));
+        assert_eq!(ed.bonuses[1].kind, BonusKind::Drone);
+        assert!(ed.press_i(Some((3, 1))));
+        assert_eq!(ed.bonuses[1].kind, BonusKind::Add(10));
+        for c in ['5', '0'] {
+            assert!(ed.type_digit(Some((3, 1)), c));
+        }
+        ed.commit_digits();
+        assert_eq!(ed.bonuses[1].kind, BonusKind::Add(50));
+        // Typing a value also switches the remembered kind: the next bonus
+        // starts as `+x` with the number just typed.
+        assert!(ed.press_i(Some((4, 1))));
+        assert_eq!(ed.bonuses[2].kind, BonusKind::Add(50));
+        // Deleting the tile takes the bonus with it.
+        assert!(ed.delete_at(Some(land)));
+        assert!(ed.bonuses.iter().all(|b| b.tile != land));
+        for tile in [(3, 1), (4, 1)] {
+            assert!(ed.delete_at(Some(tile)));
+            assert!(ed.bonuses.iter().all(|b| b.tile != tile));
+        }
+        assert!(ed.bonuses.is_empty());
+    }
+
+    #[test]
+    fn validate_reports_a_bonus_no_building_can_reach() {
+        // A bonus off every road is dead content, so the editor says so --
+        // as a warning that never blocks the save (rules.md section 13).
+        let mut ed = test_state(6, 3);
+        // A water column cuts the tank base off from the field behind it.
+        for r in 0..3 {
+            ed.board.tiles.get_mut(&(3, r)).unwrap().height = 0;
+        }
+        ed.press_b(Some((2, 1)));
+        assert!(ed.press_i(Some((5, 1))));
+        let errors = ed.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("unreachable bonus")),
+            "{errors:?}"
+        );
+    }
+
     #[test]
     fn terrain_fingerprint_ignores_building_only_edits() {
         // Building-only edits (units/owner/kind) keep the fingerprint, so the
@@ -1360,8 +1628,8 @@ mod tests {
         }
         board.tiles.get_mut(&(3, 2)).unwrap().height = 1;
         let buildings = vec![Building::new(BuildingKind::BaseTank, Some(0), 5, 4, 7.0)];
-        let (trimmed, tb) = trim_map(&board, &buildings);
-        let (padded, pb) = pad_map(trimmed, tb);
+        let (trimmed, tb, _) = trim_map(&board, &buildings, &[]);
+        let (padded, pb, _) = pad_map(trimmed, tb, Vec::new());
         assert_eq!(
             (padded.cols, padded.rows),
             (EDITOR_NEW_COLS, EDITOR_NEW_ROWS)
@@ -1373,7 +1641,7 @@ mod tests {
         let land = padded.tiles.values().filter(|t| t.height != 0).count();
         assert_eq!(land, 1);
         // ...so saving the padded board trims back down to the level size.
-        let (retrimmed, rb) = trim_map(&padded, &pb);
+        let (retrimmed, rb, _) = trim_map(&padded, &pb, &[]);
         assert_eq!((retrimmed.cols, retrimmed.rows), (4, 3));
         assert_eq!(rb.len(), 1);
     }
@@ -1463,10 +1731,10 @@ mod tests {
         }
         board.tiles.get_mut(&(3, 2)).unwrap().height = 1;
         let buildings = vec![Building::new(BuildingKind::BaseTank, Some(0), 5, 4, 7.0)];
-        let (trimmed, tb) = trim_map(&board, &buildings);
+        let (trimmed, tb, _) = trim_map(&board, &buildings, &[]);
         assert_eq!((trimmed.cols, trimmed.rows), (4, 3));
         assert_eq!(tb.len(), 1);
-        let (padded, pb) = pad_map(trimmed, tb);
+        let (padded, pb, _) = pad_map(trimmed, tb, Vec::new());
         assert_eq!(
             (padded.cols, padded.rows),
             (EDITOR_NEW_COLS, EDITOR_NEW_ROWS)
@@ -1476,7 +1744,7 @@ mod tests {
         for t in empty.tiles.values_mut() {
             t.height = 0;
         }
-        let (t, _) = trim_map(&empty, &[]);
+        let (t, _, _) = trim_map(&empty, &[], &[]);
         assert_eq!((t.cols, t.rows), (1, 1));
     }
 

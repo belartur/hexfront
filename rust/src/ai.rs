@@ -1,16 +1,20 @@
-//! AI players (rules.md section 13).
+//! AI players (rules.md sections 13-14).
 //!
-//! Each AI player runs an independent decision loop (section 13.2) and, once
+//! Each AI player runs an independent decision loop (section 14.2) and, once
 //! per interval, evaluates every (source, target) building pair with the
-//! scoring formula from section 13.5:
+//! scoring formula from section 14.5:
 //!
 //! ```text
 //! score = W1*chance + W2*value + W3*defence - W4*time
 //!         - W5*danger - W6*source_risk
 //! ```
 //!
-//! plus small security/evacuation adjustments and difficulty noise. The
-//! behaviour is fully deterministic for a given level seed (section 13.2).
+//! plus small security/evacuation adjustments and difficulty noise. Bonus
+//! tiles (rules.md section 13) compete as extra targets under the same
+//! formula: the effect value replaces the capture chance and the building
+//! value, the round trip doubles time and danger, and the same threshold
+//! decides. The behaviour is fully deterministic for a given level seed
+//! (section 14.2).
 //!
 //! A decision is the most expensive thing the simulation does: it weighs every
 //! building pair of the map, and on a big level that means thousands of route
@@ -30,7 +34,7 @@ use std::rc::Rc;
 use crate::board::Board;
 use crate::constants::{self, AiDifficulty, TurretKind, VehicleKind};
 use crate::entities::{
-    Building, BuildingKind, is_base, is_turret, turret_kind_of, vehicle_kind_of,
+    BonusKind, Building, BuildingKind, is_base, is_turret, turret_kind_of, vehicle_kind_of,
 };
 use crate::game::Game;
 use crate::hexgrid::Tile;
@@ -63,7 +67,7 @@ type Regions = HashMap<VehicleKind, Option<Rc<Vec<u32>>>>;
 /// seed and given their position among the AI players.
 ///
 /// The index and the count are what spread the decisions evenly over one
-/// decision interval (rules.md section 13.2), so every way of starting a
+/// decision interval (rules.md section 14.2), so every way of starting a
 /// game spaces them the same way.
 pub fn controllers(game: &Game, difficulty: AiDifficulty, seed: u64) -> Vec<AiController> {
     let ai_players: Vec<usize> = game
@@ -126,7 +130,7 @@ impl AiController {
     ///
     /// `player_index` is the position of this player among the AI players and
     /// `player_count` how many of them there are. The decision phases are
-    /// spread evenly over one interval that way (section 13.2): with three AI
+    /// spread evenly over one interval that way (section 14.2): with three AI
     /// players and a two-second interval the controllers decide two thirds of
     /// a second apart, so a decision never lands on top of another player's
     /// and one interval of AI work is spread over `player_count` frames
@@ -147,7 +151,7 @@ impl AiController {
             player_id,
             diff: difficulty,
             rng: Rng::new(seed),
-            // Stagger the decision phases of different AI players (13.2).
+            // Stagger the decision phases of different AI players (14.2).
             timer: phase,
             threat_seen: HashMap::new(),
             routes: HashMap::new(),
@@ -201,8 +205,8 @@ impl AiController {
             .or_insert_with(|| board.find_path(src, dst, kind).map(Rc::new))
             .clone()
     }
-    /// Enemy and neutral turrets of the current decision (sections 13.3,
-    /// 13.5): everything a route can be shot at from.
+    /// Enemy and neutral turrets of the current decision (sections 14.3,
+    /// 14.5): everything a route can be shot at from.
     fn gather_hostiles(&mut self, board: &Board, buildings: &[Building]) {
         self.hostiles.clear();
         for b in buildings.iter() {
@@ -223,7 +227,7 @@ impl AiController {
             });
         }
     }
-    /// Filter raw threats through the reaction delay (section 13.8).
+    /// Filter raw threats through the reaction delay (section 14.8).
     fn visible_threats(&mut self, game: &Game, raw: &HashMap<Tile, f64>) -> HashMap<Tile, f64> {
         let game_time = game.time;
         let delay = self.diff.reaction_delay;
@@ -263,7 +267,7 @@ impl AiController {
     /// while the vehicle crosses it, so the number of incoming shots is
     /// estimated from the covered distance (at most the full route
     /// length) divided by the turret's fire period. Used by the safety
-    /// rules (sec. 13.6).
+    /// rules (sec. 14.6).
     fn route_damage(&self, board: &Board, path: &[Tile], speed: f64) -> f64 {
         let route_length = board.path_world_length(path, None);
         let mut damage = 0.0;
@@ -288,7 +292,7 @@ impl AiController {
     }
     fn decide(&mut self, game: &mut Game) {
         let me = self.player_id;
-        // Gather intelligence (sections 13.3, 13.4).
+        // Gather intelligence (sections 14.3, 14.4).
         let mut raw_enemy: HashMap<Tile, f64> = HashMap::new();
         let mut friendly: HashMap<Tile, f64> = HashMap::new();
         for v in game.vehicles.iter() {
@@ -307,8 +311,8 @@ impl AiController {
         // tile: the danger and damage scans below walk the route and compare
         // against this list instead of against every building on the map.
         self.gather_hostiles(&game.board, &game.buildings);
-        // Candidate (source_idx, target_idx).
-        let mut best: Option<(f64, usize, usize)> = None;
+        // Candidate (source_idx, target tile).
+        let mut best: Option<(f64, usize, Tile)> = None;
         let n = game.buildings.len();
         for si in 0..n {
             let src = &game.buildings[si];
@@ -316,7 +320,7 @@ impl AiController {
                 continue;
             }
             let kind: VehicleKind = vehicle_kind_of(src.kind);
-            // Do not strip turrets under threat without a good reason (13.5).
+            // Do not strip turrets under threat without a good reason (14.5).
             if is_turret(src.kind) && visible.contains_key(&src.tile) {
                 continue;
             }
@@ -328,7 +332,7 @@ impl AiController {
                 let p = src.units;
                 let b = dst.units;
                 let own = dst.owner == Some(me);
-                // Safety rules that need no route (13.6), applied before the
+                // Safety rules that need no route (14.6), applied before the
                 // search: they reject the pair on unit counts alone, so a
                 // hopeless attack never pays for a route search.
                 if !own {
@@ -401,16 +405,154 @@ impl AiController {
                 }
                 score += self.rng.gauss(0.0, self.diff.noise);
                 if best.is_none() || score > best.unwrap().0 {
-                    best = Some((score, si, di));
+                    best = Some((score, si, dst.tile));
                 }
             }
         }
-        if let Some((score, si, di)) = best
+        // Bonus targets (rules.md section 13): a dispatch to a bonus is the
+        // same action as a dispatch to a building, only the target differs.
+        // One decision performs at most one action, so a bonus is just one
+        // more candidate next to the building pairs.
+        for (si, src) in game.buildings.iter().enumerate() {
+            if src.owner != Some(me) || src.units < 1.0 {
+                continue;
+            }
+            // Never double-book a bonus: when one own vehicle is already on
+            // its way there, no second vehicle is sent (rules.md 12).
+            let kind = vehicle_kind_of(src.kind);
+            for bonus in game.bonuses.iter().flatten() {
+                if game
+                    .vehicles
+                    .iter()
+                    .any(|v| !v.dead && v.owner == me && v.bonus_target == Some(bonus.tile))
+                {
+                    continue;
+                }
+                let Some(path) = self.route(&game.board, src.tile, bonus.tile, kind) else {
+                    continue;
+                };
+                let Some(score) =
+                    self.score_bonus(game, me, src, bonus, &path, kind, &visible, &friendly)
+                else {
+                    continue;
+                };
+                if best.is_none() || score > best.unwrap().0 {
+                    best = Some((score, si, bonus.tile));
+                }
+            }
+        }
+        if let Some((score, si, dt2)) = best
             && score >= self.diff.threshold
         {
-            let (st, dt2) = (game.buildings[si].tile, game.buildings[di].tile);
-            game.try_send(me, st, dt2);
+            let st = game.buildings[si].tile;
+            if dt2 != st {
+                game.try_send(me, st, dt2);
+            }
         }
+    }
+    /// The first enemy vehicle racing for the same bonus, with the time it
+    /// needs to get there.
+    ///
+    /// rules.md section 14.5: a bonus is not rejected just because somebody
+    /// else is going for it -- the vehicle may still win the fight on the
+    /// way, because combat never changes its destination. The caller needs
+    /// the rival only to discount the value: full when the own vehicle
+    /// arrives no later, and just the chance of winning the duel when the
+    /// rival gets there first (full with a unit advantage, zero without).
+    fn bonus_rival(&self, game: &Game, me: usize, bonus_tile: Tile) -> Option<(f64, f64)> {
+        let mut best: Option<(f64, f64)> = None;
+        for v in game.vehicles.iter() {
+            if v.dead || v.owner == me || v.route.is_empty() {
+                continue;
+            }
+            let heads_for_bonus =
+                v.bonus_target == Some(bonus_tile) || v.route[v.route.len() - 1] == bonus_tile;
+            if !heads_for_bonus {
+                continue;
+            }
+            let left: Vec<Tile> = v.route[v.route_index.min(v.route.len())..].to_vec();
+            let len = game.board.path_world_length(&left, None);
+            let time = len / constants::vehicle_speed(v.kind);
+            if best.is_none_or(|(bt, _)| time < bt) {
+                best = Some((time, v.units));
+            }
+        }
+        best
+    }
+    /// Score of one (source building, bonus) pair (rules.md section 13).
+    ///
+    /// The effect value replaces the capture chance and the building value:
+    /// `+x` is worth `x / units`, `*x` the multiplier gain `x - 1` and a
+    /// drone a fixed value independent of the unit count. The mission is a
+    /// round trip along the same route, so the travel time, the danger and
+    /// the expected damage count twice. The value shrinks with the fraction
+    /// of units expected to survive the round trip (`+x` and `*x` only -- a
+    /// drone recreates its own field when its carrier dies). A rival racing
+    /// for the same field discounts the value by the chance of getting it:
+    /// full when the own vehicle arrives no later, and only the chance of
+    /// winning the fight when the rival is quicker. `None` means the AI does
+    /// not send: the expected damage would eat the whole convoy, the rival is
+    /// both quicker and at least as strong, or the source building is
+    /// threatened and has no other force of its own defending it (a bonus
+    /// mission leaves it empty twice as long).
+    #[allow(clippy::too_many_arguments)]
+    fn score_bonus(
+        &mut self,
+        game: &Game,
+        me: usize,
+        src: &Building,
+        bonus: &crate::entities::Bonus,
+        path: &Route,
+        kind: VehicleKind,
+        visible: &HashMap<Tile, f64>,
+        friendly: &HashMap<Tile, f64>,
+    ) -> Option<f64> {
+        let p = src.units;
+        if p < 1.0 {
+            return None;
+        }
+        let length = game.board.path_world_length(path, Some(src.tile));
+        let speed = constants::vehicle_speed(kind);
+        let expected = self.route_damage(&game.board, path, speed);
+        if expected >= p {
+            return None;
+        }
+        let src_threat = *visible.get(&src.tile).unwrap_or(&0.0);
+        let src_backup = *friendly.get(&src.tile).unwrap_or(&0.0);
+        if src_threat > 0.0 && src_threat >= p + src_backup {
+            return None;
+        }
+        let d = self.diff;
+        let mut score = 0.0;
+        match bonus.kind {
+            BonusKind::Add(_) | BonusKind::Mul(_) => {
+                let effect = match bonus.kind {
+                    BonusKind::Add(x) => x as f64 / p.max(1.0),
+                    BonusKind::Mul(x) => (x as f64 - 1.0).max(0.0),
+                    BonusKind::Drone => 0.0,
+                };
+                let survived = ((p - 2.0 * expected) / p).clamp(0.0, 1.0);
+                score += d.w1 * effect * survived;
+            }
+            BonusKind::Drone => score += d.w1 * 1.5 + d.w2 * 0.3,
+        }
+        score -= d.w4 * 2.0 * length / speed / 60.0;
+        score -= d.w5 * 2.0 * self.route_danger(&game.board, path);
+        if src_threat > 0.0 {
+            score -= d.w6 * (src_threat / p.max(1.0)).min(1.0);
+        }
+        if let Some((rival_time, rival_units)) = self.bonus_rival(game, me, bonus.tile)
+            && rival_time < length / speed
+        {
+            // The rival is first: only the chance of winning the duel counts.
+            let win = ((p - rival_units) / p.max(1.0)).clamp(0.0, 1.0);
+            if win <= 0.0 {
+                return None;
+            }
+            score *= win;
+        }
+        score += self.rng.gauss(0.0, self.diff.noise);
+        Some(score)
     }
 }
 
@@ -430,7 +572,7 @@ mod tests {
             Building::new(BuildingKind::BaseTank, Some(1), 1, 1, 50.0),
             Building::new(BuildingKind::BaseTank, None, 10, 10, 5.0),
         ];
-        let mut game = Game::new(board, players, buildings, 0);
+        let mut game = Game::new(board, players, buildings, Vec::new(), 0);
         let mut ai = AiController::new(1, crate::constants::AI_DIFFICULTIES[2], 42, 0, 1);
         ai.timer = 999.0;
         ai.update(&mut game, 0.0);
@@ -438,7 +580,7 @@ mod tests {
     }
     #[test]
     fn decision_phases_are_spread_over_the_interval() {
-        // rules.md section 13.2: the AI players decide one interval apart
+        // rules.md section 14.2: the AI players decide one interval apart
         // from each other, shifted by index/count of the interval, so no two
         // of them weigh their options on the same frame.
         let d = crate::constants::AI_DIFFICULTIES[1];
@@ -504,7 +646,7 @@ mod tests {
         for t in board.tiles.clone().keys().copied().collect::<Vec<_>>() {
             board.tiles.get_mut(&t).unwrap().height = 1;
         }
-        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 0);
+        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 0);
         let mut ai = AiController::new(1, crate::constants::AI_DIFFICULTIES[2], 5, 0, 1);
         let first = ai
             .route(&game.board, (0, 0), (9, 9), VehicleKind::Tank)
@@ -540,6 +682,60 @@ mod tests {
             "both kinds walk the same number of steps across open land"
         );
     }
+    /// An AI weighs a bonus as a dispatch target and picks it when it beats
+    /// every building (rules.md sections 13 and 14.5): a `*3` next to the base
+    /// is worth more than any building move, so the vehicle drives there, and
+    /// a second decision does not send a second vehicle after the same field.
+    #[test]
+    fn a_bonus_field_outscores_building_moves_and_is_not_doubled() {
+        let mut board = Board::new(12, 12);
+        for t in board.tiles.clone().keys().copied().collect::<Vec<_>>() {
+            board.tiles.get_mut(&t).unwrap().height = 1;
+        }
+        let players = vec![Player::new(0, true), Player::new(1, false)];
+        let buildings = vec![
+            Building::new(BuildingKind::BaseTank, Some(1), 2, 2, 40.0),
+            Building::new(BuildingKind::BaseTank, Some(0), 9, 9, 40.0),
+        ];
+        let bonuses = vec![crate::entities::Bonus::new(
+            (3, 2),
+            crate::entities::BonusKind::Mul(3),
+        )];
+        let mut game = Game::new(board, players, buildings, bonuses, 0);
+        game.sandbox = true;
+        let diff = crate::constants::AI_DIFFICULTIES[2];
+        let mut ai = AiController::new(1, diff, 7, 0, 1);
+        // The first decision spends the base on the bonus.
+        ai.timer = 999.0;
+        ai.update(&mut game, 0.0);
+        assert_eq!(game.vehicles.len(), 1, "the AI sends a vehicle");
+        let v = &game.vehicles[0];
+        assert_eq!(v.bonus_target, Some((3, 2)), "and it goes for the bonus");
+        // While that vehicle is on its way no second one may be sent there.
+        ai.timer = 999.0;
+        ai.update(&mut game, 0.0);
+        let chasing = game
+            .vehicles
+            .iter()
+            .filter(|v| v.bonus_target == Some((3, 2)))
+            .count();
+        assert_eq!(chasing, 1, "no second vehicle after the same bonus");
+        // Once the bonus is spent it is no longer a candidate: the base is
+        // empty anyway, so no further dispatch happens.
+        game.bonuses = vec![None];
+        game.bonus_at.clear();
+        game.buildings[0].units = 40.0;
+        ai.timer = 999.0;
+        ai.update(&mut game, 0.0);
+        assert!(
+            game.vehicles
+                .iter()
+                .filter(|v| v.bonus_target == Some((3, 2)))
+                .count()
+                <= 1,
+            "a spent bonus is not a target any more"
+        );
+    }
     /// Flat 12x12 board with a base for each of two AI players plus a neutral
     /// one, so both controllers have something to weigh on every decision.
     /// The human player needs a building too: without one it is eliminated
@@ -561,7 +757,7 @@ mod tests {
             Building::new(BuildingKind::BaseTank, Some(0), 5, 9, 40.0),
             Building::new(BuildingKind::BaseTank, None, 1, 9, 10.0),
         ];
-        let mut game = Game::new(board, players, buildings, 0);
+        let mut game = Game::new(board, players, buildings, Vec::new(), 0);
         // Keep the match running for the whole test: the decisions of the two
         // AI players are what is measured, not who wins.
         game.sandbox = true;

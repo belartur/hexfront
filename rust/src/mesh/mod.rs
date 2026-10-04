@@ -5,10 +5,11 @@
 //! from, and the per-frame [`DynamicMesh`] that [`build_dynamic`] fills. The
 //! models themselves are grouped by what they draw -- static terrain in
 //! [`terrain`], walkable elevations in [`surface`], buildings in
-//! [`buildings`], obstacles in [`obstacles`], vehicles in [`vehicles`] and the
-//! flat overlays in [`overlays`] -- and are re-exported at the end of this
-//! file, so `crate::mesh::build_terrain` and friends keep working whatever
-//! file a given model sits in.
+//! [`buildings`], obstacles in [`obstacles`], vehicles in [`vehicles`],
+//! bonuses and drones in [`bonuses`] and the flat overlays in [`overlays`] --
+//! and are re-exported at the end of this file, so
+//! `crate::mesh::build_terrain` and friends keep working whatever file a given
+//! model sits in.
 //!
 //! Vertices carry world `(x, y, z)` positions plus a colour; the GPU camera
 //! ([`crate::iso`]) projects them and the hardware depth buffer resolves
@@ -17,12 +18,14 @@
 use crate::constants;
 use crate::game::Game;
 
+use bonuses::{push_bonus_markers, push_drones};
 use buildings::push_building;
 use obstacles::push_obstacle;
 use overlays::{push_paths, push_projectiles, push_ranges};
 use terrain::DeckQuad;
 use vehicles::{push_helicopter_shadow, push_vehicle};
 
+mod bonuses;
 mod buildings;
 mod obstacles;
 mod overlays;
@@ -765,6 +768,8 @@ pub fn build_dynamic(game: &Game, rotor_phase: f64, max_height_px: f64, out: &mu
             push_helicopter_shadow(game, v, rotor_phase, &mut out.shadow);
         }
     }
+    push_bonus_markers(game, &mut out.opaque);
+    push_drones(game, rotor_phase, &mut out.opaque, &mut out.lines);
     push_ranges(
         game,
         &mut out.range_turret,

@@ -20,9 +20,14 @@ cd rust && cargo run --release  # the game (requires the Rust toolchain)
 * 2-4 players per level: you (blue) plus AI opponents.
 * Real-time combat.  Units spawn in your bases (5 per 10 s, up to capacity).
 * Click **RMB** on your building (or **LMB** when nothing is selected yet)
-  to select it; then **LMB** on any other building sends *all* its units
-  there as a vehicle — your own buildings included, so you can transfer
-  units between them.  **Esc** (or **RMB** off-building) cancels.
+  to select it; then **LMB** on any other building — or on a bonus field —
+  sends *all* its units there as a vehicle.  Your own buildings are
+  valid targets too, so you can transfer units between them.  **Esc**
+  (or **RMB** off-building) cancels.
+* Bonuses are one-shot fields marked with a yellow ring: send a vehicle to
+  one for `+x` units, `*x` units, or a drone that guards its carrier (and
+  rebuilds the field if the carrier dies).  The vehicle drives back to the
+  building it came from with the effect applied.
 * Capture every building and destroy every enemy vehicle to win.
 * Ground vehicles move only between tiles of equal height; ramps join
   different heights and bridges cross water.  Helicopters fly anywhere.
@@ -42,7 +47,8 @@ cd rust && cargo run --release  # the game (requires the Rust toolchain)
 
 Levels live as binary map files in the `maps/` directory; the menu lists
 every `maps/*.map` file and shows the file name as the level name.  The
-file format (dimensions, 4-bit heights, buildings/ramps/bridges/obstacles)
+file format (dimensions, 4-bit heights,
+buildings/ramps/bridges/obstacles/bonuses)
 is specified in `specification_of_map_format.md` and implemented in
 `rust/src/mapfile.rs`.  The bundled maps are versioned in the repository;
 new ones are created with the built-in editor.
@@ -52,7 +58,9 @@ map` in the main menu to open it with a new 256x256 board, or right-click a
 map in the menu to edit it (left-click starts the game instead).  It shares
 the game's board renderer and tile picking.  Editing is key-driven: point
 a tile with the mouse and press a key — `b` building (again: cycle kind;
-new buildings reuse the last kind/owner/units), digits units 0-999, `o`
+new buildings reuse the last kind/owner/units), `i` bonus (again: cycle
+`+x` / `*x` / drone; new bonuses reuse the last kind and value), digits
+units 0-999 or bonus value 1-999 (`+x`) / 2-99 (`*x`), `o`
 owner, `t` obstacle (again: cycle kind; new obstacles reuse the last
 kind), `m` bridge, `r` ramp, `[`/`]` terrain -/+ (no wrap), `Del`/RMB
 delete, `l` load, `s` save (empty water borders are trimmed on save),
@@ -73,9 +81,10 @@ rust/                           the implementation (macroquad; this repository
   src/hexgrid.rs        flat-top hex geometry (odd-q offset coordinates)
   src/math.rs           scalar helpers shared by simulation and mesh builders
   src/board.rs          tiles, obstacles, ramps, bridges, path-finding, picking
-  src/entities.rs       players, buildings, vehicles
-  src/game.rs           real-time simulation (production, combat, turrets, ...)
-  src/ai.rs             AI decision loop (rules.md sec. 13)
+  src/entities.rs       players, buildings, vehicles, bonuses, drones
+  src/game.rs           real-time simulation (production, combat, turrets,
+                        bonus missions and drones, ...)
+  src/ai.rs             AI decision loop (rules.md sec. 14; bonuses sec. 13)
   src/rng.rs            deterministic PRNG for the AI noise (no extra crates)
   src/mapfile.rs        binary map file format: save / load / list maps
   src/fx.rs             explosion particle system (presentation only, headless)

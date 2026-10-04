@@ -133,7 +133,7 @@ pub struct Application {
 /// seed and given their position among the AI players.
 ///
 /// The index and the count are what spread the decisions evenly over one
-/// decision interval (rules.md section 13.2, `AiController::new`), and they
+/// decision interval (rules.md section 14.2, `AiController::new`), and they
 /// are derived here from the player list, so every way of starting a game —
 /// a map from the menu and an editor playtest — spaces them the same way.
 fn ai_controllers(game: &Game, seed: u64) -> Vec<AiController> {
@@ -437,6 +437,14 @@ impl Application {
     }
     fn hover_tile(&self, pos: (f32, f32)) -> Option<Tile> {
         let game = self.game.as_ref()?;
+        // Bonus tiles are dispatch targets too (rules.md section 13): prefer
+        // a live bonus under the cursor over the nearest building.
+        let tile = game
+            .board
+            .pick_tile(&self.camera, pos.0, pos.1, Self::flat())?;
+        if game.bonus_at_tile(tile).is_some() {
+            return Some(tile);
+        }
         game.board
             .snap_to_building(&self.camera, pos.0, pos.1, &game.buildings, Self::flat())
     }
@@ -636,7 +644,7 @@ impl Application {
                 self.preview_path = None;
                 if let (Some(h), Some(game)) = (hover, self.game.as_ref())
                     && h != sel
-                    && game.building_at_tile(h).is_some()
+                    && (game.building_at_tile(h).is_some() || game.bonus_at_tile(h).is_some())
                     && let Some(src) = game.building_at_tile(sel)
                 {
                     let kind = vehicle_kind_of(src.kind);
@@ -843,6 +851,34 @@ impl Application {
                     );
                 }
             }
+        }
+        // Bonus value labels: the effect text inside the yellow ring
+        // (specification.md, section "Grafika i interfejs użytkownika"). The
+        // ring and the drone/figures belong to the scene, only the text needs
+        // the font.
+        for bonus in game.bonuses.iter().flatten() {
+            let txt = match bonus.kind {
+                crate::entities::BonusKind::Add(x) => format!("+{}", x),
+                crate::entities::BonusKind::Mul(x) => format!("*{}", x),
+                crate::entities::BonusKind::Drone => continue,
+            };
+            let (wx, wy) = game.board.center_world(bonus.tile);
+            let gz = mesh::tile_top_z(&game.board, bonus.tile);
+            let (cx, cy) = self.camera.world_to_screen(wx, wy, gz);
+            if !Self::on_screen(cx, cy) {
+                continue;
+            }
+            let fs = ((15.0 * self.camera.zoom as f32).max(9.0)) as u16;
+            let [r, g, b] = constants::BONUS_MARK_COLOR;
+            let color = Color::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0);
+            let dim = measure_text(&txt, None, fs, 1.0);
+            draw_text(
+                &txt,
+                cx - dim.width / 2.0,
+                cy + dim.height / 2.5 - 6.0,
+                fs as f32,
+                color,
+            );
         }
         for v in game.vehicles.iter() {
             if v.dead {
@@ -1189,7 +1225,13 @@ impl Application {
             Player::new(3, false),
         ];
         let fp = ed.terrain_fingerprint();
-        let game = Game::new(ed.board.clone(), players, ed.buildings.clone(), 0);
+        let game = Game::new(
+            ed.board.clone(),
+            players,
+            ed.buildings.clone(),
+            ed.bonuses.clone(),
+            0,
+        );
         self.editor_game = Some(game);
         // NOTE: unlike the game (immutable board per level), the editor board
         // mutates in place (terrain height, ramps, bridges), so the (cols,
@@ -1412,6 +1454,14 @@ impl Application {
         } else if is_key_pressed(KeyCode::M) {
             if let Some(ed) = self.editor.as_mut()
                 && ed.press_m(tile)
+            {
+                self.editor_clean = false;
+            }
+        } else if is_key_pressed(KeyCode::I) {
+            // Bonus placement / kind cycling (`i`, specification_rust.md,
+            // section "Edytor plansz").
+            if let Some(ed) = self.editor.as_mut()
+                && ed.press_i(tile)
             {
                 self.editor_clean = false;
             }

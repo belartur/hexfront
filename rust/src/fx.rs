@@ -949,6 +949,7 @@ mod tests {
             board,
             vec![Player::new(0, true), Player::new(1, false)],
             buildings,
+            Vec::new(),
             0,
         );
         game.building_at = [(game.buildings[0].tile, 0), (game.buildings[1].tile, 1)]

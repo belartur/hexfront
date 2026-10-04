@@ -165,7 +165,7 @@ fn walk_path(prev: &[u32], start: usize, last: usize, board: &Board) -> Vec<Tile
 /// one nearest the goal. `tile` and `mode` close the order, which keeps the
 /// search deterministic for a given board, so equal-length routes that the
 /// tie-break leaves equal still resolve to the same tiles and the AI scores
-/// built on them stay reproducible for a level seed (rules.md section 13.2).
+/// built on them stay reproducible for a level seed (rules.md section 14.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OpenEntry {
     /// Estimated total cost `g + h` (both in whole steps).
@@ -231,7 +231,7 @@ const UNREACHABLE: u32 = u32::MAX;
 /// Reusable working set of [`Board::find_path`].
 ///
 /// A single AI decision routes every source building to every target
-/// building (rules.md section 13.5), so a large map runs thousands of
+/// building (rules.md section 14.5), so a large map runs thousands of
 /// searches back to back. Allocating and clearing the working arrays per
 /// search costs more than the search itself on a big board, so the board
 /// keeps one buffer and reuses it.
@@ -327,7 +327,7 @@ impl Board {
     }
     /// How many of the six neighbours of `tile` lie on the board.
     ///
-    /// Used by the per-pair scoring loops of the AI (rules.md section 13.5),
+    /// Used by the per-pair scoring loops of the AI (rules.md section 14.5),
     /// which would otherwise build a `Vec` per evaluated building pair.
     pub fn neighbor_count(&self, tile: Tile) -> usize {
         hexgrid::neighbors(tile.0, tile.1)
@@ -729,7 +729,7 @@ impl Board {
     /// the board is a full rectangle, so every in-bounds tile has an index
     /// and the lookups become plain array reads. A route search runs over
     /// every building pair the AI weighs on every decision (rules.md section
-    /// 13.5), so this is the hottest path of a decision on a big map.
+    /// 14.5), so this is the hottest path of a decision on a big map.
     pub fn find_path(&self, src: Tile, dst: Tile, kind: VehicleKind) -> Option<Vec<Tile>> {
         if src == dst || !self.contains(src) || !self.contains(dst) {
             return None;
@@ -1021,7 +1021,7 @@ mod tests {
                 .is_some()
         );
         // Determinism: the same query twice resolves to the same tiles, so
-        // AI scores built on the route stay reproducible (rules.md 13.2).
+        // AI scores built on the route stay reproducible (rules.md 14.2).
         let board = bridge_board(0);
         let (a, b) = ((0, 0), (9, 9));
         let first = board
@@ -1198,7 +1198,7 @@ mod tests {
     fn routes_are_shortest_and_reproducible_on_rough_terrain() {
         // On a board where the roads fork all the time, a route must still be
         // shortest and must not depend on the order the open set happened to
-        // fill (rules.md section 4 and 13.2).
+        // fill (rules.md section 4 and 14.2).
         fn shortest(board: &Board, src: Tile, dst: Tile, kind: VehicleKind) -> Option<usize> {
             let mut seen: HashSet<Tile> = HashSet::from([src]);
             let mut queue: VecDeque<(Tile, usize)> = VecDeque::from([(src, 0)]);

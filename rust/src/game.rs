@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use crate::board::{Board, ObstacleKind};
 use crate::constants::{self, TurretKind, VehicleKind};
 use crate::entities::{
-    Building, BuildingKind, Player, SoundEvent, Vehicle, Wreck, is_base, turret_kind_of,
-    vehicle_kind_of,
+    Bonus, BonusKind, Building, BuildingKind, Drone, DroneAnchor, Player, SoundEvent, Vehicle,
+    Wreck, is_base, turret_kind_of, vehicle_kind_of,
 };
 use crate::hexgrid::Tile;
 use crate::math::{dist, dist2, sqr};
@@ -97,11 +97,31 @@ pub struct Game {
     /// ends, so an unfinished map (e.g. without an enemy base) can still be
     /// played. Real matches always keep it `false` (rules.md section 2).
     pub sandbox: bool,
+    /// Bonuses of the match (rules.md section 13); a spent bonus becomes
+    /// `None` so vehicles already on their way can still arrive and return.
+    pub bonuses: Vec<Option<Bonus>>,
+    /// Tile of every bonus slot, spent ones included.
+    ///
+    /// Slots keep their index for the whole match, so a field can be refilled
+    /// later — a drone that lost its carrier recreates its own bonus (rules.md
+    /// section 13). A live [`Bonus`] alone cannot carry that, because it is
+    /// dropped together with its tile.
+    pub bonus_tiles: Vec<Tile>,
+    /// Live bonus index by tile.
+    pub bonus_at: HashMap<Tile, usize>,
+    /// Indestructible shooting drones (rules.md section 13).
+    pub drones: Vec<Drone>,
 }
 
 impl Game {
-    /// Create a game from a board, players and buildings.
-    pub fn new(board: Board, players: Vec<Player>, buildings: Vec<Building>, _seed: u64) -> Self {
+    /// Create a game from a board, players, buildings and bonuses.
+    pub fn new(
+        board: Board,
+        players: Vec<Player>,
+        buildings: Vec<Building>,
+        bonuses: Vec<Bonus>,
+        _seed: u64,
+    ) -> Self {
         let human_id = players
             .iter()
             .find(|p| p.is_human)
@@ -131,6 +151,17 @@ impl Game {
             })
             .collect();
         fire_tiles.sort();
+        let bonus_tiles: Vec<Tile> = bonuses.iter().map(|b| b.tile).collect();
+        let bonus_at: HashMap<Tile, usize> = bonuses
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.tile, i))
+            .collect();
+        let drones: Vec<Drone> = bonuses
+            .iter()
+            .filter(|b| b.kind == BonusKind::Drone)
+            .map(|b| Drone::new(b.tile))
+            .collect();
         Self {
             board,
             players,
@@ -138,6 +169,10 @@ impl Game {
             building_at,
             obstacle_tiles,
             fire_tiles,
+            bonuses: bonuses.into_iter().map(Some).collect(),
+            bonus_tiles,
+            bonus_at,
+            drones,
             vehicles: Vec::new(),
             projectiles: Vec::new(),
             wrecks: Vec::new(),
@@ -167,20 +202,32 @@ impl Game {
             .get(&tile)
             .and_then(|i| self.buildings.get(*i))
     }
+    /// Bonus standing on `tile`, if it still exists.
+    pub fn bonus_at_tile(&self, tile: Tile) -> Option<&Bonus> {
+        self.bonus_at
+            .get(&tile)
+            .and_then(|i| self.bonuses.get(*i))
+            .and_then(|b| b.as_ref())
+    }
     /// Send one vehicle from `src_tile` to `dst_tile`.
     ///
     /// Returns true on success. The vehicle takes *all* units from the
     /// source building (section 4); when no road exists nothing happens.
+    /// The destination may also be a live bonus tile (rules.md section 13):
+    /// the vehicle then drives there, triggers the effect, and returns
+    /// along the same route.
     pub fn try_send(&mut self, owner: usize, src_tile: Tile, dst_tile: Tile) -> bool {
         let si = match self.building_at.get(&src_tile) {
             Some(i) => *i,
             None => return false,
         };
-        let di = match self.building_at.get(&dst_tile) {
-            Some(i) => *i,
-            None => return false,
-        };
-        if si == di {
+        let bonus_mission = self.bonus_at_tile(dst_tile).is_some();
+        if !bonus_mission && !self.building_at.contains_key(&dst_tile) {
+            return false;
+        }
+        if let Some(di) = self.building_at.get(&dst_tile)
+            && *di == si
+        {
             return false;
         }
         let (owner_ok, units, kind, pos) = {
@@ -199,7 +246,10 @@ impl Game {
             Some(r) => r,
             None => return false,
         };
-        let vehicle = Vehicle::new(kind, owner, units, route, pos, Some(src_tile));
+        let mut vehicle = Vehicle::new(kind, owner, units, route, pos, Some(src_tile));
+        if bonus_mission {
+            vehicle.bonus_target = Some(dst_tile);
+        }
         {
             let src = &mut self.buildings[si];
             src.units = 0.0;
@@ -215,6 +265,7 @@ impl Game {
         self.update_buffers(dt);
         self.update_tank_guns(dt);
         self.update_vehicles(dt);
+        self.update_drones(dt);
         self.update_projectiles(dt);
         self.vehicles.retain(|v| !v.dead);
         self.check_elimination();
@@ -705,7 +756,15 @@ impl Game {
                 self.check_mine(wp_tile);
                 self.vehicles[idx].route_index += 1;
                 if self.vehicles[idx].route_index >= self.vehicles[idx].route.len() {
-                    self.arrive_vehicle(idx);
+                    // A bonus mission ends where the outgoing leg ended: the
+                    // vehicle picks up the effect and drives back along the
+                    // same route (rules.md section 13); a spent bonus still
+                    // lets late vehicles arrive and return empty-handed.
+                    if self.vehicles[idx].bonus_target.is_some() {
+                        self.arrive_bonus(idx);
+                    } else {
+                        self.arrive_vehicle(idx);
+                    }
                     continue;
                 }
             } else if d > 1e-12 {
@@ -801,6 +860,28 @@ impl Game {
             }
         }
         if let Some(w) = wreck {
+            // A drone tied to the destroyed vehicle goes back to its own field
+            // and starts recreating that bonus, so the field can be triggered
+            // again (rules.md section 13).
+            let freed: Vec<Tile> = self
+                .drones
+                .iter()
+                .filter(|d| d.anchor == DroneAnchor::Vehicle(id))
+                .map(|d| d.home)
+                .collect();
+            for d in self.drones.iter_mut() {
+                if d.anchor == DroneAnchor::Vehicle(id) {
+                    d.anchor = DroneAnchor::Bonus(d.home);
+                    d.fire_timer = 0.0;
+                    d.target = None;
+                }
+            }
+            for home in freed {
+                if let Some(i) = self.bonus_tiles.iter().position(|t| *t == home) {
+                    self.bonuses[i] = Some(Bonus::new(home, BonusKind::Drone));
+                    self.bonus_at.insert(home, i);
+                }
+            }
             // A destroyed vehicle is the loudest event in the game; the kind
             // decides between the ground blast and the air one (rules.md 5.2).
             let kind = match w.kind {
@@ -837,6 +918,8 @@ impl Game {
         self.sounds.push(SoundEvent { kind, x, y });
     }
     /// Resolve a vehicle that reached the end of its route (section 4).
+    /// A returning bonus vehicle resolves the same way, so a source
+    /// building captured meanwhile can be recaptured (rules.md section 13).
     fn arrive_vehicle(&mut self, idx: usize) {
         let (owner, units, dest) = {
             let v = &self.vehicles[idx];
@@ -869,7 +952,163 @@ impl Game {
             b.units -= units;
             b.loss_acc += units;
         }
+        // A drone tied to the vehicle docks at the source building it came
+        // back to (rules.md section 13).
+        let vehicle_id = self.vehicles[idx].id;
+        let dest_tile = dest;
+        for d in self.drones.iter_mut() {
+            if d.anchor == DroneAnchor::Vehicle(vehicle_id) {
+                d.anchor = DroneAnchor::Building(dest_tile);
+                d.fire_timer = 0.0;
+            }
+        }
         self.vehicles[idx].dead = true;
+    }
+    /// Resolve a vehicle that reached its bonus tile (rules.md section 13).
+    ///
+    /// Only a live vehicle with its sprite centre on the bonus tile counts;
+    /// a vehicle in combat never reaches this point because combat holds it
+    /// away from the centre. A spent bonus lets late vehicles arrive and
+    /// return empty-handed. A triggered bonus disappears; the vehicle turns
+    /// around and drives the same route back to its source building.
+    ///
+    /// Vehicles are resolved in creation order, and ids grow monotonically, so
+    /// when two of them reach the same field in one simulation step the lower
+    /// id takes the bonus — the same tie-break the turret target uses.
+    fn arrive_bonus(&mut self, idx: usize) {
+        let (tile, vehicle_id) = {
+            let v = &self.vehicles[idx];
+            match v.bonus_target {
+                Some(t) => (t, v.id),
+                None => {
+                    self.vehicles[idx].dead = true;
+                    return;
+                }
+            }
+        };
+        let bonus_idx = match self.bonus_at.get(&tile) {
+            Some(i) => *i,
+            None => {
+                self.turn_back(idx);
+                return;
+            }
+        };
+        let kind = match self.bonuses.get(bonus_idx).and_then(|b| *b) {
+            Some(b) => b.kind,
+            None => {
+                self.turn_back(idx);
+                return;
+            }
+        };
+        match kind {
+            BonusKind::Add(x) => {
+                self.vehicles[idx].units += x as f64;
+                self.vehicles[idx].gain_acc += x as f64;
+            }
+            BonusKind::Mul(x) => {
+                let before = self.vehicles[idx].units;
+                self.vehicles[idx].units *= x as f64;
+                self.vehicles[idx].gain_acc += self.vehicles[idx].units - before;
+            }
+            BonusKind::Drone => {
+                for d in self.drones.iter_mut() {
+                    if d.home == tile && d.anchor == DroneAnchor::Bonus(tile) {
+                        d.anchor = DroneAnchor::Vehicle(vehicle_id);
+                        d.fire_timer = 0.0;
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(slot) = self.bonuses.get_mut(bonus_idx) {
+            *slot = None;
+        }
+        self.bonus_at.remove(&tile);
+        self.turn_back(idx);
+    }
+    /// Turn a bonus vehicle around: drive the outgoing route back to the
+    /// source building (rules.md section 13).
+    fn turn_back(&mut self, idx: usize) {
+        let mut back: Vec<Tile> = self.vehicles[idx].route.clone();
+        back.pop();
+        back.reverse();
+        if let Some(src) = self.vehicles[idx].src_tile {
+            back.push(src);
+        }
+        self.vehicles[idx].route = back;
+        self.vehicles[idx].route_index = 0;
+        self.vehicles[idx].returning = true;
+        self.vehicles[idx].bonus_target = None;
+    }
+    /// Owner of a drone: the owner of the vehicle or building it is tied to
+    /// (rules.md section 13). A drone on its bonus field is neutral.
+    pub fn drone_owner(&self, drone: &Drone) -> Option<usize> {
+        match drone.anchor {
+            DroneAnchor::Bonus(_) => None,
+            DroneAnchor::Vehicle(id) => self
+                .vehicles
+                .iter()
+                .find(|v| v.id == id && !v.dead)
+                .map(|v| v.owner),
+            DroneAnchor::Building(tile) => self.building_at_tile(tile).and_then(|b| b.owner),
+        }
+    }
+    /// World position of a drone's anchor centre.
+    fn drone_anchor_pos(&self, drone: &Drone) -> Option<(f64, f64)> {
+        match drone.anchor {
+            DroneAnchor::Bonus(tile) => Some(self.board.center_world(tile)),
+            DroneAnchor::Vehicle(id) => self
+                .vehicles
+                .iter()
+                .find(|v| v.id == id && !v.dead)
+                .map(|v| v.pos()),
+            DroneAnchor::Building(tile) => {
+                self.building_at_tile(tile).map(|b| b.pos(self.board.side))
+            }
+        }
+    }
+    /// Drones fire instantly (no projectiles): each anchored drone shoots the
+    /// nearest live enemy vehicle in range (rules.md section 13).
+    fn update_drones(&mut self, dt: f64) {
+        for i in 0..self.drones.len() {
+            let drone = self.drones[i];
+            let Some(anchor) = self.drone_anchor_pos(&drone) else {
+                self.drones[i].target = None;
+                continue;
+            };
+            // A drone sitting in its bonus field is neutral and never shoots.
+            let Some(owner) = self.drone_owner(&drone) else {
+                self.drones[i].target = None;
+                continue;
+            };
+            let mut best: Option<(u64, f64)> = None;
+            for v in self.vehicles.iter() {
+                if v.dead || v.owner == owner {
+                    continue;
+                }
+                let d = dist(anchor, v.pos());
+                if d <= constants::DRONE_RANGE
+                    && best.is_none_or(|(_, bd)| d < bd || (d == bd && v.id < best.unwrap().0))
+                {
+                    best = Some((v.id, d));
+                }
+            }
+            let Some((target, _)) = best else {
+                self.drones[i].target = None;
+                continue;
+            };
+            self.drones[i].target = Some(target);
+            self.drones[i].fire_timer += dt;
+            let period = 1.0 / constants::DRONE_SHOTS_PER_SECOND;
+            while self.drones[i].fire_timer >= period {
+                self.drones[i].fire_timer -= period;
+                self.damage_vehicle_by_id(target, constants::DRONE_DAMAGE);
+                self.report_sound(SoundKind::VehicleFire, anchor.0, anchor.1);
+                if self.vehicles.iter().any(|v| v.id == target && v.dead) {
+                    break;
+                }
+            }
+        }
     }
     fn update_projectiles(&mut self, dt: f64) {
         let mut impacts: Vec<Projectile> = Vec::new();
@@ -963,6 +1202,7 @@ mod tests {
             board,
             vec![Player::new(0, true), Player::new(1, false)],
             Vec::new(),
+            Vec::new(),
             1,
         )
     }
@@ -971,6 +1211,142 @@ mod tests {
         for _ in 0..steps {
             game.update(constants::SIM_DT);
         }
+    }
+    #[test]
+    fn bonus_add_applies_and_returns() {
+        // +x adds units to the triggering vehicle only, then the vehicle
+        // drives the same route back to its source building (rules.md 12).
+        let board = flat_board(10, 2, 1);
+        let mut game = Game::new(
+            board,
+            vec![Player::new(0, true), Player::new(1, false)],
+            vec![
+                Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 20.0),
+                Building::new(BuildingKind::BaseTank, Some(1), 8, 1, 5.0),
+            ],
+            vec![Bonus::new((5, 1), BonusKind::Add(10))],
+            1,
+        );
+        assert!(game.try_send(0, (1, 1), (5, 1)));
+        run(&mut game, 30.0);
+        assert!(game.bonuses.iter().all(|b| b.is_none()));
+        assert!(game.bonus_at_tile((5, 1)).is_none());
+        let home = game.building_at_tile((1, 1)).unwrap();
+        assert!(home.owner == Some(0) && home.units > 20.0);
+        assert!(game.vehicles.is_empty());
+    }
+    #[test]
+    fn bonus_mul_and_drone_lifecycle() {
+        // *x multiplies the triggering vehicle's units; a drone docks to the
+        // carrier, returns to its field when the carrier dies, and docks to
+        // the source building on a safe return (rules.md 12).
+        let board = flat_board(12, 2, 1);
+        let mut game = Game::new(
+            board,
+            vec![Player::new(0, true), Player::new(1, false)],
+            vec![
+                Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 10.0),
+                Building::new(BuildingKind::BaseTank, Some(1), 10, 1, 5.0),
+            ],
+            vec![
+                Bonus::new((4, 1), BonusKind::Mul(3)),
+                Bonus::new((7, 1), BonusKind::Drone),
+            ],
+            1,
+        );
+        assert!(game.try_send(0, (1, 1), (4, 1)));
+        run(&mut game, 40.0);
+        let home = game.building_at_tile((1, 1)).unwrap();
+        assert!(home.units > 25.0, "3x of 10 must come home");
+        assert!(game.bonus_at_tile((4, 1)).is_none());
+        assert!(game.try_send(0, (1, 1), (7, 1)));
+        // Drive until the drone is picked up.
+        for _ in 0..(20.0 / constants::SIM_DT) as usize {
+            game.update(constants::SIM_DT);
+            if game
+                .drones
+                .iter()
+                .any(|d| matches!(d.anchor, DroneAnchor::Vehicle(_)))
+            {
+                break;
+            }
+        }
+        assert!(
+            game.drones
+                .iter()
+                .any(|d| matches!(d.anchor, DroneAnchor::Vehicle(_))),
+            "drone must dock to the carrier"
+        );
+        let carrier = game.vehicles[0].id;
+        game.damage_vehicle_by_id(carrier, 10000.0);
+        assert!(
+            game.drones
+                .iter()
+                .all(|d| matches!(d.anchor, DroneAnchor::Bonus(_))),
+            "dead carrier frees the drone home"
+        );
+        assert!(
+            game.bonus_at_tile((7, 1))
+                .is_some_and(|b| b.kind == BonusKind::Drone),
+            "a freed drone recreates its bonus field"
+        );
+        assert_eq!(game.drone_owner(&game.drones[0]), None);
+    }
+    #[test]
+    fn drone_owner_follows_the_building_it_docks_at() {
+        // A drone docked at a building belongs to whoever owns that building
+        // (rules.md section 13), so recapturing the building recaptures the
+        // drone; a drone in its own field stays neutral.
+        let board = flat_board(10, 2, 1);
+        let mut game = Game::new(
+            board,
+            vec![Player::new(0, true), Player::new(1, false)],
+            vec![
+                Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 20.0),
+                Building::new(BuildingKind::BaseTank, Some(1), 6, 1, 3.0),
+            ],
+            vec![Bonus::new((4, 1), BonusKind::Drone)],
+            1,
+        );
+        assert!(game.try_send(0, (1, 1), (4, 1)));
+        run(&mut game, 40.0);
+        assert_eq!(game.drones[0].anchor, DroneAnchor::Building((1, 1)));
+        assert_eq!(game.drone_owner(&game.drones[0]), Some(0));
+        // Player 1 takes the home base: the drone changes hands with it.
+        game.buildings[0].owner = Some(1);
+        assert_eq!(game.drone_owner(&game.drones[0]), Some(1));
+    }
+    #[test]
+    fn a_late_vehicle_returns_empty_handed() {
+        // The bonus is one-shot: two vehicles sent at the same time both drive
+        // to the field, the first one takes the effect and the second finds it
+        // gone and comes back with whatever units it had left (rules.md 13).
+        let board = flat_board(12, 3, 1);
+        // Tank bases, so nothing heals the column on the way: the unit counts
+        // of the two vehicles are exactly what the field did to them.
+        let mut game = Game::new(
+            board,
+            vec![Player::new(0, true), Player::new(1, false)],
+            vec![
+                Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 10.0),
+                Building::new(BuildingKind::BaseTank, Some(0), 1, 2, 10.0),
+                Building::new(BuildingKind::BaseTank, Some(1), 11, 1, 5.0),
+            ],
+            vec![Bonus::new((6, 1), BonusKind::Add(50))],
+            1,
+        );
+        assert!(game.try_send(0, (1, 1), (6, 1)));
+        assert!(game.try_send(0, (1, 2), (6, 1)));
+        while game.bonus_at_tile((6, 1)).is_some() {
+            game.update(constants::SIM_DT);
+        }
+        let boosted = game.vehicles.iter().filter(|v| v.units > 20.0).count();
+        assert_eq!(boosted, 1, "exactly one vehicle may take the bonus");
+        // Both keep driving and come back home.
+        run(&mut game, 40.0);
+        assert!(game.vehicles.is_empty());
+        let total: f64 = game.buildings[..2].iter().map(|b| b.units).sum();
+        assert!(total > 60.0, "the boosted units come home: {total}");
     }
     #[test]
     fn obstacle_index_matches_board_scan() {
@@ -1103,7 +1479,7 @@ mod tests {
                 Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 20.0),
                 Building::new(BuildingKind::BaseTank, Some(1), 8, 8, 20.0),
             ];
-            Game::new(board, players, buildings, 0)
+            Game::new(board, players, buildings, Vec::new(), 0)
         };
         assert!(g.try_send(0, (1, 1), (8, 8)));
         assert_eq!(g.buildings[0].units, 0.0);
@@ -1118,7 +1494,7 @@ mod tests {
                 Building::new(BuildingKind::BaseTank, Some(0), 1, 1, 99.0),
                 Building::new(BuildingKind::BaseTank, Some(1), 8, 8, 20.0),
             ];
-            Game::new(board, players, buildings, 0)
+            Game::new(board, players, buildings, Vec::new(), 0)
         };
         run(&mut g, 11.0);
         assert!(g.buildings[0].units <= g.buildings[0].capacity + 1e-6);
@@ -1672,6 +2048,7 @@ mod tests {
                 board,
                 vec![Player::new(0, true), Player::new(1, false)],
                 buildings,
+                Vec::new(),
                 0,
             )
         };

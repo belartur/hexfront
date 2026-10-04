@@ -7,7 +7,9 @@
 //! * objects, one record each: 1 B column + 1 B row + 1 B type, followed by
 //!   2 extra bytes for buildings: a little-endian 16-bit word holding the
 //!   owner code on the high 6 bits and the starting unit count on the low
-//!   10 bits.
+//!   10 bits;
+//! * bonuses (rules.md section 13): type 31 (`+x`) carries a 2-byte value,
+//!   type 32 (`*x`) a 1-byte multiplier, type 33 (drone) no value bytes.
 //!
 //! Bridge fragments are reassembled into whole [`crate::board::Bridge`]
 //! objects by [`rebuild_bridges`].
@@ -17,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::board::{Board, Bridge, Obstacle, ObstacleKind};
 use crate::constants;
-use crate::entities::{Building, BuildingKind, Player};
+use crate::entities::{Bonus, BonusKind, Building, BuildingKind, Player};
 use crate::game::Game;
 use crate::hexgrid::{self, Tile};
 
@@ -85,8 +87,13 @@ pub const OWNER_CODE_NEUTRAL: u32 = 0;
 fn warn(path: &Path, message: &str) {
     eprintln!("warning: {}: {}", path.display(), message);
 }
-/// Write `board` and its `buildings` to the binary file `path`.
-pub fn save_map(path: &Path, board: &Board, buildings: &[Building]) -> std::io::Result<()> {
+/// Write `board`, its `buildings` and its `bonuses` to the binary file `path`.
+pub fn save_map(
+    path: &Path,
+    board: &Board,
+    buildings: &[Building],
+    bonuses: &[Bonus],
+) -> std::io::Result<()> {
     if board.cols > 255 || board.rows > 255 || board.cols < 1 || board.rows < 1 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -160,12 +167,33 @@ pub fn save_map(path: &Path, board: &Board, buildings: &[Building]) -> std::io::
             out.push(obstacle_code_of(o.kind));
         }
     }
+    // Bonuses (rules.md section 13): type 31 carries a 2-byte +x value,
+    // type 32 a 1-byte *x multiplier, type 33 (drone) no value bytes.
+    for bonus in bonuses.iter() {
+        out.push(bonus.tile.0 as u8);
+        out.push(bonus.tile.1 as u8);
+        match bonus.kind {
+            BonusKind::Add(x) => {
+                out.push(constants::BONUS_CODE_ADD);
+                let x = x.clamp(constants::BONUS_ADD_MIN, constants::BONUS_ADD_MAX);
+                out.push((x & 0xFF) as u8);
+                out.push(((x >> 8) & 0xFF) as u8);
+            }
+            BonusKind::Mul(x) => {
+                out.push(constants::BONUS_CODE_MUL);
+                out.push(x.clamp(constants::BONUS_MUL_MIN, constants::BONUS_MUL_MAX) as u8);
+            }
+            BonusKind::Drone => {
+                out.push(constants::BONUS_CODE_DRONE);
+            }
+        }
+    }
     std::fs::write(path, out)
 }
 
-/// Load a board and its buildings from `path`.
+/// Load a board with its buildings and bonuses from `path`.
 /// Returns an error string on hard errors; soft issues only warn.
-pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>), String> {
+pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>, Vec<Bonus>), String> {
     let data = std::fs::read(path).map_err(|e| format!("{}: {}", path.display(), e))?;
     if data.len() < 2 {
         return Err(format!("{}: file shorter than 2 bytes", path.display()));
@@ -194,6 +222,7 @@ pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>), String> {
         }
     }
     let mut buildings: Vec<Building> = Vec::new();
+    let mut bonuses: Vec<Bonus> = Vec::new();
     let mut frag_marks: HashMap<Tile, usize> = HashMap::new();
     let mut ramp_marks: Vec<(Tile, usize)> = Vec::new();
     let mut used: HashMap<Tile, String> = HashMap::new();
@@ -267,6 +296,51 @@ pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>), String> {
             }
             used.insert(tile, "ramp".to_string());
             ramp_marks.push((tile, (typ - RAMP_CODE_BASE) as usize));
+        } else if typ == constants::BONUS_CODE_ADD
+            || typ == constants::BONUS_CODE_MUL
+            || typ == constants::BONUS_CODE_DRONE
+        {
+            // Bonuses (rules.md section 13): type 31 carries a 2-byte +x
+            // value, type 32 a 1-byte *x multiplier, type 33 (drone) no
+            // value bytes.
+            let kind = if typ == constants::BONUS_CODE_ADD {
+                if pos + 2 > data.len() {
+                    return Err(format!("{}: truncated bonus record", path.display()));
+                }
+                let x = data[pos] as u32 | ((data[pos + 1] as u32) << 8);
+                pos += 2;
+                let clamped = x.clamp(constants::BONUS_ADD_MIN, constants::BONUS_ADD_MAX);
+                if clamped != x {
+                    warn(path, &format!("bonus value {} clamped to {}", x, clamped));
+                }
+                BonusKind::Add(clamped)
+            } else if typ == constants::BONUS_CODE_MUL {
+                if pos + 1 > data.len() {
+                    return Err(format!("{}: truncated bonus record", path.display()));
+                }
+                let x = data[pos] as u32;
+                pos += 1;
+                let clamped = x.clamp(constants::BONUS_MUL_MIN, constants::BONUS_MUL_MAX);
+                if clamped != x {
+                    warn(path, &format!("bonus value {} clamped to {}", x, clamped));
+                }
+                BonusKind::Mul(clamped)
+            } else {
+                BonusKind::Drone
+            };
+            if used.contains_key(&tile) {
+                warn(path, "two objects on one tile ignored");
+                continue;
+            }
+            let t = board.tiles.get(&tile).unwrap();
+            // Bonuses stand on land only and fill the whole tile (rules.md
+            // section 12).
+            if t.height == 0 {
+                warn(path, "bonus on water ignored");
+                continue;
+            }
+            used.insert(tile, "bonus".to_string());
+            bonuses.push(Bonus::new(tile, kind));
         } else if typ >= 26 {
             let kind = match obstacle_kind_of(typ) {
                 Some(k) => k,
@@ -309,17 +383,23 @@ pub fn load_board(path: &Path) -> Result<(Board, Vec<Building>), String> {
         board.set_ramp(tile, a, b);
     }
     rebuild_bridges(&mut board, &frag_marks, true);
-    Ok((board, buildings))
+    Ok((board, buildings, bonuses))
 }
-/// Load a full game (board + players + buildings) from `path`.
+/// Load a full game (board + players + buildings + bonuses) from `path`.
 pub fn load_game(path: &Path) -> Result<Game, String> {
-    let (board, buildings) = load_board(path)?;
+    let (board, buildings, bonuses) = load_board(path)?;
     let mut owners: Vec<usize> = buildings.iter().filter_map(|b| b.owner).collect();
     owners.sort();
     owners.dedup();
     let top = owners.last().copied().unwrap_or(0);
     let players: Vec<Player> = (0..=top).map(|i| Player::new(i, i == 0)).collect();
-    Ok(Game::new(board, players, buildings, level_seed(path)))
+    Ok(Game::new(
+        board,
+        players,
+        buildings,
+        bonuses,
+        level_seed(path),
+    ))
 }
 
 /// Deterministic AI seed of a level, derived from its file name.
@@ -452,7 +532,7 @@ mod tests {
         let maps = list_maps(Some(&dir));
         assert!(!maps.is_empty(), "no maps in {}", dir.display());
         for m in maps {
-            let (board, buildings) =
+            let (board, buildings, _) =
                 load_board(&m).unwrap_or_else(|e| panic!("{}: {}", m.display(), e));
             assert!(board.cols >= 1 && board.rows >= 1);
             assert!(!buildings.is_empty());
@@ -494,7 +574,7 @@ mod tests {
         ];
         let dir = std::env::temp_dir();
         let path = dir.join("hexfront_roundtrip_test.map");
-        save_map(&path, &board, &buildings).unwrap();
+        save_map(&path, &board, &buildings, &[]).unwrap();
         // 2 header bytes + ceil(48/2) height bytes + 4 building records
         // (2+1+2 B each) + 1 ramp + 2 bridge fragments + 5 obstacles
         // (2+1 B each) — one obstacle slot is taken by the bridge end.
@@ -502,7 +582,7 @@ mod tests {
             std::fs::metadata(&path).unwrap().len(),
             (2 + 24 + 4 * 5 + 8 * 3) as u64
         );
-        let (loaded_board, loaded_buildings) = load_board(&path).unwrap();
+        let (loaded_board, loaded_buildings, _) = load_board(&path).unwrap();
         assert_eq!((loaded_board.cols, loaded_board.rows), (8, 6));
         for (tile, t) in board.tiles.iter() {
             let lt = &loaded_board.tiles[tile];
@@ -572,7 +652,7 @@ mod tests {
             "hexfront_obstacle_terrain_test.map",
             &[(0, 26), (1, 27), (2, 29), (3, 30), (4, 28), (5, 26)],
         );
-        let (board, _) = load_board(&path).unwrap();
+        let (board, _, _) = load_board(&path).unwrap();
         let kind = |q: i32| {
             board
                 .tiles
@@ -601,14 +681,14 @@ mod tests {
         ];
         let dir = std::env::temp_dir();
         let path = dir.join("hexfront_bits_test.map");
-        save_map(&path, &board, &buildings).unwrap();
+        save_map(&path, &board, &buildings, &[]).unwrap();
         // Building record at offset 3 (2 header bytes + 1 height byte):
         // 2 coord bytes + 1 type + 2 property bytes. Owner 3 -> code 4 =
         // 0b000100, units 999 = 0b1111100111, so the 16-bit word is
         // 0b000100_1111100111 = 0x13E7, stored little-endian as E7 13.
         let data = std::fs::read(&path).unwrap();
         assert_eq!(&data[6..8], b"\xe7\x13");
-        let (_, loaded) = load_board(&path).unwrap();
+        let (_, loaded, _) = load_board(&path).unwrap();
         let by_tile: HashMap<Tile, &Building> = loaded.iter().map(|b| (b.tile, b)).collect();
         assert_eq!(by_tile[&(0, 0)].units as i64, 999);
         assert_eq!(by_tile[&(0, 0)].owner, Some(3));
@@ -616,5 +696,50 @@ mod tests {
         assert_eq!(by_tile[&(1, 0)].units as i64, 999);
         assert_eq!(by_tile[&(1, 0)].owner, None);
         let _ = std::fs::remove_file(&path);
+    }
+    #[test]
+    fn bonus_roundtrip_and_clamping() {
+        // Bonuses (rules.md section 13): type 31 carries a 2-byte +x value,
+        // type 32 a 1-byte *x multiplier, type 33 (drone) no value bytes.
+        let mut board = Board::new(4, 1);
+        for t in board.tiles.clone().keys().copied().collect::<Vec<_>>() {
+            board.tiles.get_mut(&t).unwrap().height = 1;
+        }
+        let bonuses = vec![
+            Bonus::new((0, 0), BonusKind::Add(10)),
+            Bonus::new((1, 0), BonusKind::Mul(3)),
+            Bonus::new((2, 0), BonusKind::Drone),
+            Bonus::new((3, 0), BonusKind::Add(5000)),
+        ];
+        let dir = std::env::temp_dir();
+        let path = dir.join("hexfront_bonus_test.map");
+        save_map(&path, &board, &[], &bonuses).unwrap();
+        let data = std::fs::read(&path).unwrap();
+        // 2 header bytes + 2 height bytes, then 5 + 4 + 3 + 5 bonus bytes.
+        assert_eq!(data.len(), 2 + 2 + 5 + 4 + 3 + 5);
+        let (_, _, loaded) = load_board(&path).unwrap();
+        let by_tile: HashMap<Tile, &Bonus> = loaded.iter().map(|b| (b.tile, b)).collect();
+        assert_eq!(by_tile[&(0, 0)].kind, BonusKind::Add(10));
+        assert_eq!(by_tile[&(1, 0)].kind, BonusKind::Mul(3));
+        assert_eq!(by_tile[&(2, 0)].kind, BonusKind::Drone);
+        assert_eq!(by_tile[&(3, 0)].kind, BonusKind::Add(999));
+        // A hand-written +x record of 0 clamps up to 1 with a warning.
+        let mut raw: Vec<u8> = vec![2, 1, 0x11, 0, 0, 31, 0, 0];
+        let raw_path = dir.join("hexfront_bonus_zero_test.map");
+        std::fs::write(&raw_path, &raw).unwrap();
+        let (_, _, zero) = load_board(&raw_path).unwrap();
+        assert_eq!(zero[0].kind, BonusKind::Add(1));
+        // A bonus on water is ignored.
+        raw[2] = 0x10;
+        std::fs::write(&raw_path, &raw).unwrap();
+        let (_, _, water) = load_board(&raw_path).unwrap();
+        assert!(water.is_empty());
+        // A truncated +x record is a hard error.
+        let short_path = dir.join("hexfront_bonus_short_test.map");
+        std::fs::write(&short_path, [2u8, 1, 0x11, 0, 0, 31, 7]).unwrap();
+        assert!(load_board(&short_path).is_err());
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&raw_path);
+        let _ = std::fs::remove_file(&short_path);
     }
 }

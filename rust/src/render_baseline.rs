@@ -86,7 +86,7 @@ fn bench_game(name: &str, game: &crate::game::Game, frames: usize) {
             unreachable += (!found) as usize;
         }
     }
-    // AI decisions (rules.md section 13.5 weighs every building pair). Every
+    // AI decisions (rules.md section 14.5 weighs every building pair). Every
     // controller is forced to fire in the same step, which is the worst case
     // a frame can get; the second pass reuses the same controllers, whose
     // routes are cached by then, and shows what a later decision costs.
@@ -154,9 +154,14 @@ fn render_baseline() {
         // (`pad_map`), so a playtest scans a much bigger board than the file
         // holds: measure that shape too.
         if game.board.cols < EDITOR_NEW_COLS || game.board.rows < EDITOR_NEW_ROWS {
-            let (board, _) = pad_map(game.board.clone(), Vec::new());
-            let padded =
-                crate::game::Game::new(board, game.players.clone(), game.buildings.clone(), 0);
+            let (board, _, _) = pad_map(game.board.clone(), Vec::new(), Vec::new());
+            let padded = crate::game::Game::new(
+                board,
+                game.players.clone(),
+                game.buildings.clone(),
+                Vec::new(),
+                0,
+            );
             bench_game(&format!("{name} padded"), &padded, frames);
         }
     }

@@ -98,6 +98,73 @@ impl Player {
     }
 }
 
+/// A bonus effect (rules.md section 13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BonusKind {
+    /// Add `0` units to the triggering vehicle.
+    Add(u32),
+    /// Multiply the units of the triggering vehicle by `0`.
+    Mul(u32),
+    /// Attach a drone to the triggering vehicle.
+    Drone,
+}
+
+/// A pickup bonus standing on one land tile (rules.md section 13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bonus {
+    /// Tile the bonus stands on.
+    pub tile: Tile,
+    /// Effect triggered by the first living vehicle sent to it.
+    pub kind: BonusKind,
+}
+
+impl Bonus {
+    /// Create a bonus of `kind` on `tile`.
+    pub fn new(tile: Tile, kind: BonusKind) -> Self {
+        Self { tile, kind }
+    }
+}
+
+/// Where a drone is anchored (rules.md section 13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DroneAnchor {
+    /// Tied to the bonus field it came from (neutral, never shoots).
+    Bonus(Tile),
+    /// Tied to a vehicle id.
+    Vehicle(u64),
+    /// Tied to a building tile.
+    Building(Tile),
+}
+
+/// An indestructible shooting drone (rules.md section 13).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Drone {
+    /// Tile of the bonus field the drone came from.
+    pub home: Tile,
+    /// Where the drone is currently anchored.
+    pub anchor: DroneAnchor,
+    /// Cooldown progress towards the next shot.
+    pub fire_timer: f64,
+    /// Vehicle id the drone currently shoots, `None` when it shoots nothing.
+    ///
+    /// Purely for the presentation layer: the shot itself is resolved at once
+    /// by the simulation, but the renderer draws the drone on the line
+    /// between its anchor and this target (specification.md, section "Grafika").
+    pub target: Option<u64>,
+}
+
+impl Drone {
+    /// Create a drone waiting on its bonus field.
+    pub fn new(home: Tile) -> Self {
+        Self {
+            home,
+            anchor: DroneAnchor::Bonus(home),
+            fire_timer: 0.0,
+            target: None,
+        }
+    }
+}
+
 /// A vehicle destroyed in combat, reported by the simulation so the renderer
 /// can play an explosion where it happened.
 ///
@@ -251,6 +318,12 @@ pub struct Vehicle {
     pub text_timer: f64,
     /// Visible floating texts.
     pub texts: Vec<FloatText>,
+    /// Bonus tile this vehicle was sent to (rules.md section 13); `None`
+    /// for an ordinary building mission.
+    pub bonus_target: Option<Tile>,
+    /// True once the vehicle picked up its bonus and heads back to the
+    /// source building along the same route (rules.md section 13).
+    pub returning: bool,
     /// Set when destroyed or arrived.
     pub dead: bool,
 }
@@ -288,6 +361,8 @@ impl Vehicle {
             gain_acc: 0.0,
             text_timer: 0.0,
             texts: Vec::new(),
+            bonus_target: None,
+            returning: false,
             dead: false,
         }
     }

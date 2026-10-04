@@ -95,7 +95,7 @@ fn helicopter_has_slender_hull_and_spinning_rotor() {
         board.tiles.get_mut(t).unwrap().height = 1;
     }
     let (sx, sy) = crate::hexgrid::hex_to_world(3, 3, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Helicopter,
         0,
@@ -195,7 +195,7 @@ fn helicopter_tail_trails_behind_flight_heading() {
     let start = (2, 2);
     let dest = (6, 2);
     let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Helicopter,
         0,
@@ -283,7 +283,7 @@ fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
     let (lx, ly) = hexgrid::hex_to_world(low.0, low.1, board.side);
     let (hx, hy) = hexgrid::hex_to_world(hill.0, hill.1, board.side);
     let tank_board = board.clone();
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     for pos in [(lx, ly), (hx, hy)] {
         game.vehicles.push(Vehicle::new(
             VehicleKind::Helicopter,
@@ -362,7 +362,13 @@ fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
         "the rotor shadow does not spin with the phase"
     );
     // Ground vehicles hug the terrain and get no shadow disc.
-    let mut tank_game = Game::new(tank_board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut tank_game = Game::new(
+        tank_board,
+        vec![Player::new(0, true)],
+        Vec::new(),
+        Vec::new(),
+        1,
+    );
     tank_game.vehicles.push(Vehicle::new(
         VehicleKind::Tank,
         0,
@@ -394,7 +400,7 @@ fn helicopter_shadow_blades_follow_the_rotor_phase() {
         board.tiles.get_mut(t).unwrap().height = 1;
     }
     let (sx, sy) = crate::hexgrid::hex_to_world(3, 3, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Helicopter,
         0,
@@ -454,6 +460,7 @@ fn tank_gun_trains_on_the_fought_enemy() {
     let mut game = Game::new(
         board,
         vec![Player::new(0, true), Player::new(1, false)],
+        Vec::new(),
         Vec::new(),
         1,
     );
@@ -519,7 +526,7 @@ fn tank_gun_follows_walls_and_travel_heading() {
     let north = (3, 5);
     let wall_tile = (6, 6);
     let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Tank,
         0,
@@ -556,7 +563,7 @@ fn tank_parts_stack_on_the_chassis_with_details() {
         board.tiles.get_mut(t).unwrap().height = 1;
     }
     let (sx, sy) = hexgrid::hex_to_world(4, 4, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Tank,
         0,
@@ -615,7 +622,7 @@ fn buffer_shares_the_tank_chassis_without_a_gun() {
         board.tiles.get_mut(t).unwrap().height = 1;
     }
     let (sx, sy) = hexgrid::hex_to_world(4, 4, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Buffer,
         0,
@@ -662,7 +669,7 @@ fn hovercraft_floats_on_a_skirt_with_a_spinning_fan() {
         board.tiles.get_mut(t).unwrap().height = 1;
     }
     let (sx, sy) = hexgrid::hex_to_world(4, 4, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Hovercraft,
         0,
@@ -758,7 +765,7 @@ fn hovercraft_bow_and_fan_follow_the_travel_heading() {
     let start = (4, 4);
     let dest = (8, 4);
     let (sx, sy) = hexgrid::hex_to_world(start.0, start.1, board.side);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Hovercraft,
         0,
@@ -813,6 +820,7 @@ fn range_fills_are_opaque_masks_and_outlines_use_owner_colour() {
     let mut game = Game::new(
         board,
         vec![Player::new(0, true), Player::new(1, false)],
+        Vec::new(),
         Vec::new(),
         1,
     );
@@ -912,7 +920,7 @@ fn obstacles_float_above_terrain_with_details() {
         }
         board.tiles.get_mut(&tile).unwrap().height = *height;
         board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(*kind));
-        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
         let top = tile_top_z(&game.board, tile);
@@ -960,7 +968,7 @@ fn obstacles_float_above_terrain_with_details() {
     }
     let tile = (2, 2);
     board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Wall));
-    let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     let mut dynamic = DynamicMesh::default();
     build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     let top = tile_top_z(&game.board, tile);
@@ -987,7 +995,7 @@ fn fire_trap_has_no_static_model() {
     }
     let tile = (2, 2);
     board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::TrapFire));
-    let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     let mut dynamic = DynamicMesh::default();
     build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     assert!(
@@ -1020,7 +1028,7 @@ fn mine_changes_shape_with_the_terrain() {
         let tile = (3, 3);
         board.tiles.get_mut(&tile).unwrap().height = height;
         board.tiles.get_mut(&tile).unwrap().obstacle = Some(Obstacle::new(ObstacleKind::Mine));
-        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+        let game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
         let mut dynamic = DynamicMesh::default();
         build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
         let top = tile_top_z(&game.board, tile);
@@ -1081,7 +1089,7 @@ fn flat_building_parts_float_above_terrain() {
             )
         })
         .collect();
-    let game = Game::new(board, vec![Player::new(0, true)], buildings, 1);
+    let game = Game::new(board, vec![Player::new(0, true)], buildings, Vec::new(), 1);
     let mut dynamic = DynamicMesh::default();
     build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     assert!(!dynamic.opaque.vertices.is_empty());
@@ -1117,6 +1125,7 @@ fn every_building_kind_fits_its_field() {
             board,
             vec![Player::new(0, true), Player::new(1, false)],
             vec![building],
+            Vec::new(),
             1,
         );
         let mut dynamic = DynamicMesh::default();
@@ -1174,7 +1183,7 @@ fn building_mesh_is_deterministic() {
             )
         })
         .collect();
-    let game = Game::new(board, vec![Player::new(0, true)], buildings, 1);
+    let game = Game::new(board, vec![Player::new(0, true)], buildings, Vec::new(), 1);
     let mut first = DynamicMesh::default();
     let mut second = DynamicMesh::default();
     build_dynamic(&game, 0.0, max_height(&game.board), &mut first);
@@ -1209,7 +1218,7 @@ fn turret_weapon_tip(kind: crate::entities::BuildingKind, aim: Option<(f64, f64)
     if let Some((ox, oy)) = aim {
         b.last_target_pos = Some((cx + ox, cy + oy));
     }
-    let game = Game::new(board, vec![Player::new(0, true)], vec![b], 1);
+    let game = Game::new(board, vec![Player::new(0, true)], vec![b], Vec::new(), 1);
     let mut dynamic = DynamicMesh::default();
     build_dynamic(&game, 0.0, max_height(&game.board), &mut dynamic);
     let weapon_base = tile_top_z(&game.board, tile)
@@ -1604,7 +1613,7 @@ fn vehicle_on_the_deck_stands_on_it_and_under_the_bridge_stays_on_the_water() {
     let (board, a, b, frags) = bridge_board();
     let mid = frags[0];
     let (mx, my) = board.center_world(mid);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     // Driving along the deck: the vehicle rides the bridge, high above the
     // water it crosses (rules.md section 8).
     game.vehicles.push(Vehicle::new(
@@ -1719,7 +1728,7 @@ fn route_line_of_a_vehicle_already_on_the_bridge_keeps_riding_the_deck() {
     use crate::game::Game;
     let (board, a, b, frags) = bridge_board();
     let (mx, my) = board.center_world(frags[0]);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     // A route set up at the near land end, so the first leg is right: the
     // vehicle climbs onto the deck and every waypoint after it rides it.
     game.vehicles.push(Vehicle::new(
@@ -1784,7 +1793,7 @@ fn route_line_floats_above_the_decals_lying_on_the_ground() {
         board.tiles.get_mut(&t).unwrap().height = 0;
     }
     let (mx, my) = board.center_world(frags[0]);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Hovercraft,
         0,
@@ -1837,7 +1846,7 @@ fn route_line_climbs_a_ramp_as_steeply_as_the_slope() {
     board.tiles.get_mut(&low).unwrap().height = 1;
     board.tiles.get_mut(&high).unwrap().height = 4;
     board.set_ramp(ramp, low, high);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     let (lx, ly) = game.board.center_world(low);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Tank,
@@ -1942,7 +1951,7 @@ fn helicopter_shadow_over_a_bridge_is_clipped_to_the_deck() {
     let (board, _a, _b, frags) = bridge_board();
     let mid = frags[0];
     let (mx, my) = board.center_world(mid);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Helicopter,
         0,
@@ -2009,7 +2018,7 @@ fn helicopter_route_leaves_from_its_shadow_not_from_the_hull() {
     use crate::game::Game;
     let (board, a, b, frags) = bridge_board();
     let (mx, my) = board.center_world(frags[0]);
-    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), Vec::new(), 1);
     game.vehicles.push(Vehicle::new(
         VehicleKind::Helicopter,
         0,
@@ -2068,4 +2077,89 @@ fn mesh_chunks_fit_u16_indices() {
             );
         }
     }
+}
+
+/// A board with one drone bonus and one `+x` bonus, plus a game whose drone is
+/// already tied to a building (so it orbits instead of resting).
+fn bonus_board_and_game() -> (Game, Tile, Tile) {
+    let mut board = Board::new(8, 8);
+    for t in board.tiles.clone().keys().copied().collect::<Vec<_>>() {
+        board.tiles.get_mut(&t).unwrap().height = 1;
+    }
+    let drone_tile = (2, 2);
+    let add_tile = (5, 5);
+    let base = (2, 4);
+    let mut game = Game::new(
+        board,
+        vec![crate::entities::Player::new(0, true)],
+        vec![crate::entities::Building::new(
+            crate::entities::BuildingKind::BaseTank,
+            Some(0),
+            base.0,
+            base.1,
+            20.0,
+        )],
+        vec![
+            crate::entities::Bonus::new(drone_tile, crate::entities::BonusKind::Drone),
+            crate::entities::Bonus::new(add_tile, crate::entities::BonusKind::Add(25)),
+        ],
+        0,
+    );
+    // Tie the drone to the base so it flies instead of waiting on its field.
+    game.drones[0].anchor = crate::entities::DroneAnchor::Building(base);
+    (game, drone_tile, add_tile)
+}
+
+#[test]
+fn bonuses_and_drones_get_geometry() {
+    let (game, _, _) = bonus_board_and_game();
+    let mut mesh = DynamicMesh::default();
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut mesh);
+    // `+x` draws two figures, the drone bonus a pad: both in the opaque soup.
+    assert!(
+        mesh.opaque.vertices.len() > 6,
+        "the bonus markers have no geometry"
+    );
+    // The orbiting drone draws its rotor ring among the 3D strokes.
+    assert!(!mesh.lines.is_empty(), "the drone has no rotor ring");
+    // With the drone on its own field the frame is the same size minus the
+    // orbit: the marker geometry does not depend on the anchor.
+    let (resting, _, _) = bonus_board_and_game();
+    let mut mesh2 = DynamicMesh::default();
+    build_dynamic(&resting, 0.0, max_height(&resting.board), &mut mesh2);
+    assert!(mesh2.opaque.vertices.len() > 6);
+    assert!(!mesh2.lines.is_empty());
+}
+
+#[test]
+fn an_anchored_drone_orbits_and_the_anchor_stays_put() {
+    // The orbit is presentation only: the anchor centre is where the drone
+    // returns to, and the range is counted from there (rules.md section 13).
+    let (game, _, _) = bonus_board_and_game();
+    let base = (2, 4);
+    let anchor = super::bonuses::anchor_point(&game, &game.drones[0]);
+    assert_eq!((anchor.0, anchor.1), game.board.center_world(base));
+    let hull = |phase: f64| {
+        let mut mesh = DynamicMesh::default();
+        build_dynamic(&game, phase, max_height(&game.board), &mut mesh);
+        let (cx, cy) = game.board.center_world(base);
+        // Mean position of the drone hull vertices, i.e. where it was drawn.
+        let hull: Vec<&GpuVertex> = mesh
+            .opaque
+            .vertices
+            .iter()
+            .filter(|v| (v.x as f64 - cx).abs() < 200.0 && (v.y as f64 - cy).abs() < 200.0)
+            .collect();
+        let n = hull.len() as f64;
+        (
+            hull.iter().map(|v| v.x as f64).sum::<f64>() / n,
+            hull.iter().map(|v| v.y as f64).sum::<f64>() / n,
+        )
+    };
+    let (x0, y0) = hull(0.0);
+    let (x1, y1) = hull(1.0 / super::bonuses::DRON_ORBIT_W);
+    assert!(
+        dist((x0, y0), (x1, y1)) > 1.0,
+        "an anchored drone does not move: {x0},{y0} vs {x1},{y1}"
+    );
 }

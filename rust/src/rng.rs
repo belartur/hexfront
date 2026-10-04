@@ -1,7 +1,7 @@
 //! Deterministic pseudo-random number generator (no extra crates).
 //!
 //! A small splitmix64-based generator with Box-Muller gaussian sampling,
-//! used for the AI score noise (rules.md section 13.8). The sequence is
+//! used for the AI score noise (rules.md section 14.8). The sequence is
 //! fully deterministic for a given seed (specification_rust.md).
 
 /// Deterministic PRNG: splitmix64 state plus a cached gaussian sample.

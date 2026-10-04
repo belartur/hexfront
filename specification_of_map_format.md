@@ -28,7 +28,7 @@ Znajdują się w nim, kolejno, następujące informacje:
 
 * Wymiary planszy (2 bajty): liczba kolumn `k` (1 bajt) i wierszy `w` (1 bajt), każda z zakresu 1–255 (maksimum wynika z 1 bajta na wymiar; `0` jest odrzucane przy odczycie jako pusta plansza).
 * `k·w` liczb 4-bitowych kodujących wysokości kolejnych pól planszy (0–15, 0 to woda) w kolejności row-major: indeks `r·k+q`. Zapisane są na `⌈k·w/2⌉` bajtach, po dwa pola na bajt: wcześniejsze pole pary na młodszych 4 bitach (bity 3–0), późniejsze na starszych 4 bitach (bity 7–4). Gdy `k·w` jest nieparzyste, starsze 4 bity ostatniego bajta przechowują zero (padding).
-* Obiekty znajdujące się na planszy, jeden rekord za drugim aż do końca pliku (bez licznika ani terminatora); kolejność rekordów jest dowolna. Liczba użytych bajtów zależy od typu obiektu: pierwsze 2 bajty kodują położenie obiektu (1 bajt kolumnę `q` i 1 bajt wiersz `r`), trzeci bajt koduje typ obiektu, a kolejne 2 bajty (wyłącznie w przypadku budynków) jego własności. Na jednym polu może znajdować się najwyżej jeden obiekt.
+* Obiekty znajdujące się na planszy, jeden rekord za drugim aż do końca pliku (bez licznika ani terminatora); kolejność rekordów jest dowolna. Liczba użytych bajtów zależy od typu obiektu: pierwsze 2 bajty kodują położenie obiektu (1 bajt kolumnę `q` i 1 bajt wiersz `r`), trzeci bajt koduje typ obiektu, a kolejne bajty — jego własności (2 bajty dla budynku, 2 dla premiary +x, 1 dla premiary *x, brak dla premiary z dronem). Na jednym polu może znajdować się najwyżej jeden obiekt.
 
 ## Rekordy obiektów
 
@@ -56,6 +56,22 @@ Rodzaje budynków opisuje [rules.md](rules.md), sekcja 3. Po typie zapisywane s�
 ### Podjazdy (typy 23–25)
 `typ − 23` to oś pary łączonych przeciwległych sąsiadów. Podjazd na polu `p` łączy pole `a` — sąsiada w kierunku `oś` — z polem `b` — sąsiadem w kierunku `oś+3` ([rules.md](rules.md), sekcja 7). Rekord, którego końce wypadają poza planszę, jest przy odczycie pomijany z ostrzeżeniem.
 
+### Premie (typy 31–33)
+
+| typ | rodzaj premii | bajty własności |
+|---|---|---|
+| 31 | +x jednostek | 2 |
+| 32 | *x jednostek | 1 |
+| 33 | dron | brak |
+
+Premie opisuje [rules.md](rules.md), sekcja 13. Rekord premii składa się z 2 bajtów pozycji pola, 1 bajtu typu i — zależnie od rodzaju — własności premii:
+
+* **+x** — 16-bitowe słowo little-endian z liczbą jednostek; zakres przewidziany dla mapy to 1–999 (ten sam co początkowa liczba jednostek w budynku),
+* **\*x** — 1 bajt z mnożnikiem; zakres 2–99 mieści się w tym bajcie w całości,
+* **dron** — rekord kończy się na bajcie typu, nie ma bajtów własności.
+
+Wartość spoza zakresu (także 0 dla `+x`) czytnik sprowadza do najbliższej dopuszczalnej wartości z ostrzeżeniem.
+
 ### Utrudnienia (typy 26 i wyższe)
 | typ | rodzaj utrudnienia |
 |---|---|
@@ -64,7 +80,8 @@ Rodzaje budynków opisuje [rules.md](rules.md), sekcja 3. Po typie zapisywane s�
 | 28 | zarezerwowany (nieużywany) |
 | 29 | pułapka ogniowa (tylko na lądzie) |
 | 30 | pułapka lodowa (tylko na lądzie) |
-| 31 i wyższe | zarezerwowane (nieznany typ jest przy odczycie pomijany z ostrzeżeniem) |
+| 31–33 | premie (patrz niżej) |
+| 34 i wyższe | zarezerwowane (nieznany typ jest przy odczycie pomijany z ostrzeżeniem) |
 
 Utrudnienia opisuje [rules.md](rules.md), sekcja 1.
 
@@ -72,14 +89,15 @@ Utrudnienia opisuje [rules.md](rules.md), sekcja 1.
 Zapisujący:
 * plansza większa niż 255 na 255 nie ma reprezentacji w tym formacie (każdy wymiar musi zmieścić się w 1 bajcie),
 * wysokość pola jest zapisywana w zakresie 0–15, liczba jednostek w zakresie 0–999, a numer właściciela na 6 bitach,
-* budynek o typie spoza tabeli nie jest zapisywany; na jednym polu znajduje się najwyżej jeden obiekt (budynek, podjazd, fragment mostu albo utrudnienie).
+* wartość premiary +x jest zapisywana w zakresie 1–999, a mnożnik premiary *x w zakresie 2–99,
+* budynek o typie spoza tabeli nie jest zapisywany; na jednym polu znajduje się najwyżej jeden obiekt (budynek, premia, podjazd, fragment mostu albo utrudnienie).
 
 Czytnik:
-* błąd odczytu powodują: plik krótszy niż 2 bajty, plansza o wymiarze 0, brak pełnych danych wysokości, rekord wskazujący pole poza planszą oraz obcięty rekord budynku (brak 2 bajtów własności),
-* ostrzeżenie i korektę danych powodują: liczba jednostek 1000–1023 (sprowadzana do 999), budynek o typie z zakresu zarezerwowanego oraz nieznany typ utrudnienia (rekord pomijany),
-* rekord obiektu, którego nie można postawić na danym polu według reguł [rules.md](rules.md), sekcja 1, jest pomijany z ostrzeżeniem.
+* błąd odczytu powodują: plik krótszy niż 2 bajty, plansza o wymiarze 0, brak pełnych danych wysokości, rekord wskazujący pole poza planszą, obcięty rekord budynku (brak 2 bajtów własności) oraz obcięty rekord premii (brak 2 bajtów wartości typu 31 albo 1 bajta typu 32),
+* ostrzeżenie i korektę danych powodują: liczba jednostek 1000–1023 (sprowadzana do 999), budynek o typie z zakresu zarezerwowanego, nieznany typ utrudnienia (rekord pomijany) oraz wartość premii spoza zakresu (sprowadzana do najbliższej dopuszczalnej wartości),
+* rekord obiektu, którego nie można postawić na danym polu według reguł [rules.md](rules.md), sekcja 1, jest pomijany z ostrzeżeniem — dotyczy to premii na wodzie.
 
 ## Zobacz też
-* [rules.md](rules.md) — zasady gry (mapa, budynki, podjazdy, mosty),
+* [rules.md](rules.md) — zasady gry (mapa, budynki, podjazdy, mosty, premie),
 * [specification.md](specification.md) — wspólna część specyfikacji implementacji,
 * [specification_rust.md](specification_rust.md) — implementacja w Rust, w tym edytor plansz (m.in. usuwanie i dopełnianie pustych skrajnych wierszy i kolumn).

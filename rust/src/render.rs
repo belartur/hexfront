@@ -251,8 +251,9 @@ impl Renderer {
         self.draw_range_fills(matrix, dynamic);
         mq::set_camera(&GpuIsoCamera::flat(matrix));
         draw_line_soup(&dynamic.range_lines);
-        // Selection outline + hovered route preview as 2D overlays.
+        // Bonus rings, selection outline and hovered route preview as 2D overlays.
         mq::set_default_camera();
+        draw_bonus_rings_2d(camera, game);
         draw_selection_2d(camera, game, selection, hover_tile, preview);
     }
 
@@ -549,6 +550,32 @@ fn draw_mask_overlay(texture: &macroquad::prelude::Texture2D, color: [u8; 3], al
             ..Default::default()
         },
     );
+}
+
+/// Yellow ring around every bonus field, as a 2D overlay (never occluded).
+///
+/// specification.md, section "Grafika i interfejs użytkownika": a bonus shows
+/// its effect inside a yellow ring around the whole field. The ring is a 2D
+/// overlay for the same reason the range outlines are: a bonus must stay
+/// readable even behind a cliff, a bridge deck or a building.
+fn draw_bonus_rings_2d(camera: &Camera, game: &Game) {
+    use macroquad::prelude as mq;
+    let [r, g, b] = constants::BONUS_MARK_COLOR;
+    let color = mq::Color::from_rgba(r, g, b, 255);
+    for bonus in game.bonuses.iter().flatten() {
+        let z = crate::mesh::tile_top_z(&game.board, bonus.tile);
+        let corners = crate::hexgrid::hex_corners(bonus.tile.0, bonus.tile.1, game.board.side);
+        let pts: Vec<(f32, f32)> = corners
+            .iter()
+            .map(|(x, y)| camera.world_to_screen(*x, *y, z))
+            .collect();
+        for w in pts.windows(2) {
+            mq::draw_line(w[0].0, w[0].1, w[1].0, w[1].1, 2.5, color);
+        }
+        if let (Some(a), Some(b)) = (pts.first(), pts.last()) {
+            mq::draw_line(a.0, a.1, b.0, b.1, 2.5, color);
+        }
+    }
 }
 
 /// 2D selection outline and route preview (never occluded).

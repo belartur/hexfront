@@ -719,22 +719,48 @@ pub const MENU_GRID_TOP_FRACTION: f32 = 0.30;
 pub const MENU_GRID_BOTTOM_MARGIN: f32 = 70.0;
 /// Menu scroll step in px.
 pub const MENU_SCROLL_STEP: f32 = 48.0;
+// Bonuses (rules.md section 13)
+/// Map type code of a +x bonus (rules.md section 13).
+pub const BONUS_CODE_ADD: u8 = 31;
+/// Map type code of a *x bonus (rules.md section 13).
+pub const BONUS_CODE_MUL: u8 = 32;
+/// Map type code of a drone bonus (rules.md section 13).
+pub const BONUS_CODE_DRONE: u8 = 33;
+/// Smallest +x bonus value (rules.md section 13).
+pub const BONUS_ADD_MIN: u32 = 1;
+/// Largest +x bonus value, same as the largest starting garrison of a
+/// building (rules.md sections 3, 12).
+pub const BONUS_ADD_MAX: u32 = 999;
+/// Smallest *x bonus multiplier (rules.md section 13).
+pub const BONUS_MUL_MIN: u32 = 2;
+/// Largest *x bonus multiplier (rules.md section 13).
+pub const BONUS_MUL_MAX: u32 = 99;
+/// Colour of the ring and the markers drawn on a bonus field
+/// (specification.md, section "Grafika i interfejs użytkownika": a bonus shows
+/// its effect inside a yellow ring).
+pub const BONUS_MARK_COLOR: [u8; 3] = [235, 205, 90];
+/// Drone firing rate: shots per second (rules.md section 13).
+pub const DRONE_SHOTS_PER_SECOND: f64 = 3.0;
+/// Drone firing range in j (rules.md section 13).
+pub const DRONE_RANGE: f64 = 80.0;
+/// Damage of one drone shot (rules.md section 13).
+pub const DRONE_DAMAGE: f64 = 1.0;
 // Map files (specification.md "Plansze")
-/// AI difficulty used for maps loaded from files (rules.md section 13.8).
+/// AI difficulty used for maps loaded from files (rules.md section 14.8).
 pub const MAP_DEFAULT_AI_DIFFICULTY: &str = "normal";
-// AI difficulty (rules.md sections 13.5, 13.8)
-/// Tunable parameters of one AI difficulty level (rules.md section 13.8).
+// AI difficulty (rules.md sections 14.5, 14.8)
+/// Tunable parameters of one AI difficulty level (rules.md section 14.8).
 #[derive(Clone, Copy, Debug)]
 pub struct AiDifficulty {
     /// Preset name.
     pub name: &'static str,
-    /// Seconds between decisions (section 13.2).
+    /// Seconds between decisions (section 14.2).
     pub interval: f64,
     /// Standard deviation of the score noise.
     pub noise: f64,
     /// Seconds before a fresh threat is reacted to.
     pub reaction_delay: f64,
-    /// Minimum score to perform an action (section 13.5).
+    /// Minimum score to perform an action (section 14.5).
     pub threshold: f64,
     /// Weight: chance of capturing the target.
     pub w1: f64,
@@ -749,7 +775,7 @@ pub struct AiDifficulty {
     /// Weight: risk of losing the source.
     pub w6: f64,
 }
-/// Difficulty presets (rules.md section 13.8).
+/// Difficulty presets (rules.md section 14.8).
 pub const AI_DIFFICULTIES: [AiDifficulty; 3] = [
     AiDifficulty {
         name: "easy",
