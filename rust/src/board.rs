@@ -3,6 +3,7 @@
 //! Ground-movement rules implemented in [`Board::step`] follow rules.md
 //! sections 4, 5, 7 (ramps) and 8 (bridges).
 
+use std::cell::RefCell;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::constants::{self, VehicleKind};
@@ -139,19 +140,19 @@ pub enum Crossing {
 
 /// Rebuild the tile route of a shortest-path search from its parent links,
 /// leaving out the source field.
-fn walk_path(
-    prev: &HashMap<(Tile, Crossing), (Tile, Crossing)>,
-    start: (Tile, Crossing),
-    last: (Tile, Crossing),
-) -> Vec<Tile> {
-    let mut path = vec![last.0];
+///
+/// `prev` holds the parent state index of every reached state (see
+/// [`Board::find_path`]); `start` is the index of the source state, so the
+/// walk stops one step before it and the source field never appears in the
+/// result.
+fn walk_path(prev: &[u32], start: usize, last: usize, board: &Board) -> Vec<Tile> {
+    let mut path = Vec::new();
     let mut cur = last;
     while cur != start {
-        cur = prev[&cur];
-        path.push(cur.0);
+        path.push(board.state_tile(cur));
+        cur = prev[cur] as usize;
     }
     path.reverse();
-    path.remove(0); // drop the source field
     path
 }
 
@@ -222,6 +223,58 @@ fn helicopter_path(src: Tile, dst: Tile) -> Vec<Tile> {
     path
 }
 
+/// Marker of a field that belongs to no region yet, or to none at all because
+/// the vehicle cannot stand on it (see `Board::regions`). Distinct from region
+/// id 0, which is a perfectly ordinary region.
+const UNREACHABLE: u32 = u32::MAX;
+
+/// Reusable working set of [`Board::find_path`].
+///
+/// A single AI decision routes every source building to every target
+/// building (rules.md section 13.5), so a large map runs thousands of
+/// searches back to back. Allocating and clearing the working arrays per
+/// search costs more than the search itself on a big board, so the board
+/// keeps one buffer and reuses it.
+///
+/// `stamp` marks which generation each entry belongs to, which spares the
+/// buffer a full reset between searches: an entry whose stamp is older than
+/// the current generation is simply unvisited, and its `cost` / `prev` value
+/// is never read before it is written.
+#[derive(Clone, Debug, Default)]
+struct PathScratch {
+    /// Generation of the entry, or an older one when the state is unvisited.
+    stamp: Vec<u32>,
+    /// Cost of the cheapest known route to the state of the current
+    /// generation.
+    cost: Vec<i32>,
+    /// Index of the parent state on that route.
+    prev: Vec<u32>,
+    /// Generation counter, bumped at the start of every search.
+    generation: u32,
+}
+
+impl PathScratch {
+    /// Start a new generation, allocating the buffers on first use.
+    ///
+    /// Returns the generation to write into the stamps. Wrapping the counter
+    /// would make stale entries look current again, so on overflow the
+    /// stamps are cleared and counting restarts at one.
+    fn begin(&mut self, states: usize) -> u32 {
+        if self.generation == u32::MAX {
+            self.stamp.clear();
+            self.stamp.resize(states, 0);
+            self.generation = 0;
+        }
+        if self.stamp.len() < states {
+            self.stamp.resize(states, 0);
+            self.cost.resize(states, 0);
+            self.prev.resize(states, 0);
+        }
+        self.generation += 1;
+        self.generation
+    }
+}
+
 /// Rectangular (odd-q) board of hexagonal tiles.
 #[derive(Clone, Debug)]
 pub struct Board {
@@ -237,6 +290,8 @@ pub struct Board {
     pub bridges: Vec<Bridge>,
     /// Tiles carrying a ramp: `{tile: (a, b)}`.
     pub ramps: HashMap<Tile, (Tile, Tile)>,
+    /// Working set reused by every [`Board::find_path`] call.
+    path_scratch: RefCell<PathScratch>,
 }
 
 impl Board {
@@ -259,6 +314,7 @@ impl Board {
             tiles,
             bridges: Vec::new(),
             ramps: HashMap::new(),
+            path_scratch: RefCell::new(PathScratch::default()),
         }
     }
     /// True when `tile` lies on the board.
@@ -269,12 +325,15 @@ impl Board {
     pub fn height(&self, tile: Tile) -> i32 {
         self.tiles.get(&tile).map(|t| t.height).unwrap_or(0)
     }
-    /// All six neighbours of `tile` (on-board ones only).
-    pub fn neighbors(&self, tile: Tile) -> Vec<Tile> {
+    /// How many of the six neighbours of `tile` lie on the board.
+    ///
+    /// Used by the per-pair scoring loops of the AI (rules.md section 13.5),
+    /// which would otherwise build a `Vec` per evaluated building pair.
+    pub fn neighbor_count(&self, tile: Tile) -> usize {
         hexgrid::neighbors(tile.0, tile.1)
             .into_iter()
             .filter(|t| self.contains(*t))
-            .collect()
+            .count()
     }
     /// World position of a tile centre.
     pub fn center_world(&self, tile: Tile) -> (f64, f64) {
@@ -664,6 +723,13 @@ impl Board {
     /// destination instead of flooding the board in rings. Equally short
     /// routes are resolved by the squared Euclidean distance to the
     /// destination (rules.md section 4).
+    ///
+    /// The search keeps its working set in flat arrays indexed by
+    /// `2 * (r * cols + q) + mode` instead of hashing `(tile, mode)` pairs:
+    /// the board is a full rectangle, so every in-bounds tile has an index
+    /// and the lookups become plain array reads. A route search runs over
+    /// every building pair the AI weighs on every decision (rules.md section
+    /// 13.5), so this is the hottest path of a decision on a big map.
     pub fn find_path(&self, src: Tile, dst: Tile, kind: VehicleKind) -> Option<Vec<Tile>> {
         if src == dst || !self.contains(src) || !self.contains(dst) {
             return None;
@@ -674,9 +740,12 @@ impl Board {
         if kind == VehicleKind::Helicopter {
             return Some(helicopter_path(src, dst));
         }
-        let start = (src, Crossing::Ground);
-        let mut prev: HashMap<(Tile, Crossing), (Tile, Crossing)> = HashMap::new();
-        let mut best_g: HashMap<(Tile, Crossing), i32> = HashMap::from([(start, 0)]);
+        let cells = self.cols * self.rows;
+        let mut scratch = self.path_scratch.borrow_mut();
+        let generation = scratch.begin(2 * cells as usize);
+        let start = self.state_index(src, Crossing::Ground);
+        scratch.stamp[start] = generation;
+        scratch.cost[start] = 0;
         let start_h = hexgrid::hex_distance(src.0, src.1, dst.0, dst.1);
         let mut open = BinaryHeap::from([OpenEntry {
             f: start_h,
@@ -685,31 +754,41 @@ impl Board {
             tile: src,
             mode: Crossing::Ground,
         }]);
-        while let Some(cur) = open.pop() {
-            let state = (cur.tile, cur.mode);
+        let found = loop {
+            let Some(cur) = open.pop() else {
+                break None;
+            };
+            let state = self.state_index(cur.tile, cur.mode);
             // Lazy deletion: skip an entry whose `g` (`f - h`) is worse than
             // the best one recorded for this state, i.e. a stale duplicate
             // pushed before a shorter route to the same state was found. The
             // state is always present: a successor is only pushed right after
             // its `g` is stored.
-            let g = best_g[&state];
-            if cur.f - cur.h != g {
+            if scratch.stamp[state] != generation || cur.f - cur.h != scratch.cost[state] {
                 continue;
             }
             if cur.tile == dst {
-                return Some(walk_path(&prev, start, state));
+                break Some(state);
             }
-            for n in self.neighbors(cur.tile) {
+            // The six neighbours in their fixed geometric order (the same one
+            // [`Board::neighbors`] yields), filtered in place instead of
+            // collecting them into a `Vec` first: this loop runs once per
+            // explored state of every route search.
+            for n in hexgrid::neighbors(cur.tile.0, cur.tile.1) {
+                if !self.contains(n) {
+                    continue;
+                }
                 let Some(mode) = self.step(cur.tile, n, kind, cur.mode) else {
                     continue;
                 };
-                let next = (n, mode);
-                let next_g = g + 1;
-                if best_g.get(&next).is_some_and(|old| next_g >= *old) {
+                let next_g = scratch.cost[state] + 1;
+                let next = self.state_index(n, mode);
+                if scratch.stamp[next] == generation && next_g >= scratch.cost[next] {
                     continue;
                 }
-                best_g.insert(next, next_g);
-                prev.insert(next, state);
+                scratch.stamp[next] = generation;
+                scratch.cost[next] = next_g;
+                scratch.prev[next] = state as u32;
                 let h = hexgrid::hex_distance(n.0, n.1, dst.0, dst.1);
                 open.push(OpenEntry {
                     f: next_g + h,
@@ -719,9 +798,103 @@ impl Board {
                     mode,
                 });
             }
-        }
-        None
+        };
+        drop(scratch);
+        found.map(|last| walk_path(&self.path_scratch.borrow().prev, start, last, self))
     }
+    /// Index of the `(field, crossing mode)` state in the flat arrays the route
+    /// search and [`Board::components`] work on: two slots per field, ground
+    /// first and deck second.
+    fn state_index(&self, tile: Tile, mode: Crossing) -> usize {
+        let base = (tile.1 as usize) * self.cols as usize + tile.0 as usize;
+        2 * base + if mode == Crossing::Ground { 0 } else { 1 }
+    }
+    /// Field of a state index, the inverse of [`Board::state_index`].
+    fn state_tile(&self, index: usize) -> Tile {
+        let base = index / 2;
+        (
+            (base % self.cols as usize) as i32,
+            (base / self.cols as usize) as i32,
+        )
+    }
+    /// Connected ground regions a vehicle of `kind` can drive, or `None`
+    /// when the board has a bridge and the shortcut does not apply.
+    ///
+    /// A caller that weighs many routes can build this once and reject every
+    /// pair the vehicle cannot reach at all without searching: the search
+    /// would first flood the whole source region before it could answer
+    /// `None`. On a map made of separate islands most pairs are like that.
+    ///
+    /// `None` on a board with a bridge is not an optimisation left out but a
+    /// correctness requirement. Crossing modes make the state graph
+    /// *directed* (rules.md section 8): from a bridge end on the ground a
+    /// vehicle may ride onto the deck, but from that deck field it may not
+    /// step back down onto the same field. Reachability is therefore no
+    /// longer symmetric, so two fields can share neither a region nor a
+    /// mutual connection, and no labelling can stand in for the search.
+    pub fn regions(&self, kind: VehicleKind) -> Option<Vec<u32>> {
+        if !self.bridges.is_empty() {
+            return None;
+        }
+        // With no bridge there is only the ground mode, and every step is its
+        // own reverse, so the drivable fields split into plain regions.
+        let cells = (self.cols * self.rows) as usize;
+        let mut region: Vec<u32> = vec![UNREACHABLE; cells];
+        let mut next = 0u32;
+        let mut queue: Vec<usize> = Vec::new();
+        for r in 0..self.rows {
+            for q in 0..self.cols {
+                let tile = (q, r);
+                if !self.drivable(tile, kind) {
+                    continue;
+                }
+                let start = (r as usize) * self.cols as usize + q as usize;
+                if region[start] != UNREACHABLE {
+                    continue;
+                }
+                queue.clear();
+                queue.push(start);
+                region[start] = next;
+                while let Some(cell) = queue.pop() {
+                    let cols = self.cols as usize;
+                    let tile = ((cell % cols) as i32, (cell / cols) as i32);
+                    for n in hexgrid::neighbors(tile.0, tile.1) {
+                        if !self.contains(n) {
+                            continue;
+                        }
+                        let next_cell = (n.1 as usize) * cols + n.0 as usize;
+                        if region[next_cell] == UNREACHABLE
+                            && self.ground_step(tile, n, kind)
+                            && self.drivable(n, kind)
+                        {
+                            region[next_cell] = next;
+                            queue.push(next_cell);
+                        }
+                    }
+                }
+                next += 1;
+            }
+        }
+        Some(region)
+    }
+    /// True when a route from `src` to `dst` may exist, according to the
+    /// labelling [`Board::regions`] returns.
+    ///
+    /// A field the vehicle cannot stand on has no region and cannot be
+    /// entered, so it counts as unreachable; a field off the board is left to
+    /// the search, which is the answer that costs nothing to be wrong about.
+    pub fn same_region(&self, region: &[u32], src: Tile, dst: Tile) -> bool {
+        let at = |t: Tile| {
+            region
+                .get((t.1 as usize) * self.cols as usize + t.0 as usize)
+                .copied()
+        };
+        match (at(src), at(dst)) {
+            (Some(a), Some(b)) => a != UNREACHABLE && a == b,
+            _ => true,
+        }
+    }
+
     /// World-space length of a tile path (for travel-time estimates).
     /// When `start` is given, the hop from `start` to `path[0]` is included.
     pub fn path_world_length(&self, path: &[Tile], start: Option<Tile>) -> f64 {
@@ -1033,7 +1206,10 @@ mod tests {
                 if t == dst {
                     return Some(d);
                 }
-                for n in board.neighbors(t) {
+                for n in hexgrid::neighbors(t.0, t.1)
+                    .into_iter()
+                    .filter(|n| board.contains(*n))
+                {
                     let ground = board.step(t, n, kind, Crossing::Ground).is_some();
                     let deck = board.step(t, n, kind, Crossing::Deck).is_some();
                     if (ground || deck) && seen.insert(n) {
@@ -1075,6 +1251,61 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn regions_never_hide_a_route() {
+        // `Board::regions` is a shortcut the AI takes instead of searching:
+        // two fields it calls unreachable must really have no route. A wrong
+        // "no" would silently stop the AI from moving, so every pair is
+        // cross-checked against the search itself, over water, land and
+        // across the two sides of a wall.
+        // The board is small on purpose: the check is quadratic in the fields
+        // and `cargo test` runs unoptimised.
+        let mut board = flat_board(11, 9);
+        // A wall down the middle with two gaps, so both answers occur: the
+        // roads fork and join again.
+        for r in 0..9 {
+            board.tiles.get_mut(&(6, r)).unwrap().height = 2;
+        }
+        board.tiles.get_mut(&(6, 2)).unwrap().height = 1;
+        board.tiles.get_mut(&(6, 6)).unwrap().height = 1;
+        // A water corner, which a tank can neither enter nor cross.
+        for q in 0..3 {
+            board.tiles.get_mut(&(q, 0)).unwrap().height = 0;
+        }
+        for kind in [VehicleKind::Tank, VehicleKind::Hovercraft] {
+            let regions = board.regions(kind).expect("no bridge, so regions apply");
+            let tiles: Vec<Tile> = board.tiles.keys().copied().collect();
+            for src in tiles.iter().copied() {
+                for dst in tiles.iter().copied() {
+                    if src == dst {
+                        continue;
+                    }
+                    let joined = board.same_region(&regions, src, dst);
+                    let found = board.find_path(src, dst, kind).is_some();
+                    assert_eq!(
+                        joined, found,
+                        "{kind:?} {src:?} -> {dst:?}: regions say {joined}, search says {found}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_bridge_disables_the_region_shortcut() {
+        // A bridge deck is entered from a land end but never left sideways, so
+        // reachability stops being symmetric and no labelling can stand in for
+        // the search. The shortcut must switch itself off rather than answer
+        // for it.
+        let mut board = flat_board(11, 9);
+        board.tiles.get_mut(&(4, 1)).unwrap().height = 4;
+        board.tiles.get_mut(&(4, 4)).unwrap().height = 4;
+        board.tiles.get_mut(&(4, 2)).unwrap().height = 0;
+        board.tiles.get_mut(&(4, 3)).unwrap().height = 0;
+        assert!(board.add_bridge((4, 1), (4, 4), 1).is_some());
+        assert_eq!(board.regions(VehicleKind::Tank), None);
     }
 
     #[test]

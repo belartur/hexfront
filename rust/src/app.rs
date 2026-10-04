@@ -129,6 +129,21 @@ pub struct Application {
     slow_frames: Vec<f32>,
 }
 
+/// One AI controller per computer player of `game`, seeded from the level
+/// seed and given their position among the AI players.
+///
+/// The index and the count are what spread the decisions evenly over one
+/// decision interval (rules.md section 13.2, `AiController::new`), and they
+/// are derived here from the player list, so every way of starting a game —
+/// a map from the menu and an editor playtest — spaces them the same way.
+fn ai_controllers(game: &Game, seed: u64) -> Vec<AiController> {
+    crate::ai::controllers(
+        game,
+        *constants::ai_difficulty(constants::MAP_DEFAULT_AI_DIFFICULTY),
+        seed,
+    )
+}
+
 impl Application {
     /// Create the application (window is owned by macroquad).
     pub fn new() -> Self {
@@ -491,16 +506,7 @@ impl Application {
         match mapfile::load_game(path) {
             Ok(game) => {
                 let seed = level_seed(path);
-                let mut ai = Vec::new();
-                for p in game.players.iter() {
-                    if !p.is_human {
-                        ai.push(AiController::new(
-                            p.id,
-                            *constants::ai_difficulty(constants::MAP_DEFAULT_AI_DIFFICULTY),
-                            seed.wrapping_add(p.id as u64),
-                        ));
-                    }
-                }
+                let ai = ai_controllers(&game, seed);
                 self.camera = Camera::new((screen_width(), screen_height()));
                 self.camera.focus_board(&game.board);
                 self.terrain = mesh::build_terrain(&game.board);
@@ -544,16 +550,7 @@ impl Application {
         };
         let game = ed.playtest_game();
         let seed = ed.playtest_seed();
-        let mut ai = Vec::new();
-        for p in game.players.iter() {
-            if !p.is_human {
-                ai.push(AiController::new(
-                    p.id,
-                    *constants::ai_difficulty(constants::MAP_DEFAULT_AI_DIFFICULTY),
-                    seed.wrapping_add(p.id as u64),
-                ));
-            }
-        }
+        let ai = ai_controllers(&game, seed);
         self.terrain = mesh::build_terrain(&game.board);
         self.renderer.set_terrain(&self.terrain);
         self.terrain_board_key = Some((game.board.cols, game.board.rows));

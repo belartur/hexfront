@@ -214,7 +214,7 @@ Jedyną akcją, jaką może wykonać AI, jest wysłanie pojazdu z jednego ze swo
 
 ### 13.2. Pętla decyzyjna
 
-AI podejmuje decyzje co stały interwał 2 sekund, przy czym decyzje poszczególnych graczy AI są przesunięte w czasie względem siebie. W ramach jednej decyzji AI wykonuje co najwyżej jedną akcję. Zachowanie AI jest deterministyczne przy ustalonym ziarnie losowości przypisanym do poziomu.
+AI podejmuje decyzje co stały interwał 2 sekund, przy czym decyzje poszczególnych graczy AI są przesunięte w czasie względem siebie: pierwszy gracz AI podejmuje decyzję po pełnym interwale, każdy następny o interwał podzielony przez liczbę graczy AI wcześniej. Dzięki temu w danym momencie decyzję podejmuje najwyżej jeden gracz AI, a koszt wszystkich decyzji w interwale rozłożony jest równomiernie na liczbę graczy AI. W ramach jednej decyzji AI wykonuje co najwyżej jedną akcję. Zachowanie AI jest deterministyczne przy ustalonym ziarnie losowości przypisanym do poziomu.
 
 ### 13.3. Informacje
 

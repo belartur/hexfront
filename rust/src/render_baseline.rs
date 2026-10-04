@@ -1,15 +1,16 @@
 //! Headless mesh-build baseline of the GPU path.
 //!
 //! Measures pure CPU cost of [`build_terrain`] (once per map) plus
-//! [`build_dynamic`] (every frame) per repository map, and the `find_path`
-//! cost per (source, target, kind) pair over the buildings of each map. It
-//! only prints numbers, never asserts, so plain `cargo test` skips it; run
-//! explicitly with:
+//! [`build_dynamic`] (every frame) per repository map, the `find_path`
+//! cost per (source, target, kind) pair over the buildings of each map, and
+//! the cost of one full AI decision. It only prints numbers, never asserts,
+//! so plain `cargo test` skips it; run explicitly with:
 //!
 //! ```bash
 //! cd rust && cargo test --release render_baseline -- --ignored --nocapture
 //! ```
 
+use crate::constants;
 use crate::editor::{EDITOR_NEW_COLS, EDITOR_NEW_ROWS, pad_map};
 use crate::mapfile;
 use crate::mesh::{DynamicMesh, build_dynamic, build_terrain, depth_span, max_height};
@@ -85,8 +86,35 @@ fn bench_game(name: &str, game: &crate::game::Game, frames: usize) {
             unreachable += (!found) as usize;
         }
     }
+    // AI decisions (rules.md section 13.5 weighs every building pair). Every
+    // controller is forced to fire in the same step, which is the worst case
+    // a frame can get; the second pass reuses the same controllers, whose
+    // routes are cached by then, and shows what a later decision costs.
+    let ai_count = game.players.iter().filter(|p| !p.is_human).count();
+    let mut decide_ms = 0.0;
+    let mut decide_warm_ms = 0.0;
+    if ai_count > 0 {
+        let mut ais = crate::ai::controllers(
+            game,
+            *constants::ai_difficulty(constants::MAP_DEFAULT_AI_DIFFICULTY),
+            1,
+        );
+        // Each pass gets its own copy of the match, so both start from the
+        // same state and only the route cache differs between them.
+        let decide = |ais: &mut [crate::ai::AiController]| {
+            let mut sim = game.clone();
+            let start = std::time::Instant::now();
+            for ai in ais.iter_mut() {
+                ai.timer = ai.diff.interval;
+                ai.update(&mut sim, 0.0);
+            }
+            start.elapsed().as_secs_f64() * 1000.0
+        };
+        decide_ms = decide(&mut ais);
+        decide_warm_ms = decide(&mut ais);
+    }
     println!(
-        "{}: tiles={} terrain={:.1} ms ({} verts) dynamic={:.3} ms/frame ({} verts) span={:.3} height={:.3} camp={:.3} ms/frame ({} spots) cached_span=({:.0},{:.0}) cached_height={:.0} path={:.1}us/pair worst={:.0}us unreachable={}/{}",
+        "{}: tiles={} terrain={:.1} ms ({} verts) dynamic={:.3} ms/frame ({} verts) span={:.3} height={:.3} camp={:.3} ms/frame ({} spots) cached_span=({:.0},{:.0}) cached_height={:.0} path={:.1}us/pair worst={:.0}us unreachable={}/{} decide={:.1} ms/all AI ({} AI, warm={:.1} ms)",
         name,
         game.board.tiles.len(),
         terrain_ms,
@@ -104,6 +132,9 @@ fn bench_game(name: &str, game: &crate::game::Game, frames: usize) {
         path_us_worst,
         unreachable,
         pairs,
+        decide_ms,
+        ai_count,
+        decide_warm_ms,
     );
 }
 

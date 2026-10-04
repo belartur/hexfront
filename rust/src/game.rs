@@ -1717,6 +1717,8 @@ mod tests {
                             crate::constants::MAP_DEFAULT_AI_DIFFICULTY,
                         ),
                         seed.wrapping_add(p.id as u64),
+                        p.id,
+                        game.players.iter().filter(|q| !q.is_human).count(),
                     )
                 })
                 .collect();
