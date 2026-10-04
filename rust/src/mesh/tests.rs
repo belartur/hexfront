@@ -308,8 +308,8 @@ fn helicopter_keeps_its_altitude_and_shadows_the_tile_below() {
     // The shadow lands on the surface under the helicopter: on the low
     // tile far below the hull, on the hill closer to it, lifted
     // SHADOW_LIFT above the receiving surface.
-    let low_shadow = helicopter_shadow_z(&game, lx, ly) + constants::SHADOW_LIFT;
-    let hill_shadow = helicopter_shadow_z(&game, hx, hy) + constants::SHADOW_LIFT;
+    let low_shadow = helicopter_shadow_surface(&game, lx, ly).0 + constants::SHADOW_LIFT;
+    let hill_shadow = helicopter_shadow_surface(&game, hx, hy).0 + constants::SHADOW_LIFT;
     assert!((low_shadow - (constants::ELEVATION_PX + constants::SHADOW_LIFT)).abs() < 1e-9);
     assert!((hill_shadow - (hill_top + constants::SHADOW_LIFT)).abs() < 1e-9);
     assert!(
@@ -1656,7 +1656,7 @@ fn vehicle_on_the_deck_stands_on_it_and_under_the_bridge_stays_on_the_water() {
         helicopter_altitude(&game)
     );
     assert_eq!(
-        helicopter_shadow_z(&game, mx, my),
+        helicopter_shadow_surface(&game, mx, my).0,
         bridge_deck_z(&game.board.bridges[0])
     );
 }

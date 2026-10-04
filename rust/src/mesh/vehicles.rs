@@ -761,16 +761,6 @@ pub(super) fn helicopter_shadow_surface(game: &Game, x: f64, y: f64) -> (f64, Op
     (vehicle_ground_z(game, x, y), None)
 }
 
-/// Elevation in px of the surface that receives a helicopter shadow.
-///
-/// A deck fragment of a bridge shields the water below it, so a helicopter
-/// crossing a bridge drops its shadow on the deck; everywhere else the
-/// shadow follows the terrain (ramps included, see [`vehicle_ground_z`]).
-#[cfg(test)]
-pub(super) fn helicopter_shadow_z(game: &Game, x: f64, y: f64) -> f64 {
-    helicopter_shadow_surface(game, x, y).0
-}
-
 /// Detailed shadow of one helicopter, projected straight down.
 ///
 /// The flight altitude does not follow the terrain (rules.md section 5.2),
