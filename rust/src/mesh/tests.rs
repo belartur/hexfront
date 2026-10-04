@@ -7,7 +7,7 @@
 
 use super::buildings::*;
 use super::obstacles::*;
-use super::overlays::route_start_z;
+use super::overlays::{push_paths, route_start_z};
 use super::surface::*;
 use super::terrain::{
     CHUNK_VERTICES, bridge_deck_quad, bridge_deck_z, build_terrain, tile_top_z,
@@ -1666,7 +1666,7 @@ fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
     use crate::constants::VehicleKind;
     let (board, a, b, frags) = bridge_board();
     let route = vec![frags[0], frags[1], b];
-    let modes = route_crossings(&board, VehicleKind::Tank, Some(a), &route);
+    let modes = route_crossings(&board, VehicleKind::Tank, Some(a), Crossing::Ground, &route);
     for i in 0..route.len() - 1 {
         assert_eq!(
             waypoint_z(&board, &route, i, modes[i + 1]),
@@ -1691,7 +1691,13 @@ fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
         board.tiles.get_mut(&t).unwrap().height = 0;
     }
     let under = vec![frags[0], frags[1], east];
-    let modes = route_crossings(&board, VehicleKind::Hovercraft, Some(west), &under);
+    let modes = route_crossings(
+        &board,
+        VehicleKind::Hovercraft,
+        Some(west),
+        Crossing::Ground,
+        &under,
+    );
     assert_eq!(
         modes[1],
         Crossing::Ground,
@@ -1702,6 +1708,63 @@ fn route_waypoints_ride_the_deck_only_while_crossing_along_the_bridge() {
             waypoint_z(&board, &under, i, modes[i + 1]),
             0.0,
             "waypoint {i} climbed"
+        );
+    }
+}
+
+#[test]
+fn route_line_of_a_vehicle_already_on_the_bridge_keeps_riding_the_deck() {
+    use crate::constants::VehicleKind;
+    use crate::entities::{Player, Vehicle};
+    use crate::game::Game;
+    let (board, a, b, frags) = bridge_board();
+    let (mx, my) = board.center_world(frags[0]);
+    let mut game = Game::new(board, vec![Player::new(0, true)], Vec::new(), 1);
+    // A route set up at the near land end, so the first leg is right: the
+    // vehicle climbs onto the deck and every waypoint after it rides it.
+    game.vehicles.push(Vehicle::new(
+        VehicleKind::Tank,
+        0,
+        30.0,
+        vec![frags[0], frags[1], b],
+        (mx, my),
+        Some(a),
+    ));
+    let deck = bridge_deck_z(&game.board.bridges[0]);
+    let mut lines = Vec::new();
+    push_paths(&game, &mut lines);
+    assert_eq!(lines.len(), 3, "one line per remaining leg");
+    for (i, l) in lines.iter().enumerate() {
+        assert!(
+            (f64::from(l.1.z) - deck).abs() < 1e-6 || i == lines.len() - 1,
+            "leg {i} left the deck to z={}",
+            f64::from(l.1.z)
+        );
+    }
+    // Now the vehicle is halfway: it already stands on the first fragment
+    // and the drawn route starts from there. The rest of the route has to
+    // continue in the mode the vehicle is really in, otherwise every
+    // following waypoint drops onto the water and the line is hidden under
+    // the bridge (rules.md section 8).
+    game.vehicles[0].route_index = 1;
+    assert_eq!(
+        route_prev_crossing(&game, &game.vehicles[0]),
+        Crossing::Deck
+    );
+    let mut lines = Vec::new();
+    push_paths(&game, &mut lines);
+    assert_eq!(lines.len(), 2, "one line per remaining leg");
+    assert!((f64::from(lines[0].0.z) - deck).abs() < 1e-6);
+    for (i, l) in lines.iter().enumerate() {
+        let want = if i + 1 == lines.len() {
+            tile_top_z(&game.board, b)
+        } else {
+            deck
+        };
+        assert!(
+            (f64::from(l.1.z) - want).abs() < 1e-6,
+            "leg {i} drawn at z={} instead of {want}",
+            f64::from(l.1.z)
         );
     }
 }

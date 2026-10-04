@@ -67,21 +67,45 @@ fn next_crossing(
         .unwrap_or(Crossing::Ground)
 }
 
+/// Crossing mode a vehicle stands in on the field it came from: the mode
+/// reached after every hop of its route it has already finished.
+///
+/// This is the mode the rest of the route has to continue in, and it is
+/// [`Crossing::Deck`] in the middle of a bridge, where the next hop runs on
+/// the deck (rules.md section 8).
+pub fn route_prev_crossing(game: &Game, v: &crate::entities::Vehicle) -> Crossing {
+    let board = &game.board;
+    let done = v.route_index.min(v.route.len());
+    let mut cur = v.src_tile;
+    let mut mode = Crossing::Ground;
+    for t in v.route[..done].iter() {
+        mode = next_crossing(board, v.kind, cur, *t, mode);
+        cur = Some(*t);
+    }
+    mode
+}
+
 /// Crossing mode at every field of a route, starting from `src`.
 ///
-/// Index 0 is the mode at `src` (always [`Crossing::Ground`]: no building
-/// stands on a bridge fragment, so a route never starts on a deck), index
-/// `i + 1` the mode reached after the hop to `route[i]`.
+/// Index 0 is the mode at `src`, index `i + 1` the mode reached after the hop
+/// to `route[i]`. `src_mode` is the mode the vehicle is in on `src`: a route
+/// a vehicle is setting off along starts on the ground ([`Crossing::Ground`],
+/// no building stands on a bridge fragment), while the rest of a route
+/// already under way continues in the mode the vehicle really reached
+/// ([`route_prev_crossing`]). Starting from `Ground` in the middle of a
+/// bridge would drop every following waypoint to the terrain below the deck,
+/// because a deck is only ever stepped on from one of its two land ends.
 pub fn route_crossings(
     board: &Board,
     kind: constants::VehicleKind,
     src: Option<Tile>,
+    src_mode: Crossing,
     route: &[Tile],
 ) -> Vec<Crossing> {
     let mut modes = Vec::with_capacity(route.len() + 1);
-    modes.push(Crossing::Ground);
+    modes.push(src_mode);
     let mut cur = src;
-    let mut mode = Crossing::Ground;
+    let mut mode = src_mode;
     for t in route {
         mode = next_crossing(board, kind, cur, *t, mode);
         modes.push(mode);
@@ -98,16 +122,10 @@ pub fn route_crossings(
 /// finished the mode of the last driven hop is kept, which the deck lookup
 /// then ignores on the field where the vehicle came off the bridge.
 pub fn vehicle_crossing(game: &Game, v: &crate::entities::Vehicle) -> Crossing {
-    let board = &game.board;
     let done = v.route_index.min(v.route.len());
-    let mut cur = v.src_tile;
-    let mut mode = Crossing::Ground;
-    for t in v.route[..done].iter() {
-        mode = next_crossing(board, v.kind, cur, *t, mode);
-        cur = Some(*t);
-    }
+    let mode = route_prev_crossing(game, v);
     if done < v.route.len() {
-        mode = next_crossing(board, v.kind, cur, v.route[done], mode);
+        return next_crossing(&game.board, v.kind, route_prev(v), v.route[done], mode);
     }
     mode
 }

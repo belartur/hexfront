@@ -1,7 +1,7 @@
 //! The flat per-frame overlays: range fills and outlines, drawn vehicle routes
 //! and projectiles.
 
-use super::surface::{route_crossings, route_prev, waypoint_z};
+use super::surface::{route_crossings, route_prev, route_prev_crossing, waypoint_z};
 use super::vehicles::{helicopter_shadow_surface, vehicle_z};
 use super::{
     AlphaVertex, RangeSoup, TriangleSoup, alpha_vert, push_disc, push_range_disc, push_ring,
@@ -137,7 +137,13 @@ pub(super) fn push_paths(game: &Game, lines: &mut Vec<(AlphaVertex, AlphaVertex)
         // them. A route crossing a bridge rides its deck, the fields of a
         // route crossing under one keep the terrain below (rules.md section 8).
         let seq = &v.route[v.route_index.min(v.route.len())..];
-        let modes = route_crossings(&game.board, v.kind, route_prev(v), seq);
+        let modes = route_crossings(
+            &game.board,
+            v.kind,
+            route_prev(v),
+            route_prev_crossing(game, v),
+            seq,
+        );
         let mut prev = (v.x, v.y, route_start_z(game, v));
         for i in 0..seq.len() {
             let (wx, wy) = game.board.center_world(seq[i]);
