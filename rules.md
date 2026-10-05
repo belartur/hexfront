@@ -78,7 +78,7 @@ Pojazdy powstają, gdy jakiś gracz postanowi przesłać jednostki z jednego bud
 Każdym pojazdem przemieszcza się pewna, niezerowa liczba jednostek. Na początku liczba ta jest równa liczbie jednostek w budynku, z którego dany pojazd wyjechał. Pojazd zabiera wszystkie jednostki z budynku (w budynku pozostaje zero jednostek). Liczba jednostek w pojeździe może ulec zmianie: zwiększa się w przypadku leczenia (od bufora lub wieży leczniczej), a zmniejsza w przypadku:
 
 * walki z innym pojazdem,
-* natrafienia na pułapkę ogniową (wtedy obrażenia zadawane są ze stałą prędkością 1/sekundę dopóki na niej jest; pułapka ogniowa nie zostaje usunięta),
+* natrafienia na pułapkę ogniową (wtedy obrażenia zadawane są ze stałą prędkością 1/0.2 sekundy dopóki na niej jest; pułapka ogniowa nie zostaje usunięta),
 * natrafienia na minę (wtedy zadawana jest stała liczba 25 obrażeń, a następnie ta mina jest usuwana),
 * lub dostania pociskiem od działka.
 

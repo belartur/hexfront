@@ -503,7 +503,7 @@ pub const MINE_DAMAGE: f64 = 25.0;
 /// Distance in j from a mined tile centre at which the mine explodes.
 pub const MINE_TRIGGER_RADIUS: f64 = 8.0;
 /// Damage per second while a vehicle sits on a fire trap (section 4).
-pub const FIRE_TRAP_DPS: f64 = 1.0;
+pub const FIRE_TRAP_DPS: f64 = 5.0;
 /// Speed multiplier while a ground vehicle is on an ice trap (section 4).
 pub const ICE_TRAP_SLOWDOWN: f64 = 0.5;
 /// Number of hits a wall can take before it collapses (section 4).
