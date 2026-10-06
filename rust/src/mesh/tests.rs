@@ -2132,6 +2132,51 @@ fn bonuses_and_drones_get_geometry() {
 }
 
 #[test]
+fn bonus_figures_read_as_people_not_boxes() {
+    use super::bonuses::*;
+    // One figure is legs + torso + arms + head, far more than the single box
+    // it replaced: a lone cuboid would pass the "has geometry" test above but
+    // still look like a cuboid.
+    let (game, _, add) = bonus_board_and_game();
+    let mut mesh = DynamicMesh::default();
+    build_dynamic(&game, 0.0, max_height(&game.board), &mut mesh);
+    let top = tile_top_z(&game.board, add);
+    // Only the bonus field itself: the test board also holds a base, whose
+    // roof is far taller than the little figures.
+    let (cx, cy) = game.board.center_world(add);
+    let fig_verts: Vec<&GpuVertex> = mesh
+        .opaque
+        .vertices
+        .iter()
+        .filter(|v| {
+            f64::from(v.z) > top + constants::OBSTACLE_LIFT - 1e-6
+                && dist((f64::from(v.x), f64::from(v.y)), (cx, cy)) < 20.0
+        })
+        .collect();
+    // Five boxes (two legs, torso, two arms) at 3 quads each plus one head
+    // cylinder (8 side quads + an 8-triangle top disc), times two figures.
+    // A quad is 6 verts, a disc triangle 3.
+    let want = 2 * (5 * 3 * 6 + BONUS_FIG_HEAD_SEGMENTS * 6 + BONUS_FIG_HEAD_SEGMENTS * 3);
+    assert!(
+        fig_verts.len() >= want,
+        "a bonus figure has {} verts, want at least {want} for legs+torso+arms+head",
+        fig_verts.len()
+    );
+    // The figures stand upright: the top of the stack (the head) sits above
+    // the torso boxes.
+    let max_z = fig_verts
+        .iter()
+        .map(|v| f64::from(v.z))
+        .fold(f64::NEG_INFINITY, f64::max);
+    let want_top =
+        top + constants::OBSTACLE_LIFT + BONUS_FIG_LEG_H + BONUS_FIG_TORSO_H + BONUS_FIG_HEAD_H;
+    assert!(
+        (max_z - want_top).abs() < 0.05,
+        "bonus figure top {max_z} vs {want_top}"
+    );
+}
+
+#[test]
 fn an_anchored_drone_orbits_and_the_anchor_stays_put() {
     // The orbit is presentation only: the anchor centre is where the drone
     // returns to, and the range is counted from there (rules.md section 13).

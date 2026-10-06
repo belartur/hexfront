@@ -42,11 +42,34 @@ pub const DRON_SHOT_Z: f64 = 14.0;
 /// Radius of the yellow pad drawn on a field holding a drone bonus, in px.
 pub const BONUS_DRONE_MARK_R: f64 = 12.0;
 /// Half distance between the two figures of a unit bonus, in px.
-pub const BONUS_FIG_DX: f64 = 6.0;
-/// Half height of one figure of a unit bonus, in px.
-pub const BONUS_FIG_H: f64 = 3.0;
-/// Width of one figure of a unit bonus, in px.
-pub const BONUS_FIG_W: f64 = 4.0;
+pub const BONUS_FIG_DX: f64 = 7.0;
+/// Shift of both figures towards the viewer in px, so the value label floating
+/// above the pair (see `crate::app`) stays clear of their heads.
+pub const BONUS_FIG_DY: f64 = 5.0;
+/// Width of one leg box of a figure, in px.
+pub const BONUS_FIG_LEG_W: f64 = 1.3;
+/// Depth of one leg box of a figure, in px.
+pub const BONUS_FIG_LEG_D: f64 = 2.4;
+/// Height of the legs of a figure, in px.
+pub const BONUS_FIG_LEG_H: f64 = 2.0;
+/// Width of the torso box of a figure, in px.
+pub const BONUS_FIG_TORSO_W: f64 = 4.4;
+/// Depth of the torso box of a figure, in px.
+pub const BONUS_FIG_TORSO_D: f64 = 3.0;
+/// Height of the torso box of a figure, in px.
+pub const BONUS_FIG_TORSO_H: f64 = 2.4;
+/// Width of one arm box of a figure, in px.
+pub const BONUS_FIG_ARM_W: f64 = 1.1;
+/// Depth of one arm box of a figure, in px.
+pub const BONUS_FIG_ARM_D: f64 = 2.4;
+/// Height of the arms of a figure, in px.
+pub const BONUS_FIG_ARM_H: f64 = 2.2;
+/// Radius of the round head of a figure, in px.
+pub const BONUS_FIG_HEAD_R: f64 = 1.8;
+/// Height of the round head of a figure, in px.
+pub const BONUS_FIG_HEAD_H: f64 = 1.6;
+/// Facets of the head cylinder.
+pub const BONUS_FIG_HEAD_SEGMENTS: usize = 8;
 
 /// Where the anchor of `drone` is drawn: world `(x, y)` and its elevation.
 ///
@@ -147,18 +170,73 @@ pub(super) fn push_bonus_markers(game: &Game, mesh: &mut TriangleSoup) {
             ),
             BonusKind::Add(_) | BonusKind::Mul(_) => {
                 for dx in [-BONUS_FIG_DX, BONUS_FIG_DX] {
-                    push_box(
-                        mesh,
-                        x + dx,
-                        y,
-                        z + constants::OBSTACLE_LIFT,
-                        BONUS_FIG_W,
-                        BONUS_FIG_W,
-                        BONUS_FIG_H,
-                        constants::BONUS_MARK_COLOR,
-                    );
+                    push_bonus_figure(mesh, x + dx, y + BONUS_FIG_DY, z);
                 }
             }
         }
     }
+}
+
+/// Draw one little human figure: two legs, a torso, two arms and a round head.
+///
+/// The two `+x` / `*x` markers used to be single flat boxes, which read as two
+/// cuboids rather than people. The new shape keeps the same yellow colour and
+/// the same footprint, but arms held slightly out and a head on top give it a
+/// human silhouette even at this tiny size.
+fn push_bonus_figure(mesh: &mut TriangleSoup, x: f64, y: f64, z: f64) {
+    let base = z + constants::OBSTACLE_LIFT;
+    let color = constants::BONUS_MARK_COLOR;
+    // Legs: two narrow boxes side by side along x.
+    let leg_gap = BONUS_FIG_LEG_W + 0.4;
+    for dx in [-leg_gap / 2.0, leg_gap / 2.0] {
+        push_box(
+            mesh,
+            x + dx,
+            y,
+            base,
+            BONUS_FIG_LEG_W,
+            BONUS_FIG_LEG_D,
+            BONUS_FIG_LEG_H,
+            color,
+        );
+    }
+    // Torso on top of the legs.
+    let torso_base = base + BONUS_FIG_LEG_H;
+    push_box(
+        mesh,
+        x,
+        y,
+        torso_base,
+        BONUS_FIG_TORSO_W,
+        BONUS_FIG_TORSO_D,
+        BONUS_FIG_TORSO_H,
+        color,
+    );
+    // Arms hang beside the torso, slightly out so the silhouette widens at the
+    // shoulders instead of merging into one block.
+    let arm_x = BONUS_FIG_TORSO_W / 2.0 + BONUS_FIG_ARM_W / 2.0 + 0.2;
+    for dx in [-arm_x, arm_x] {
+        push_box(
+            mesh,
+            x + dx,
+            y,
+            torso_base,
+            BONUS_FIG_ARM_W,
+            BONUS_FIG_ARM_D,
+            BONUS_FIG_ARM_H,
+            color,
+        );
+    }
+    // Round head on top of the torso.
+    push_cylinder(
+        mesh,
+        x,
+        y,
+        torso_base + BONUS_FIG_TORSO_H,
+        BONUS_FIG_HEAD_R,
+        BONUS_FIG_HEAD_R * 0.85,
+        BONUS_FIG_HEAD_H,
+        BONUS_FIG_HEAD_SEGMENTS,
+        color,
+    );
 }
