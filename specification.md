@@ -48,7 +48,7 @@ Ląd ma kolor szary, a woda jasny niebieski.
 
 **Podjazd** nie ma strzałek i nie zajmuje całego hexu — rysowany jest jako węższy pas w kolorze ziemi, biegnący przez środek pola wzdłuż osi podjazdu od krawędzi pola a do krawędzi pola b. Korpus podjazdu jest pełny — przestrzeń pod pochyloną powierzchnią wypełnia ciemniejsza ziemia, nie widać pod nim pustki.
 
-**Premie.** Premia jest oznaczana swoim efektem w żółtej otoczce, przy czym otoczka jest obrysem całego pola, a symbol efektu rysowany wewnątrz niej. Dla premii +x jednostek i *x jednostek rysowany jest ten napis wraz z parą ludzików, dla premii z dronem — dron. Otoczka i symbol są rysowane jako nakładka na wierzchu sceny, więc nic ich nie zasłania. Wartość premii nie jest licznikiem jednostek i nie podlega oznaczeniu licznikiem z poprzedniego akapitu.
+**Premie.** Premia jest oznaczana swoim efektem w żółtej otoczce, przy czym otoczka jest obrysem całego pola, a symbol efektu rysowany wewnątrz niej. Dla premii +x jednostek i ×x jednostek rysowany jest ten napis wraz z parą ludzików, dla premii z dronem — dron. Otoczka i symbol są rysowane jako nakładka na wierzchu sceny, więc nic ich nie zasłania. Wartość premii nie jest licznikiem jednostek i nie podlega oznaczeniu licznikiem z poprzedniego akapitu.
 
 **Dron.** Dron jest małym obiektem, znacznie mniejszym od pojazdów. Dopóki pozostaje w premii, stoi w miejscu i nie animuje się; gdy jest do czegoś przywiązany, krąży (orbituje) wokół tego, do czego jest przywiązany. Ta animacja nie wpływa na zasięg drona, który liczony jest ze środka budynku lub pojazdu, do którego dron jest przywiązany. Gdy dron przypisany do obiektu *a* strzela do pojazdu *b*, dron pojawia się na linii między środkami *a* i *b*.
 

@@ -859,7 +859,7 @@ impl Application {
         for bonus in game.bonuses.iter().flatten() {
             let txt = match bonus.kind {
                 crate::entities::BonusKind::Add(x) => format!("+{}", x),
-                crate::entities::BonusKind::Mul(x) => format!("*{}", x),
+                crate::entities::BonusKind::Mul(x) => format!("×{}", x),
                 crate::entities::BonusKind::Drone => continue,
             };
             let (wx, wy) = game.board.center_world(bonus.tile);
@@ -868,14 +868,23 @@ impl Application {
             if !Self::on_screen(cx, cy) {
                 continue;
             }
-            let fs = ((15.0 * self.camera.zoom as f32).max(9.0)) as u16;
+            // A bonus label must read louder than the unit badges (17 px):
+            // at 15 px the sign sat right on the left figure of the pair —
+            // same yellow, so it blended in and looked missing. At 20 px,
+            // with the label floating above the figures, both the sign and
+            // the digits stay clear of them, and even "+999" still fits
+            // inside the yellow ring.
+            let fs = ((20.0 * self.camera.zoom as f32).max(12.0)) as u16;
             let [r, g, b] = constants::BONUS_MARK_COLOR;
             let color = Color::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0);
             let dim = measure_text(&txt, None, fs, 1.0);
             draw_text(
                 &txt,
                 cx - dim.width / 2.0,
-                cy + dim.height / 2.5 - 6.0,
+                // ProggyClean digits are 0.5 em tall, so a quarter-size
+                // offset puts the whole label above the in-field figures
+                // (checked against the ring outline for the whole zoom range).
+                cy - 0.25 * fs as f32,
                 fs as f32,
                 color,
             );
