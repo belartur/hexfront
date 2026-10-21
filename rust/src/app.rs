@@ -47,9 +47,9 @@
 
 use std::path::PathBuf;
 
-use macroquad::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use macroquad::experimental::coroutines::{Coroutine, start_coroutine};
+use macroquad::prelude::*;
 
 use crate::ai::AiController;
 use crate::camera::Camera;
@@ -133,6 +133,10 @@ pub struct Application {
     /// Sound playback (presentation only, see [`crate::audio`]). Filled from
     /// the sounds the simulation reports next to the explosion particles.
     audio: crate::audio::Audio,
+    /// Background sound preload of the web build. Kept separate from `audio`
+    /// so the first menu frame does not wait for browser audio activation.
+    #[cfg(target_arch = "wasm32")]
+    audio_loader: Option<Coroutine<crate::audio::Audio>>,
     /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`); native only.
     #[cfg(not(target_arch = "wasm32"))]
     capture: Option<String>,
@@ -192,6 +196,8 @@ impl Application {
             editor_tile: None,
             fx: crate::fx::Fx::new(),
             audio: crate::audio::Audio::new(),
+            #[cfg(target_arch = "wasm32")]
+            audio_loader: None,
             playtest: false,
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
@@ -209,9 +215,19 @@ impl Application {
         self.load_debug_map().await;
         // Synthesise and decode the sound effects once, before the first
         // frame. A failure here only disables sound (see `Audio::load`).
+        // The browser keeps its audio context suspended until a user gesture,
+        // so the web build loads sounds in the background instead; the menu
+        // must be visible (and clickable) before anything can resume it.
+        #[cfg(not(target_arch = "wasm32"))]
         self.audio.load().await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.audio_loader = Some(start_coroutine(crate::audio::load_async()));
+        }
         loop {
             let dt = get_frame_time().min(0.1);
+            #[cfg(target_arch = "wasm32")]
+            self.poll_audio_loader();
             self.handle_input(dt).await;
             self.update(dt);
             #[cfg(not(target_arch = "wasm32"))]
@@ -265,6 +281,22 @@ impl Application {
         }
         if std::env::var("HEXFRONT_TIMING").is_ok() {
             self.sim_acc = 0.0;
+        }
+    }
+    /// Move the finished background sound preload into the live subsystem.
+    ///
+    /// The loader keeps its own [`crate::audio::Audio`] so no borrow is held
+    /// across the browser's `next_frame` waits; installing it preserves the
+    /// playback state of the game that may have started in the meantime.
+    #[cfg(target_arch = "wasm32")]
+    fn poll_audio_loader(&mut self) {
+        let loaded = self
+            .audio_loader
+            .as_ref()
+            .and_then(|loader| loader.retrieve());
+        if let Some(audio) = loaded {
+            self.audio.install_loaded(audio);
+            self.audio_loader = None;
         }
     }
     fn ensure_buffers(&mut self) {

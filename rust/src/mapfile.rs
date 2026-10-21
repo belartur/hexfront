@@ -469,10 +469,10 @@ pub fn list_maps(directory: Option<&Path>) -> Vec<PathBuf> {
     };
     #[cfg(target_arch = "wasm32")]
     {
-        return bundled_maps::MAP_FILES
+        bundled_maps::MAP_FILES
             .iter()
             .map(|name| dir.join(name))
-            .collect();
+            .collect()
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

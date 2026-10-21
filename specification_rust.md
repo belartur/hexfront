@@ -67,7 +67,7 @@ Ta sama binarka buduje się dla `wasm32-unknown-unknown`. `build_wasm.sh` tworzy
 
 **Edytor.** Wersja webowa nie udostępnia edytora: nie ma przycisku `add map` ani edycji mapy prawym przyciskiem. Edytor pozostaje skompilowany (współdzieli kod gry), ale jest nieosiągalny; powód jest praktyczny — przeglądarka nie może zapisać mapy z powrotem na serwer, a lista poziomów jest migawką z czasu budowania.
 
-**Runtime JavaScript.** `rust/wasm/mq_js_bundle.js` to runtime dołączony do macroquad 0.4.16, trzymany w repozytorium zamiast pobierania z CDN, żeby wersja była zgodna z linkowaną biblioteką i działanie nie zależało od sieci. `rust/.cargo/config.toml` zostawia importy audio i systemu plików nierozwiązane na etapie linkowania — dostarcza je ten runtime. Pochodzenie, licencja i lokalna poprawka runtime'u są opisane w `rust/wasm/README.md`. Przeglądarki mogą wymagać gestu użytkownika przed odtworzeniem dźwięku; kliknięcie poziomu w menu jest takim gestem.
+**Runtime JavaScript.** `rust/wasm/mq_js_bundle.js` to runtime dołączony do macroquad 0.4.16, trzymany w repozytorium zamiast pobierania z CDN, żeby wersja była zgodna z linkowaną biblioteką i działanie nie zależało od sieci. `rust/.cargo/config.toml` zostawia importy audio i systemu plików nierozwiązane na etapie linkowania — dostarcza je ten runtime. Pochodzenie, licencja i lokalna poprawka runtime'u są opisane w `rust/wasm/README.md`. Przeglądarki mogą wymagać gestu użytkownika przed odtworzeniem dźwięku, dlatego menu jest rysowane przed zakończeniem wczytywania dźwięków, a samo wczytywanie odbywa się w tle; pierwszy gest użytkownika może je wtedy uruchomić.
 
 ## Renderowanie
 
