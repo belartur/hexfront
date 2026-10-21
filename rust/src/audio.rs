@@ -106,7 +106,7 @@ impl Audio {
         for kind in sound::ALL_KINDS {
             for path in sound::variant_paths(kind) {
                 let name = path.display().to_string();
-                let bytes = match std::fs::read(&path) {
+                let bytes = match crate::assets::read(&path).await {
                     Ok(bytes) => bytes,
                     Err(err) => {
                         eprintln!("hexfront: audio disabled, cannot read {name}: {err}");
@@ -247,6 +247,14 @@ impl Audio {
         Some(offset + variant)
     }
 
+    /// Install the recordings loaded by [`load_async`] without replacing the
+    /// playback state (variant seed, retrigger history, clock).
+    #[cfg(target_arch = "wasm32")]
+    pub fn install_loaded(&mut self, loaded: Audio) {
+        self.sounds = loaded.sounds;
+        self.failed = loaded.failed;
+    }
+
     /// Hand one recording to the mixer, remembering when it started.
     fn play(&mut self, placed: Placed) {
         let Some(index) = self.slot(placed.kind, placed.variant) else {
@@ -264,6 +272,21 @@ impl Audio {
         );
         self.last_played.insert(placed.kind, self.time);
     }
+}
+
+/// Load every recording on its own audio subsystem, for the web build.
+///
+/// The browser creates its audio context before the first user gesture and
+/// keeps it suspended until the page is clicked or a key is pressed. Waiting
+/// for the recordings before the first frame would therefore leave the page
+/// blank until the visitor clicks, and the click would not reach the menu.
+/// The web build starts this future as a coroutine instead, so the menu is
+/// drawn immediately and loading resumes as soon as the browser allows audio.
+#[cfg(target_arch = "wasm32")]
+pub async fn load_async() -> Audio {
+    let mut audio = Audio::new();
+    audio.load().await;
+    audio
 }
 
 /// The volume of `kind` at world position `pos`, seen from `centre`.

@@ -23,6 +23,11 @@ pub const DRAW_BATCH_VERTICES: usize = 16_000;
 /// Root of the repository: the rules (`rules.md`), the specifications and
 /// the `maps` directory stay there, while this Rust implementation lives in
 /// `rust/` (one directory per language implementation).
+///
+/// Only the native build has a repository directory. The web build serves its
+/// assets from the deployment root instead (see [`maps_dir`] and
+/// [`sounds_dir`]), so this helper is not compiled into the wasm binary.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn repo_root() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(parent) = manifest.parent() {
@@ -44,23 +49,43 @@ pub fn repo_root() -> PathBuf {
 }
 
 /// Directory holding one binary map file per level (specification.md,
-/// section "Plansze"). It lives in the repository root (see [`repo_root`]),
-/// so the game and the tests find the maps no matter which working
-/// directory they are started from.
+/// section "Plansze").
+///
+/// The native build resolves it through [`repo_root`], so the game and the
+/// tests find the maps no matter which working directory they are started
+/// from. The web build has no repository directory: it receives a copy of
+/// `maps/` next to its `index.html` and passes the relative URL `maps/...` to
+/// `macroquad::file::load_file`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn maps_dir() -> PathBuf {
     repo_root().join("maps")
+}
+
+/// Directory holding the map files served by the web build.
+#[cfg(target_arch = "wasm32")]
+pub fn maps_dir() -> PathBuf {
+    PathBuf::from("maps")
 }
 
 /// Map file name extension.
 pub const MAP_EXTENSION: &str = ".map";
 
-/// Directory holding the sound effect files (`*.ogg`) of the game. It sits in
-/// the repository root next to `maps/`, and is resolved through
-/// [`repo_root`] for the same reason: the game must find its sounds no matter
-/// which working directory it was started from. Provenance and licence of the
-/// individual files are documented in `sounds/README.md`.
+/// Directory holding the sound effect files (`*.ogg`) of the game.
+///
+/// The native build resolves it through [`repo_root`] for the same reason as
+/// [`maps_dir`]: the game must find its sounds no matter which working
+/// directory it was started from. The web build fetches `sounds/...` relative
+/// to the served page. Provenance and licence of the individual files are
+/// documented in `sounds/README.md`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn sounds_dir() -> PathBuf {
     repo_root().join("sounds")
+}
+
+/// Directory holding the sound files served by the web build.
+#[cfg(target_arch = "wasm32")]
+pub fn sounds_dir() -> PathBuf {
+    PathBuf::from("sounds")
 }
 
 /// 1 j == 1 px at 1:1 view scale (specification.md, section "Parametry").

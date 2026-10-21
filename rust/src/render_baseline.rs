@@ -148,7 +148,11 @@ fn render_baseline() {
             .and_then(|s| s.to_str())
             .unwrap_or("?")
             .to_string();
-        let game = mapfile::load_game(&path).expect("repo map must load");
+        let game = mapfile::load_game_bytes(
+            &std::fs::read(&path).expect("repo map must be readable"),
+            &path,
+        )
+        .expect("repo map must load");
         bench_game(&name, &game, frames);
         // The editor pads every level up to the standard new-map size
         // (`pad_map`), so a playtest scans a much bigger board than the file

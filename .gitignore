@@ -2,3 +2,6 @@
 # reproduce exactly the dependency set)
 target/
 *.rs.bk
+
+# Packaged web build (build_wasm.sh)
+dist_wasm/

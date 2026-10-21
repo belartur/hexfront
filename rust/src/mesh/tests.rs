@@ -2066,7 +2066,11 @@ fn helicopter_route_leaves_from_its_shadow_not_from_the_hull() {
 #[test]
 fn mesh_chunks_fit_u16_indices() {
     for path in crate::mapfile::list_maps(None) {
-        let game = crate::mapfile::load_game(&path).expect("repo map loads");
+        let game = crate::mapfile::load_game_bytes(
+            &std::fs::read(&path).expect("repo map must be readable"),
+            &path,
+        )
+        .expect("repo map loads");
         let mesh = build_terrain(&game.board);
         for chunk in mesh.chunks.iter() {
             assert!(

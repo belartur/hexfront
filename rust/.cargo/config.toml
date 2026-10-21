@@ -1,0 +1,5 @@
+# The browser runtime (`rust/wasm/mq_js_bundle.js`) provides the audio and
+# filesystem imports that macroquad expects. They live in JavaScript, so the
+# wasm linker must leave them undefined instead of rejecting the module.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--allow-undefined"]

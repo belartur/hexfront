@@ -862,7 +862,7 @@ impl EditorState {
     /// Build a game from the edited board for the in-editor playtest (`p`).
     ///
     /// Players are derived from the placed buildings exactly like
-    /// [`crate::mapfile::load_game`] does for a saved map: ids `0..=highest
+    /// [`crate::mapfile::load_game_bytes`] does for a saved map: ids `0..=highest
     /// owner`, player 0 human, so the AI drives every other owner. The editor
     /// keeps its own board — the returned game works on a copy, so a playtest
     /// never modifies the map being edited.

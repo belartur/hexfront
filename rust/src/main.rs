@@ -5,6 +5,7 @@
 
 mod ai;
 mod app;
+mod assets;
 mod audio;
 mod board;
 mod camera;

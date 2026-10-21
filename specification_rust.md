@@ -20,8 +20,11 @@ Decyzje zapisane w tej specyfikacji (nazwy modułów, nazwy stałych, rozwiązan
 ## Planowany układ kodu
 ```text
 rust/Cargo.toml        manifest crate'a (Cargo.lock wersjonowany; target/ w .gitignore)
+rust/build.rs          lista plików maps/*.map wbudowana w wersję wasm (przeglądarka nie listuje katalogów)
+rust/.cargo/config.toml  flaga linkera wasm zostawiająca importy runtime'u JavaScript
 rust/src/main.rs       punkt wejścia gry (cargo run --release)
-rust/src/constants.rs  stałe gry: UNIT_J_TO_PX jako jedyne miejsce przelicznika j → px, FPS i SIM_DT (prędkość klatki — decyzja tej implementacji), współczynniki rzutu izometrycznego, REPO_ROOT, MAPS_DIR, MAP_EXTENSION; każda stała z komentarzem wskazującym sekcję rules.md lub specification.md
+rust/src/assets.rs     wczytywanie zasobów gry przez macroquad::file::load_file na obu platformach
+rust/src/constants.rs  stałe gry: UNIT_J_TO_PX jako jedyne miejsce przelicznika j → px, FPS i SIM_DT (prędkość klatki — decyzja tej implementacji), współczynniki rzutu izometrycznego, MAP_EXTENSION oraz funkcje katalogów repo_root()/maps_dir()/sounds_dir(); te funkcje dają ścieżki absolutne natywnie i względne wobec strony w wasm; każda stała z komentarzem wskazującym sekcję rules.md lub specification.md
 rust/src/hexgrid.rs    geometria sześciokątów flat-top (odd-q) bez logiki gry
 rust/src/math.rs       skalarne helpery wspólne dla symulacji i budowy meshy (kwadrat, odległość, odległość kwadratowa)
 rust/src/board.rs      plansza: pola, utrudnienia, podjazdy, mosty, tryb przejazdu przez most, wyszukiwanie drogi, wskazywanie pola kursorem (tryb „płaski” z klawiszem Alt)
@@ -29,7 +32,7 @@ rust/src/entities.rs   rodzaje budynków, gracze, budynki, pojazdy i ich pojemno
 rust/src/game.rs       symulacja czasu rzeczywistego o stałym kroku SIM_DT, bez zależności od macroquad
 rust/src/ai.rs         sterowanie przeciwnikami według sekcji 14 rules.md (premie z sekcji 13 są jednym z celów wysyłki); deterministyczne dla danego seeda; trasy i obszary osiągalności planszy cache'owane na czas meczu, decyzje graczy AI rozłożone równomiernie w czasie
 rust/src/rng.rs        własny deterministyczny PRNG (bez dodatkowych crate'ów, niezależny od macroquad)
-rust/src/mapfile.rs    zapis i odczyt formatu z specification_of_map_format.md (tabele kodów) oraz lista poziomów dla menu; używany też przez edytor
+rust/src/mapfile.rs    zapis i odczyt formatu z specification_of_map_format.md (tabele kodów), parsowanie z bajtów oraz lista poziomów dla menu; używany też przez edytor
 rust/src/camera.rs     rzut izometryczny i widok: przesuwanie, zoom, ograniczanie do planszy
 rust/src/iso.rs        ortograficzna kamera GPU odtwarzająca rzut 2D (macierze view/proj, głębia z D wzdłuż osi Z)
 rust/src/mesh/        budowa meshy GPU bez zależności od macroquad, podzielona na moduły wg tego, co rysują: `mod.rs` (typy wierzchołków i zupy, prymitywy bryłowe, `DynamicMesh` i `build_dynamic()`, cząstki fx), `terrain.rs` (statyczny teren: chunki na u16, mosty i ich cienie, `depth_span()`/`max_height()`/`visible_world_bounds()`), `surface.rs` (wysokość, po której jedzie pojazd: `vehicle_ground_z()`, `route_crossings()`, `waypoint_z()`), `buildings.rs` (modele ośmiu rodzajów budynków i stałe `BLD_*`), `obstacles.rs` (modele utrudnień i stałe `OBS_*`), `vehicles.rs` (czołg, helikopter, poduszkowiec, `vehicle_z()`/`wreck_z()`, cień helikoptera, stałe `TANK_*`/`HELI_*`), `overlays.rs` (`push_ranges()`, trasy, pociski), `bonuses.rs` (model drona i znaczniki pól premii, stałe `DRON_*`/`BONUS_*`) oraz `tests.rs`
@@ -41,6 +44,10 @@ rust/src/render.rs     rysowanie z kodu na GPU, bez assetów rastrowych (chunki 
 rust/src/render_baseline.rs  test-benchmark budowy meshy (`#[cfg(test)]`, tylko na potrzeby pomiaru)
 rust/src/editor.rs     edytor map jako stan aplikacji (nie osobny program): operacje na `Board`, trim/pad, walidacja, pamięć ostatniego budynku/utrudnienia/premii
 rust/src/app.rs        okno, menu poziomów, gra i edytor: obsługa wejścia i pętla aplikacji
+rust/wasm/index.html   strona uruchamiająca moduł wasm
+rust/wasm/mq_js_bundle.js  runtime przeglądarkowy macroquad, dołączony do repozytorium
+rust/wasm/README.md    pochodzenie i licencja runtime'u oraz instrukcja wersji web
+build_wasm.sh          buduje release wasm i pakuje dist_wasm/ (katalog ignorowany przez git)
 ```
 
 ## Uruchamianie i testy
@@ -50,6 +57,17 @@ cd rust && cargo test            # testy
 ```
 
 Kod formatowany jest rustfmtem (domyślne ustawienia). Testy logiki działają bez okna, bo moduły logiki nie zależą od macroquad; są to moduły `#[cfg(test)]` wewnątrz modułów logiki. Zakres: reguły z [rules.md](rules.md) (ruch, produkcja, walka, działka, wieże, eliminacja, AI), edytor (trim/pad, walidacja, cykle klawiszy — headless, bez okna) oraz format plansz — odczyt tych samych plików z `maps/` musi dawać ten sam stan początkowy w każdej implementacji, co wynika z formatu ([specification_of_map_format.md](specification_of_map_format.md)), a nie z jednej implementacji; test formatu czyta rzeczywiste pliki z `maps/`.
+
+## Wersja przeglądarkowa
+Ta sama binarka buduje się dla `wasm32-unknown-unknown`. `build_wasm.sh` tworzy release'owy moduł i pakuje do `dist_wasm/` (katalog ignorowany przez git) moduł wasm, stronę `index.html`, runtime JavaScript, wszystkie `maps/*.map` i `sounds/*.ogg`. Pakiet trzeba serwować przez HTTP; otwarcie strony przez `file://` nie działa, bo przeglądarka pobiera moduł i zasoby osobnymi żądaniami.
+
+**Zasoby.** Wersja natywna i webowa czytają mapy i dźwięki tą samą ścieżką (`assets.rs`, `macroquad::file::load_file`): natywnie są to ścieżki absolutne od katalogu głównego repozytorium, a w przeglądarce ścieżki względne wobec strony. Dzięki temu logika wczytywania map i dźwięków nie ma dwóch implementacji. `std::fs` pozostaje wyłącznie tam, gdzie potrzebny jest system plików: w edytorze, przy dynamicznym listowaniu katalogu natywnie i w testach headless.
+
+**Lista poziomów.** Przeglądarka nie potrafi listować katalogu, więc `build.rs` zapisuje posortowaną listę `maps/*.map` w czasie kompilacji, a menu w wasm korzysta z tej listy. Nowa plansza pojawia się w wersji web po ponownym uruchomieniu `build_wasm.sh`; lista nie jest ręcznie hardkodowana. Wersja natywna nadal czyta katalog w czasie działania, żeby mapa zapisana w edytorze od razu była w menu.
+
+**Edytor.** Wersja webowa nie udostępnia edytora: nie ma przycisku `add map` ani edycji mapy prawym przyciskiem. Edytor pozostaje skompilowany (współdzieli kod gry), ale jest nieosiągalny; powód jest praktyczny — przeglądarka nie może zapisać mapy z powrotem na serwer, a lista poziomów jest migawką z czasu budowania.
+
+**Runtime JavaScript.** `rust/wasm/mq_js_bundle.js` to runtime dołączony do macroquad 0.4.16, trzymany w repozytorium zamiast pobierania z CDN, żeby wersja była zgodna z linkowaną biblioteką i działanie nie zależało od sieci. `rust/.cargo/config.toml` zostawia importy audio i systemu plików nierozwiązane na etapie linkowania — dostarcza je ten runtime. Pochodzenie, licencja i lokalna poprawka runtime'u są opisane w `rust/wasm/README.md`. Przeglądarki mogą wymagać gestu użytkownika przed odtworzeniem dźwięku; kliknięcie poziomu w menu jest takim gestem.
 
 ## Renderowanie
 
@@ -86,10 +104,10 @@ Brak działającego urządzenia dźwiękowego nie może uniemożliwić uruchomie
 Aplikacja ma stany: menu poziomów, gra i edytor plansz (pauza jest flagą stanu gry; w edytorze pauzy nie ma). Okno tworzymy w domyślnej konfiguracji macroquad — nie wpisujemy rozmiaru, więc okno jest skalowalne, a wymiar renderowania pobieramy co klatkę; zmiana rozmiaru okna wymusza przebudowanie buforów rasteryzacji i unieważnia cache terenu. Obsługa wejścia jest opisana w [specification.md](specification.md) (sekcja „Sterowanie") i obowiązuje w grze bez zmian. Szczegóły stanów, HUD-u i menu opisuje dokumentacja `app.rs`. Wejścia do edytora opisuje sekcja „Edytor plansz" poniżej.
 
 ## Edytor plansz
-Edytor jest integralną częścią tej samej binarki — stan edytora w `app.rs` z logiką w `editor.rs`, a nie osobny program. Wskazywanie pola myszą działa identycznie jak w grze (w tym tryb „płaski” klawiszem `Alt`), a gra i edytor współdzielą renderer i picking (oba wołają geometrię `Board` bezpośrednio). Format pliku opisuje [specification_of_map_format.md](specification_of_map_format.md), implementacja jest w `mapfile.rs`. Szczegóły zachowania opisuje dokumentacja `editor.rs`.
+Edytor jest integralną częścią tej samej binarki w wersji natywnej — stan edytora w `app.rs` z logiką w `editor.rs`, a nie osobny program. Wersja webowa go nie udostępnia (sekcja „Wersja przeglądarkowa”). Wskazywanie pola myszą działa identycznie jak w grze (w tym tryb „płaski” klawiszem `Alt`), a gra i edytor współdzielą renderer i picking (oba wołają geometrię `Board` bezpośrednio). Format pliku opisuje [specification_of_map_format.md](specification_of_map_format.md), implementacja jest w `mapfile.rs`. Szczegóły zachowania opisuje dokumentacja `editor.rs`.
 
 ### Wejście i wyjście
-* Menu główne pokazuje obok siatki poziomów przycisk `add map` (zawsze widoczny): kliknięcie otwiera edytor z nową mapą. Kliknięcie pozycji mapy prawym przyciskiem otwiera tę mapę do edycji; kliknięcie lewym przyciskiem rozpoczyna grę.
+* Wersja natywna pokazuje obok siatki poziomów przycisk `add map`: kliknięcie otwiera edytor z nową mapą. Kliknięcie pozycji mapy prawym przyciskiem otwiera tę mapę do edycji; kliknięcie lewym przyciskiem rozpoczyna grę.
 * Prawy przycisk ma różne znaczenie w każdym stanie, a stany są rozłączne: w menu — edytuj mapę, w grze — anulowanie zaznaczenia (sekcja „Sterowanie" [specification.md](specification.md)), w edytorze — kasowanie obiektu.
 * Wyjście klawiszem `Esc` wraca do menu głównego; przy niezapisanych zmianach edytor pyta o zapis. Zapis nie wychodzi z edytora, a po zapisie lista `maps` w menu jest odświeżana.
 
@@ -118,4 +136,4 @@ Nowo utworzona plansza ma wymiary podane w `EDITOR_NEW_COLS` × `EDITOR_NEW_ROWS
 Prędkość klatki jest decyzją tej implementacji: `FPS` i `SIM_DT` to stałe w `constants.rs`, a symulacja działa o stałym kroku `SIM_DT` niezależnie od zegara systemowego — czas rzeczywisty służy wyłącznie do zliczania kroków. Symulacja i AI są deterministyczne dla danego seeda (sekcja 14 [rules.md](rules.md)); seed wyznaczany jest z nazwy pliku poziomu. Determinizm jest wymagany wewnątrz tej implementacji. Trasy pojazdów wyznaczane przez `board.rs` są jednoznaczne: remisy w A* rozstrzyga kwadrat odległości euklidesowej do celu (reguła z sekcji 4 [rules.md](rules.md)), więc dwa zapytania o trasę zawsze dają te same pola. Powtórzone zapytania o trasę w trakcie meczu zwracają ten sam wynik: graf dróg zależy tylko od wysokości, podjazdów i mostów, które w trakcie meczu się nie zmieniają, więc `ai.rs` trzyma cache tras i obszarów osiągalności (`board.rs`) przez cały mecz i odrzuca jedynie pary, do których droga nie istnieje. Obszary są etykietowane tylko na planszach bez mostów — tryby przejazdu czynią graf stanów skierowanym, więc na mapie z mostami skrót jest wyłączony i decyzje idą pełną ścieżką wyszukiwania. Losowość (szum AI, warianty dźwięków, cząstki) realizuje `rng.rs` własnym, deterministycznym generatorem, bez dodatkowych crate'ów; strumienie są zasiany seidem poziomu przy starcie meczu i gry testowej. Płomień ognisk pułapek ogniowych ma osobny strumień i jest czysto prezentacyjny (może się różnić z klatki na klatkę), więc nie wpływa ani na determinizm symulacji, ani na powtarzalność wybuchów.
 
 ## Katalog maps
-Ścieżkę katalogu `maps` wyznaczamy względem katalogu głównego repozytorium, a nie względem katalogu roboczego — to zasada z [specification.md](specification.md) (sekcja „Struktura repozytorium”). Menu poziomów listuje wszystkie pliki `*.map` z tego katalogu (nazwa pliku jest nazwą poziomu), bez hardcodowania listy. Sposób odnajdywania katalogu głównego opisuje dokumentacja `constants.rs`.
+Ścieżkę katalogu `maps` wyznaczamy względem katalogu głównego repozytorium, a nie względem katalogu roboczego — to zasada z [specification.md](specification.md) (sekcja „Struktura repozytorium”). Menu poziomów wersji natywnej listuje wszystkie pliki `*.map` z tego katalogu (nazwa pliku jest nazwą poziomu), bez hardcodowania listy. Wersja webowa korzysta z listy wygenerowanej przez `build.rs` w czasie kompilacji, bo przeglądarka nie listuje katalogów. Sposób odnajdywania katalogu głównego i różnicę ścieżek natywnych/webowych opisuje dokumentacja `constants.rs`.

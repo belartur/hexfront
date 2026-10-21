@@ -20,6 +20,8 @@ Pliki niezależne od języka implementacji leżą w katalogu głównym repozytor
 
 Ścieżka katalogu `maps` wyznaczana jest w kodzie względem katalogu głównego repozytorium, a nie względem katalogu roboczego, dzięki czemu grę, edytor i testy można uruchamiać z dowolnego katalogu. Kolejne implementacje dostałyby własne katalogi obok `rust/` i nie zmieniałyby dokumentów ani katalogu `maps`.
 
+Wersja przeglądarkowa nie ma dostępu do katalogu repozytorium: otrzymuje kopię `maps/` i `sounds/` obok strony i odwołuje się do nich ścieżkami względnymi wobec strony. Taka wersja musi być serwowana przez HTTP, ponieważ przeglądarka pobiera moduł wasm, plansze i dźwięki osobnymi żądaniami.
+
 ## Kod
 Kod jest przejrzysty i dobrze udokumentowany, w języku angielskim.
 Wszelkie funkcje, metody, klasy, pola, itp. mają dokumentację.
@@ -85,9 +87,9 @@ Wszystkie wartości liczbowe gry (odległości, promienie, zasięgi, itd.) są z
 Prędkość klatki (FPS) nie jest częścią kontraktu — jest decyzją każdej implementacji, opisaną w specyfikacji tego języka.
 
 ## Plansze
-Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Każda implementacja listuje katalog `maps` dynamicznie, a nazwa pliku jest wyświetlaną nazwą poziomu w menu — lista poziomów nie jest hardkodowana.
+Plansze zapisywane są w katalogu maps w plikach o rozszerzeniu `map`, każda w osobnym pliku. Nazwa pliku jest wyświetlaną nazwą poziomu w menu — lista poziomów nie jest ręcznie hardkodowana. Implementacja desktopowa listuje katalog `maps` dynamicznie. Wersja przeglądarkowa nie może listować katalogu, więc jej listę poziomów generuje się z `maps/` podczas budowania; nowa plansza jest widoczna w wersji web dopiero po jej przebudowaniu.
 
-Edytor plansz jest integralną częścią tej samej aplikacji (bez osobnego programu) i opisany jest w [specification_rust.md](specification_rust.md) (sekcja „Edytor plansz”).
+Edytor plansz jest integralną częścią tej samej aplikacji desktopowej (bez osobnego programu) i opisany jest w [specification_rust.md](specification_rust.md) (sekcja „Edytor plansz”). Wersja przeglądarkowa może nie udostępniać edytora; wtedy menu nie pokazuje wejść do edycji, a plansze są wyłącznie odczytywane.
 
 ## Format pliku planszy
 Format pliku planszy jest wspólny dla wszystkich implementacji i opisany jest w [specification_of_map_format.md](specification_of_map_format.md).

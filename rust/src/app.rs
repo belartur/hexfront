@@ -11,7 +11,9 @@
 //! rather than a state of its own; the editor has no pause, because nothing
 //! simulates while editing. The game and the editor share the renderer, the
 //! camera and the picking helpers, so a change in one is visible in the other
-//! immediately.
+//! immediately. The web build keeps the editor code but never exposes it:
+//! [`EDITOR_AVAILABLE`] gates every menu entry and gesture that could enter
+//! [`State::Editor`].
 //!
 //! # Window and resizing
 //!
@@ -46,6 +48,8 @@
 use std::path::PathBuf;
 
 use macroquad::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use macroquad::experimental::coroutines::{Coroutine, start_coroutine};
 
 use crate::ai::AiController;
 use crate::camera::Camera;
@@ -67,6 +71,14 @@ enum State {
     Playing,
     Editor,
 }
+
+/// True when this build exposes the board editor.
+///
+/// The web build ships without the editor: it has no way to save a map back to
+/// the server, and the levels it serves are a compile-time snapshot. The module
+/// and its state remain compiled (the game code is shared), but no menu entry
+/// or mouse gesture can reach them in wasm.
+const EDITOR_AVAILABLE: bool = !cfg!(target_arch = "wasm32");
 
 /// Owns the window and drives the whole program.
 pub struct Application {
@@ -121,11 +133,14 @@ pub struct Application {
     /// Sound playback (presentation only, see [`crate::audio`]). Filled from
     /// the sounds the simulation reports next to the explosion particles.
     audio: crate::audio::Audio,
-    /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`).
+    /// TEMPORARY debug hook output path (`HEXFRONT_CAPTURE`); native only.
+    #[cfg(not(target_arch = "wasm32"))]
     capture: Option<String>,
-    /// TEMPORARY debug hook frame countdown.
+    /// TEMPORARY debug hook frame countdown; native only.
+    #[cfg(not(target_arch = "wasm32"))]
     capture_frames: u32,
-    /// TEMPORARY frame-time samples (`HEXFRONT_TIMING`).
+    /// TEMPORARY frame-time samples (`HEXFRONT_TIMING`); native only.
+    #[cfg(not(target_arch = "wasm32"))]
     slow_frames: Vec<f32>,
 }
 
@@ -147,7 +162,7 @@ fn ai_controllers(game: &Game, seed: u64) -> Vec<AiController> {
 impl Application {
     /// Create the application (window is owned by macroquad).
     pub fn new() -> Self {
-        let mut app = Self {
+        Self {
             game: None,
             camera: Camera::new((screen_width(), screen_height())),
             renderer: Renderer::new(),
@@ -178,34 +193,28 @@ impl Application {
             fx: crate::fx::Fx::new(),
             audio: crate::audio::Audio::new(),
             playtest: false,
+            #[cfg(not(target_arch = "wasm32"))]
             capture: None,
+            #[cfg(not(target_arch = "wasm32"))]
             capture_frames: 0,
+            #[cfg(not(target_arch = "wasm32"))]
             slow_frames: Vec::new(),
-        };
-        // TEMPORARY debug hook: render a level headlessly and dump a PNG.
-        if let Ok(path) = std::env::var("HEXFRONT_MAP") {
-            if let Ok(png) = std::env::var("HEXFRONT_CAPTURE") {
-                app.capture = Some(png);
-                app.capture_frames = 20;
-            }
-            app.start_map(std::path::Path::new(&path));
-            app.state = State::Playing;
-            app.paused = false;
         }
-        if std::env::var("HEXFRONT_TIMING").is_ok() {
-            app.sim_acc = 0.0;
-        }
-        app
     }
     /// Main loop; exits when the window is closed.
     pub async fn run(mut self) {
+        // TEMPORARY native debug hooks (`HEXFRONT_MAP`, `HEXFRONT_TIMING`).
+        // They need the async loader, so they run here instead of in `new`.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.load_debug_map().await;
         // Synthesise and decode the sound effects once, before the first
         // frame. A failure here only disables sound (see `Audio::load`).
         self.audio.load().await;
         loop {
             let dt = get_frame_time().min(0.1);
-            self.handle_input(dt);
+            self.handle_input(dt).await;
             self.update(dt);
+            #[cfg(not(target_arch = "wasm32"))]
             if std::env::var("HEXFRONT_TIMING").is_ok()
                 && (self.state == State::Playing || self.state == State::Editor)
             {
@@ -224,6 +233,7 @@ impl Application {
                 }
             }
             self.draw(dt);
+            #[cfg(not(target_arch = "wasm32"))]
             if self.capture.is_some() {
                 if self.capture_frames > 0 {
                     self.capture_frames -= 1;
@@ -238,6 +248,25 @@ impl Application {
             next_frame().await;
         }
     }
+    /// TEMPORARY debug hook: render a level and dump a PNG.
+    ///
+    /// Native only, so the web build carries no PNG exporter and never tries
+    /// to read process environment variables that a browser does not have.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn load_debug_map(&mut self) {
+        if let Ok(path) = std::env::var("HEXFRONT_MAP") {
+            if let Ok(png) = std::env::var("HEXFRONT_CAPTURE") {
+                self.capture = Some(png);
+                self.capture_frames = 20;
+            }
+            self.start_map(std::path::Path::new(&path)).await;
+            self.state = State::Playing;
+            self.paused = false;
+        }
+        if std::env::var("HEXFRONT_TIMING").is_ok() {
+            self.sim_acc = 0.0;
+        }
+    }
     fn ensure_buffers(&mut self) {
         self.camera.screen_size = (screen_width(), screen_height());
     }
@@ -246,7 +275,7 @@ impl Application {
     fn alt_down() -> bool {
         is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt)
     }
-    fn handle_input(&mut self, dt: f32) {
+    async fn handle_input(&mut self, dt: f32) {
         // macroquad queues one char per pressed key and never drops them on
         // its own; only the editor's Save overlay reads that queue. Drain it
         // in every other state so keys pressed while playing or editing never
@@ -311,7 +340,7 @@ impl Application {
                     .find(|(rect, _)| rect.contains(vec2(mx, my)))
                     .map(|(_, path)| path.clone());
                 if let Some(path) = picked {
-                    self.start_map(&path);
+                    self.start_map(&path).await;
                 }
             }
             if is_key_pressed(KeyCode::Up) {
@@ -326,6 +355,9 @@ impl Application {
             if is_key_pressed(KeyCode::PageDown) {
                 self.menu_scroll += constants::MENU_SCROLL_STEP * 4.0;
             }
+            // A browser tab cannot be closed from wasm; the native build keeps
+            // Esc as "quit" while the web build simply stays in the menu.
+            #[cfg(not(target_arch = "wasm32"))]
             if is_key_pressed(KeyCode::Escape) {
                 std::process::exit(0);
             }
@@ -510,8 +542,12 @@ impl Application {
             self.set_selection(None);
         }
     }
-    fn start_map(&mut self, path: &std::path::Path) {
-        match mapfile::load_game(path) {
+    async fn start_map(&mut self, path: &std::path::Path) {
+        let loaded = match crate::assets::read(path).await {
+            Ok(data) => mapfile::load_game_bytes(&data, path),
+            Err(err) => Err(err),
+        };
+        match loaded {
             Ok(game) => {
                 let seed = level_seed(path);
                 let ai = ai_controllers(&game, seed);
@@ -1128,49 +1164,53 @@ impl Application {
             );
         }
         self.maps = maps;
-        // "add map" button opens a fresh editor board (specification_rust.md).
-        let add_rect = Rect::new(w / 2.0 - 90.0, h * 0.08 + 118.0, 180.0, 40.0);
-        draw_rectangle(
-            add_rect.x,
-            add_rect.y,
-            add_rect.w,
-            add_rect.h,
-            Color::new(0.16, 0.35, 0.18, 1.0),
-        );
-        draw_rectangle_lines(
-            add_rect.x,
-            add_rect.y,
-            add_rect.w,
-            add_rect.h,
-            2.0,
-            Color::new(0.45, 0.85, 0.5, 1.0),
-        );
-        {
-            let t = "add map";
-            let dim = measure_text(t, None, 22, 1.0);
-            draw_text(
-                t,
-                w / 2.0 - dim.width / 2.0,
-                h * 0.08 + 118.0 + 27.0,
-                22.0,
-                WHITE,
+        // The web build has no editor, so it shows neither the "add map"
+        // button nor the right-click gesture on a level.
+        if EDITOR_AVAILABLE {
+            // "add map" button opens a fresh editor board (specification_rust.md).
+            let add_rect = Rect::new(w / 2.0 - 90.0, h * 0.08 + 118.0, 180.0, 40.0);
+            draw_rectangle(
+                add_rect.x,
+                add_rect.y,
+                add_rect.w,
+                add_rect.h,
+                Color::new(0.16, 0.35, 0.18, 1.0),
             );
-        }
-        if add_rect.contains(vec2(mx, my)) && is_mouse_button_pressed(MouseButton::Left) {
-            self.enter_editor_new();
-            return;
-        }
-        // RMB on a map cell edits that map (specification_rust.md).
-        if is_mouse_button_pressed(MouseButton::Right) {
-            // Only the winning path is cloned; entering the editor needs `&mut`.
-            let picked = self
-                .menu_rects
-                .iter()
-                .find(|(rect, _)| rect.contains(vec2(mx, my)))
-                .map(|(_, path)| path.clone());
-            if let Some(path) = picked {
-                self.enter_editor_path(&path);
+            draw_rectangle_lines(
+                add_rect.x,
+                add_rect.y,
+                add_rect.w,
+                add_rect.h,
+                2.0,
+                Color::new(0.45, 0.85, 0.5, 1.0),
+            );
+            {
+                let t = "add map";
+                let dim = measure_text(t, None, 22, 1.0);
+                draw_text(
+                    t,
+                    w / 2.0 - dim.width / 2.0,
+                    h * 0.08 + 118.0 + 27.0,
+                    22.0,
+                    WHITE,
+                );
+            }
+            if add_rect.contains(vec2(mx, my)) && is_mouse_button_pressed(MouseButton::Left) {
+                self.enter_editor_new();
                 return;
+            }
+            // RMB on a map cell edits that map (specification_rust.md).
+            if is_mouse_button_pressed(MouseButton::Right) {
+                // Only the winning path is cloned; entering the editor needs `&mut`.
+                let picked = self
+                    .menu_rects
+                    .iter()
+                    .find(|(rect, _)| rect.contains(vec2(mx, my)))
+                    .map(|(_, path)| path.clone());
+                if let Some(path) = picked {
+                    self.enter_editor_path(&path);
+                    return;
+                }
             }
         }
         if max_scroll > 0.0 {
@@ -1191,7 +1231,13 @@ impl Application {
                 Color::new(0.47, 0.55, 0.78, 1.0),
             );
         }
-        let hint = if max_scroll > 0.0 {
+        let hint = if !EDITOR_AVAILABLE {
+            if max_scroll > 0.0 {
+                "click a level to play - wheel/Up/Down scrolls"
+            } else {
+                "click a level to play"
+            }
+        } else if max_scroll > 0.0 {
             "click a level to play - RMB edits - wheel/Up/Down scrolls"
         } else {
             "click a level to play - RMB edits"

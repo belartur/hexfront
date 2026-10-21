@@ -1353,7 +1353,8 @@ mod tests {
         // Every repo map: the index built in `Game::new` lists exactly the
         // fields a full board scan would find.
         for path in crate::mapfile::list_maps(None) {
-            let game = crate::mapfile::load_game(&path).expect("repo map must load");
+            let data = std::fs::read(&path).expect("repo map must be readable");
+            let game = crate::mapfile::load_game_bytes(&data, &path).expect("repo map must load");
             let mut scan: Vec<Tile> = game
                 .board
                 .tiles
@@ -2081,7 +2082,8 @@ mod tests {
         let maps = mapfile::list_maps(None);
         assert!(!maps.is_empty());
         for m in maps {
-            let mut game = mapfile::load_game(&m).expect("load");
+            let data = std::fs::read(&m).expect("repo map must be readable");
+            let mut game = mapfile::load_game_bytes(&data, &m).expect("load");
             let seed = mapfile::level_seed(&m);
             let mut ais: Vec<AiController> = game
                 .players

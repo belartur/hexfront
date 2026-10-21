@@ -15,6 +15,23 @@ can be added next to `rust/` without touching them.
 cd rust && cargo run --release  # the game (requires the Rust toolchain)
 ```
 
+### Web build
+
+The game also compiles to WebAssembly. `build_wasm.sh` builds a release
+module and packages everything the browser needs into `dist_wasm/`
+(ignored by git):
+
+```bash
+./build_wasm.sh
+python3 -m http.server 8080 --directory dist_wasm
+```
+
+Then open <http://localhost:8080/>. The page must be served over HTTP, not
+opened through `file://`, because the browser fetches the wasm module, maps
+and sounds with `XMLHttpRequest`. The web build has no board editor; see
+[`rust/wasm/README.md`](rust/wasm/README.md) for the bundled JavaScript
+runtime and build details.
+
 ## Gameplay
 
 * 2-4 players per level: you (blue) plus AI opponents.
@@ -53,9 +70,11 @@ is specified in `specification_of_map_format.md` and implemented in
 `rust/src/mapfile.rs`.  The bundled maps are versioned in the repository;
 new ones are created with the built-in editor.
 
-The board editor is part of the game, not a separate program: press `add
-map` in the main menu to open it with a new 256x256 board, or right-click a
-map in the menu to edit it (left-click starts the game instead).  It shares
+The board editor is part of the native game, not a separate program: press
+`add map` in the main menu to open it with a new 256x256 board, or
+right-click a map in the menu to edit it (left-click starts the game
+instead).  The web build omits the editor and both of those menu entries,
+because a browser cannot save a map back to the server.  The editor shares
 the game's board renderer and tile picking.  Editing is key-driven: point
 a tile with the mouse and press a key — `b` building (again: cycle kind;
 new buildings reuse the last kind/owner/units), `i` bonus (again: cycle
@@ -73,34 +92,41 @@ exit), and `p` starts a playtest game on the edited level (see
 ## Code layout
 
 ```text
+build_wasm.sh                   build and package the WebAssembly version
 rust/                           the implementation (macroquad; this repository
                                 root holds rules.md, specification*.md and maps/)
-  src/main.rs           entry point (cd rust && cargo run --release)
-  src/constants.rs      values shared by several modules (rules.md units "j";
-                        single-module constants live next to their code)
-  src/hexgrid.rs        flat-top hex geometry (odd-q offset coordinates)
-  src/math.rs           scalar helpers shared by simulation and mesh builders
-  src/board.rs          tiles, obstacles, ramps, bridges, path-finding, picking
-  src/entities.rs       players, buildings, vehicles, bonuses, drones
-  src/game.rs           real-time simulation (production, combat, turrets,
-                        bonus missions and drones, ...)
-  src/ai.rs             AI decision loop (rules.md sec. 14; bonuses sec. 13)
-  src/rng.rs            deterministic PRNG for the AI noise (no extra crates)
-  src/mapfile.rs        binary map file format: save / load / list maps
-  src/fx.rs             explosion particle system (presentation only, headless)
-  src/sound.rs          sound catalogue: event -> Ogg Vorbis file (headless)
-  src/decode.rs         sound decoding and resampling to 44100 Hz (headless)
-  src/audio.rs          sound playback through the macroquad backend
-  src/camera.rs         isometric projection and view transforms
-  src/iso.rs            orthographic GPU camera reproducing the 2D projection
-  src/mesh/             CPU mesh building without macroquad, split by subject:
-                        mod (vertex types, solid primitives, DynamicMesh,
-                        fx particle geometry), terrain, surface, buildings,
-                        obstacles, vehicles, overlays, tests
-  src/render.rs         code-drawn isometric renderer (no raster assets)
-  src/editor.rs         map editor as a game state (no separate program)
-  src/app.rs            menu, input handling, HUD
-  unit tests            headless rule + map tests:   cd rust && cargo test
+  build.rs            generates the wasm level list from ../maps/*.map
+  .cargo/config.toml  wasm linker flag for the JavaScript runtime imports
+  src/main.rs         entry point (cd rust && cargo run --release)
+  src/assets.rs       runtime asset reads through macroquad::file::load_file
+  src/constants.rs    values shared by several modules (rules.md units "j";
+                      single-module constants live next to their code)
+  src/hexgrid.rs      flat-top hex geometry (odd-q offset coordinates)
+  src/math.rs         scalar helpers shared by simulation and mesh builders
+  src/board.rs        tiles, obstacles, ramps, bridges, path-finding, picking
+  src/entities.rs     players, buildings, vehicles, bonuses, drones
+  src/game.rs         real-time simulation (production, combat, turrets,
+                      bonus missions and drones, ...)
+  src/ai.rs           AI decision loop (rules.md sec. 14; bonuses sec. 13)
+  src/rng.rs          deterministic PRNG for the AI noise (no extra crates)
+  src/mapfile.rs      binary map file format: save / load / list maps
+  src/fx.rs           explosion particle system (presentation only, headless)
+  src/sound.rs        sound catalogue: event -> Ogg Vorbis file (headless)
+  src/decode.rs       sound decoding and resampling to 44100 Hz (headless)
+  src/audio.rs        sound playback through the macroquad backend
+  src/camera.rs       isometric projection and view transforms
+  src/iso.rs          orthographic GPU camera reproducing the 2D projection
+  src/mesh/           CPU mesh building without macroquad, split by subject:
+                      mod (vertex types, solid primitives, DynamicMesh,
+                      fx particle geometry), terrain, surface, buildings,
+                      obstacles, vehicles, overlays, tests
+  src/render.rs       code-drawn isometric renderer (no raster assets)
+  src/editor.rs       map editor as a game state (no separate program)
+  src/app.rs          menu, input handling, HUD
+  wasm/index.html     page that loads the wasm module
+  wasm/mq_js_bundle.js  vendored macroquad browser runtime
+  wasm/README.md      provenance/licence of the runtime and web instructions
+  unit tests          headless rule + map tests:   cd rust && cargo test
 ```
 
 The conversion **1 j = 1 px** at 1:1 zoom is defined once in
