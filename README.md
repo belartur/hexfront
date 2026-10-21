@@ -112,8 +112,8 @@ rust/                           the implementation (macroquad; this repository
   src/mapfile.rs      binary map file format: save / load / list maps
   src/fx.rs           explosion particle system (presentation only, headless)
   src/sound.rs        sound catalogue: event -> Ogg Vorbis file (headless)
-  src/decode.rs       sound decoding and resampling to 44100 Hz (headless)
-  src/audio.rs        sound playback through the macroquad backend
+  src/decode.rs       sound decoding and resampling to the backend's rate (headless)
+  src/audio.rs        sound playback and backend mix-rate selection
   src/camera.rs       isometric projection and view transforms
   src/iso.rs          orthographic GPU camera reproducing the 2D projection
   src/mesh/           CPU mesh building without macroquad, split by subject:

@@ -482,8 +482,9 @@ pub const CAMPFIRE_SMOKE_COLOR_END: [u8; 3] = [54, 52, 52];
 // stop being audible, and how many of them may sound at once.
 // ---------------------------------------------------------------------------
 
-/// Sample rate the audio backend mixes at, and therefore the rate every
-/// recording is resampled to before playback (see `decode.rs`).
+/// Sample rate the native audio backend mixes at, and the fallback when the
+/// browser reports no usable Web Audio rate. Recordings are resampled to the
+/// backend's real rate before playback (see `audio::mix_rate` and `decode.rs`).
 pub const AUDIO_MIX_RATE: u32 = 44_100;
 
 /// Master volume of all game sound (0..1).

@@ -33,6 +33,38 @@ use crate::entities::SoundEvent;
 use crate::rng::Rng;
 use crate::sound::{self, SoundKind};
 
+#[cfg(target_arch = "wasm32")]
+unsafe extern "C" {
+    /// Rate of the browser's AudioContext, provided by the vendored runtime
+    /// (`rust/wasm/mq_js_bundle.js`); 0 before the context exists.
+    fn hexfront_audio_sample_rate() -> u32;
+}
+
+/// Rate at which the active audio backend mixes.
+///
+/// Native quad-snd mixes at [`constants::AUDIO_MIX_RATE`]. In the browser the
+/// AudioContext owns the rate and it is normally 48 kHz, not the native rate;
+/// decoding the recordings to that rate keeps the WAV's rate equal to the
+/// graph that plays it, instead of relying on a second resampling pass inside
+/// the browser. If the reported rate is not one the resampler models (or the
+/// context does not exist yet), fall back to the native rate and let the
+/// browser convert.
+fn mix_rate() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    // SAFETY: the bundled runtime registers `hexfront_audio_sample_rate` as an
+    // audio-plugin import before the wasm module is instantiated. It only
+    // reads `AudioContext.sampleRate` and returns a `u32`.
+    let backend_rate = unsafe { hexfront_audio_sample_rate() };
+    #[cfg(not(target_arch = "wasm32"))]
+    let backend_rate = constants::AUDIO_MIX_RATE;
+
+    if decode::supports_rate(backend_rate) {
+        backend_rate
+    } else {
+        constants::AUDIO_MIX_RATE
+    }
+}
+
 /// The sound played for one event, including how loud and which recording.
 ///
 /// Split from [`SoundEvent`] because neither the loudness nor the variant is
@@ -103,6 +135,7 @@ impl Audio {
         if self.failed || !self.sounds.is_empty() {
             return;
         }
+        let target_rate = mix_rate();
         for kind in sound::ALL_KINDS {
             for path in sound::variant_paths(kind) {
                 let name = path.display().to_string();
@@ -114,7 +147,7 @@ impl Audio {
                         return;
                     }
                 };
-                let decoded = match decode::to_wav(&bytes, constants::AUDIO_MIX_RATE) {
+                let decoded = match decode::to_wav(&bytes, target_rate) {
                     Ok(decoded) => decoded,
                     Err(err) => {
                         eprintln!("hexfront: audio disabled, cannot decode {name}: {err}");
@@ -130,14 +163,11 @@ impl Audio {
                         // means the resampler refused to convert the file, and
                         // the recording would play wrong; say so instead of
                         // leaving the player to wonder.
-                        if decoded.sample_rate != constants::AUDIO_MIX_RATE || decoded.channels > 2
-                        {
+                        if decoded.sample_rate != target_rate || decoded.channels > 2 {
                             eprintln!(
                                 "hexfront: {name} decoded to {} Hz / {} channels, \
-                                 not {} Hz stereo -- it will sound wrong",
-                                decoded.sample_rate,
-                                decoded.channels,
-                                constants::AUDIO_MIX_RATE
+                                 not {target_rate} Hz stereo -- it will sound wrong",
+                                decoded.sample_rate, decoded.channels,
                             );
                         }
                         self.sounds.push(Some(loaded));

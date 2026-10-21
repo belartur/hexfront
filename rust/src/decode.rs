@@ -7,7 +7,9 @@
 //! and much more once filters are added on top).
 //!
 //! This module decodes a file to raw samples, resamples it to the rate the
-//! backend mixes at, and hands it over as a WAV byte stream in memory.
+//! active backend mixes at (44.1 kHz for the native mixer, the Web Audio
+//! context rate in the browser), and hands it over as a WAV byte stream in
+//! memory.
 //!
 //! # Why not let the backend do it
 //!
@@ -84,6 +86,17 @@ pub struct Decoded {
     pub sample_rate: u32,
     /// Channel count of `wav` (1 or 2).
     pub channels: u8,
+}
+
+/// True when the resampler can convert between `hz` and another modelled rate.
+///
+/// The audio module asks this before committing to the rate the browser
+/// reports: a Web Audio context is normally 44.1 or 48 kHz, but it is chosen
+/// by the browser and may be something the crate does not model. In that case
+/// the caller falls back to [`crate::constants::AUDIO_MIX_RATE`] and lets the
+/// browser resample, rather than disabling sound for the whole match.
+pub fn supports_rate(hz: u32) -> bool {
+    SampleRate::try_from(hz).is_ok()
 }
 
 /// Decode the Ogg Vorbis file in `bytes` and return it as a WAV byte stream at
@@ -366,6 +379,38 @@ mod tests {
                 "{}: {source:.3}s of audio plays as {played:.3}s (ratio {ratio:.3})",
                 path.display()
             );
+        }
+    }
+
+    #[test]
+    fn every_recording_decodes_at_a_browser_context_rate() {
+        // The web build asks the browser for the rate its Web Audio graph
+        // runs at and decodes to that rate, so the browser does not have to
+        // resample our WAV. 48 kHz is the usual browser rate; exercise every
+        // recording at it so a rate the resampler handles cannot make audio
+        // fail only in the web build.
+        const BROWSER_RATE: u32 = 48_000;
+        for kind in ALL_KINDS {
+            for variant in 0..sound::variant_count(kind) {
+                let path = sound::variant_path(kind, variant);
+                let bytes = std::fs::read(&path).unwrap();
+                let d = to_wav(&bytes, BROWSER_RATE).unwrap_or_else(|e| {
+                    panic!(
+                        "{}: cannot decode at {BROWSER_RATE} Hz: {e}",
+                        path.display()
+                    )
+                });
+                assert_eq!(d.sample_rate, BROWSER_RATE);
+                let played = wav_frames(&d.wav, d.channels) as f64 / f64::from(BROWSER_RATE);
+                let source = source_seconds(&path);
+                let ratio = played / source;
+                assert!(
+                    (0.97..=1.03).contains(&ratio),
+                    "{}: {source:.3}s of audio plays as {played:.3}s at {BROWSER_RATE} Hz \
+                     (ratio {ratio:.3})",
+                    path.display()
+                );
+            }
         }
     }
 

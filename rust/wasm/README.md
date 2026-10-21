@@ -11,10 +11,12 @@ compiled `hexfront.wasm` module, `maps/*.map` and `sounds/*.ogg`.
   [macroquad](https://github.com/not-fl3/macroquad) 0.4.16, vendored from the
   crate's `js/mq_js_bundle.js`. Keeping a local copy means the game does not
   depend on a CDN and the runtime always matches the linked macroquad version.
-  Update this file together with the `macroquad` dependency. One local fix is
-  applied: the unused `quad_net` plugin assigned `register_plugin` without
-  declaring it, which throws a `ReferenceError` in the bundle's strict mode.
-  The assignment now uses `var`.
+  Update this file together with the `macroquad` dependency. Two local changes
+  are applied: the unused `quad_net` plugin assigned `register_plugin` without
+  declaring it, which throws a `ReferenceError` in the bundle's strict mode
+  (the assignment now uses `var`), and the audio plugin exposes
+  `hexfront_audio_sample_rate` so the Rust side can decode recordings at the
+  browser's `AudioContext` rate instead of resampling them a second time.
 
 `mq_js_bundle.js` is part of macroquad, licensed under MIT OR Apache-2.0; that
 licence applies to this bundled file. The game itself is distributed under the

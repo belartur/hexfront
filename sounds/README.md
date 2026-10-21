@@ -29,10 +29,11 @@ explosion_ground_1.ogg`, and so on) and committed as is.
 
 Everything else happens at start-up in
 [`rust/src/decode.rs`](../rust/src/decode.rs): the file is decoded (`lewton`),
-its sample rate is corrected to 44100 Hz (`resampler`), and the result reaches
-the mixer as a WAV held in memory.
+its sample rate is corrected to the rate the active audio backend mixes at
+(`resampler`; 44.1 kHz for the native mixer, the Web Audio context rate in the
+browser), and the result reaches the backend as a WAV held in memory.
 
-### Why the files are not re-encoded to 44.1 kHz
+### Why the files are not re-encoded to the playback rate
 
 Vorbis is a lossy format, and every extra generation of encoding costs real
 quality. Measured on `bang_06`: re-encoding at quality 3 alone costs about
@@ -47,17 +48,19 @@ The audio backend would decode the file just fine, but its resampler is a
 shortens the file to half its length (a 1.364 s explosion becomes 0.682 s) and
 raises the high-frequency energy by about 8.6 dB, so the explosion would sound
 like a short hissy thud instead. `decode.rs` therefore resamples the audio
-itself, and the backend receives 44100 Hz already, which makes it skip that
-flawed path entirely.
+itself, and the backend receives a WAV already at its own mix rate, which makes
+it skip that flawed path entirely. In the browser the mix rate is the
+`AudioContext` rate, read from the runtime, so the browser does not have to
+resample the WAV either.
 
 ### Other sample rates
 
 The rate is read from each file's header rather than assumed, so a recording
 sampled at a different rate (44.1 kHz, 96 kHz, anything the `resampler` crate
-models) works without any code change. A file already at 44.1 kHz is passed
-through without conversion. A file outside the rates the crate models, or with
-more than two channels, ends in a readable message in the log rather than in
-silence.
+models) works without any code change. A file already at the target rate is
+passed through without conversion. A file outside the rates the crate models,
+or with more than two channels, ends in a readable message in the log rather
+than in silence.
 
 ### Channels
 
